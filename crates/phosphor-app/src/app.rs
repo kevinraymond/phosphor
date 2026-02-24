@@ -134,17 +134,30 @@ impl App {
         // Pack params
         self.uniforms.params = self.param_store.pack_to_buffer();
 
-        // Check for shader changes
-        if let Some(path) = self.shader_watcher.check_for_changes() {
-            log::info!("Shader file changed: {}", path.display());
-            match std::fs::read_to_string(&path) {
-                Ok(source) => {
-                    let full_source = self.effect_loader.prepend_library(&source);
-                    self.try_recompile_shader(&full_source);
-                }
-                Err(e) => {
-                    log::error!("Failed to read shader file: {e}");
-                    self.shader_error = Some(format!("Read error: {e}"));
+        // Check for shader changes — only reload if a relevant file changed
+        let changes = self.shader_watcher.drain_changes();
+        if !changes.is_empty() {
+            if let Some(idx) = self.effect_loader.current_effect {
+                let effect = &self.effect_loader.effects[idx];
+                let is_relevant = changes.iter().any(|p| {
+                    p.ends_with(&effect.shader)
+                        || p.to_string_lossy().contains("/lib/")
+                });
+                if is_relevant {
+                    match self.effect_loader.load_effect_source(&effect.shader) {
+                        Ok(source) if source != self.current_shader_source => {
+                            log::info!(
+                                "Shader file changed: {}",
+                                changes.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+                            );
+                            self.try_recompile_shader(&source);
+                        }
+                        Ok(_) => {} // content unchanged, skip
+                        Err(e) => {
+                            log::error!("Failed to reload shader: {e}");
+                            self.shader_error = Some(format!("Read error: {e}"));
+                        }
+                    }
                 }
             }
         }
@@ -180,14 +193,9 @@ impl App {
                     self.param_store.load_from_defs(&effect.inputs);
                     self.try_recompile_shader(&source);
 
-                    // Watch the new shader file
-                    let shader_path = self.effect_loader.resolve_shader_path(&effect.shader);
-                    if let Some(parent) = shader_path.parent() {
-                        if let Err(e) = self.shader_watcher.watch_path(parent) {
-                            log::warn!("Failed to watch shader directory: {e}");
-                        }
-                    }
                     self.effect_loader.current_effect = Some(index);
+                    // Drain stale watcher events to prevent spurious recompiles
+                    self.shader_watcher.drain_changes();
                     log::info!("Loaded effect: {}", effect.name);
                 }
                 Err(e) => {

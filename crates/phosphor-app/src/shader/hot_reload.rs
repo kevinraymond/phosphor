@@ -44,20 +44,14 @@ impl ShaderWatcher {
         })
     }
 
-    pub fn watch_path(&mut self, path: &Path) -> Result<()> {
-        self._debouncer
-            .watcher()
-            .watch(path, notify::RecursiveMode::Recursive)?;
-        log::info!("Watching {} for shader changes", path.display());
-        Ok(())
-    }
-
-    /// Drain all pending changes and return the most recent one.
-    pub fn check_for_changes(&self) -> Option<PathBuf> {
-        let mut last = None;
+    /// Drain all pending change events and return the unique paths.
+    pub fn drain_changes(&self) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
         while let Ok(path) = self.receiver.try_recv() {
-            last = Some(path);
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
         }
-        last
+        paths
     }
 }
