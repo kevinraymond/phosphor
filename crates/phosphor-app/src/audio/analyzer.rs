@@ -200,7 +200,7 @@ impl FftAnalyzer {
         // Mid bands (linear) — from medium FFT
         out.low_mid = self.medium.band_energy_linear(250.0, 500.0);
         out.mid = self.medium.band_energy_linear(500.0, 2000.0);
-        out.upper_mid = self.medium.band_energy_linear(2000.0, 4000.0);
+        out.upper_mid = self.medium.band_energy_db(2000.0, 4000.0);
 
         // High bands (dB-scaled) — from small FFT
         out.presence = self.small.band_energy_db(4000.0, 6000.0);
