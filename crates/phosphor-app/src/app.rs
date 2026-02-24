@@ -5,6 +5,7 @@ use anyhow::Result;
 use winit::window::Window;
 
 use crate::audio::AudioSystem;
+use crate::effect::format::PostProcessDef;
 use crate::effect::EffectLoader;
 use crate::gpu::particle::ParticleSystem;
 use crate::gpu::pass_executor::PassExecutor;
@@ -24,7 +25,7 @@ pub struct App {
     pub last_frame: Instant,
     pub frame_count: u32,
     pub shader_watcher: ShaderWatcher,
-    pub current_shader_source: String,
+    pub current_shader_sources: Vec<String>,
     pub shader_error: Option<String>,
     pub param_store: ParamStore,
     pub audio: AudioSystem,
@@ -34,6 +35,7 @@ pub struct App {
     // Multi-pass rendering
     pub pass_executor: PassExecutor,
     pub post_process: PostProcessChain,
+    pub current_postprocess: PostProcessDef,
     pub placeholder: PlaceholderTexture,
 }
 
@@ -130,7 +132,7 @@ impl App {
             last_frame: now,
             frame_count: 0,
             shader_watcher,
-            current_shader_source: shader_source,
+            current_shader_sources: vec![shader_source],
             shader_error: None,
             param_store,
             audio,
@@ -139,6 +141,7 @@ impl App {
             window,
             pass_executor,
             post_process,
+            current_postprocess: PostProcessDef::default(),
             placeholder,
         })
     }
@@ -218,32 +221,50 @@ impl App {
         let changes = self.shader_watcher.drain_changes();
         if !changes.is_empty() {
             if let Some(idx) = self.effect_loader.current_effect {
-                // Clone what we need to avoid borrow conflicts with self
                 let effect = self.effect_loader.effects[idx].clone();
-                let main_shader = if !effect.passes.is_empty() {
-                    effect.passes[0].shader.clone()
-                } else {
-                    effect.shader.clone()
-                };
-                let is_relevant = changes.iter().any(|p| {
-                    p.ends_with(&main_shader) || p.to_string_lossy().contains("/lib/")
-                });
-                if is_relevant {
-                    match self.effect_loader.load_effect_source(&main_shader) {
-                        Ok(source) if source != self.current_shader_source => {
-                            log::info!(
-                                "Shader file changed: {}",
-                                changes
-                                    .iter()
-                                    .map(|p| p.display().to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            );
-                            self.try_recompile_shader(&source);
+                let passes = effect.normalized_passes();
+                let lib_changed = changes.iter().any(|p| p.to_string_lossy().contains("/lib/"));
+
+                // Hot-reload each pass's fragment shader
+                let hdr_format = GpuContext::hdr_format();
+                for (i, pass_def) in passes.iter().enumerate() {
+                    let pass_relevant = lib_changed
+                        || changes.iter().any(|p| p.ends_with(&pass_def.shader));
+                    if !pass_relevant {
+                        continue;
+                    }
+                    match self.effect_loader.load_effect_source(&pass_def.shader) {
+                        Ok(source) => {
+                            let changed = self
+                                .current_shader_sources
+                                .get(i)
+                                .map_or(true, |prev| *prev != source);
+                            if changed {
+                                log::info!("Shader changed: pass {} ({})", i, pass_def.shader);
+                                match self.pass_executor.recompile_pass(
+                                    i,
+                                    &self.gpu.device,
+                                    hdr_format,
+                                    &source,
+                                    &self.uniform_buffer,
+                                    &self.placeholder,
+                                ) {
+                                    Ok(()) => {
+                                        if i < self.current_shader_sources.len() {
+                                            self.current_shader_sources[i] = source;
+                                        }
+                                        self.shader_error = None;
+                                        log::info!("Pass {} recompiled successfully", i);
+                                    }
+                                    Err(e) => {
+                                        log::error!("Pass {} compilation failed: {e}", i);
+                                        self.shader_error = Some(e);
+                                    }
+                                }
+                            }
                         }
-                        Ok(_) => {} // content unchanged, skip
                         Err(e) => {
-                            log::error!("Failed to reload shader: {e}");
+                            log::error!("Failed to reload shader for pass {}: {e}", i);
                             self.shader_error = Some(format!("Read error: {e}"));
                         }
                     }
@@ -252,12 +273,15 @@ impl App {
                 // Hot-reload compute shader if applicable
                 if let Some(ref particle_def) = effect.particles {
                     if !particle_def.compute_shader.is_empty() {
-                        let compute_relevant = changes.iter().any(|p| {
-                            p.ends_with(&particle_def.compute_shader)
-                        });
+                        let compute_relevant = changes
+                            .iter()
+                            .any(|p| p.ends_with(&particle_def.compute_shader));
                         if compute_relevant {
                             if let Some(ref mut ps) = self.pass_executor.particle_system {
-                                match self.effect_loader.load_compute_source(&particle_def.compute_shader) {
+                                match self
+                                    .effect_loader
+                                    .load_compute_source(&particle_def.compute_shader)
+                                {
                                     Ok(src) if src != ps.current_compute_source => {
                                         match ps.recompile_compute(&self.gpu.device, &src) {
                                             Ok(()) => {
@@ -268,36 +292,14 @@ impl App {
                                         }
                                     }
                                     Ok(_) => {} // content unchanged, skip
-                                    Err(e) => log::error!("Failed to reload compute shader: {e}"),
+                                    Err(e) => {
+                                        log::error!("Failed to reload compute shader: {e}")
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-        }
-    }
-
-    pub fn try_recompile_shader(&mut self, source: &str) {
-        let hdr_format = GpuContext::hdr_format();
-        match self.pass_executor.main_pipeline_mut().recreate_pipeline(
-            &self.gpu.device,
-            hdr_format,
-            source,
-        ) {
-            Ok(()) => {
-                self.current_shader_source = source.to_string();
-                self.shader_error = None;
-                self.pass_executor.rebuild_bind_groups(
-                    &self.gpu.device,
-                    &self.uniform_buffer,
-                    &self.placeholder,
-                );
-                log::info!("Shader recompiled successfully");
-            }
-            Err(e) => {
-                log::error!("Shader compilation failed: {e}");
-                self.shader_error = Some(e);
             }
         }
     }
@@ -338,62 +340,51 @@ impl App {
     pub fn load_effect(&mut self, index: usize) {
         if let Some(effect) = self.effect_loader.effects.get(index).cloned() {
             let hdr_format = GpuContext::hdr_format();
-            let uses_passes = !effect.passes.is_empty();
+            let passes = effect.normalized_passes();
+            if passes.is_empty() {
+                log::error!("Effect '{}' has no shader or passes defined", effect.name);
+                return;
+            }
 
-            if uses_passes {
-                // Effect defines explicit passes — build a new PassExecutor
-                match PassExecutor::new(
-                    &self.gpu.device,
-                    hdr_format,
-                    self.gpu.surface_config.width,
-                    self.gpu.surface_config.height,
-                    &effect.passes,
-                    &self.effect_loader,
-                    &self.uniform_buffer,
-                    &self.placeholder,
-                ) {
-                    Ok(mut executor) => {
-                        // Build particle system if effect defines one
-                        if let Some(ref particle_def) = effect.particles {
-                            executor.particle_system = self.build_particle_system(particle_def);
-                        }
-                        self.pass_executor = executor;
-                        self.param_store.load_from_defs(&effect.inputs);
-                        self.shader_error = None;
-                        self.effect_loader.current_effect = Some(index);
-                        self.shader_watcher.drain_changes();
-                        // Track the first pass's shader source for hot-reload
-                        if let Ok(src) = self.effect_loader.load_effect_source(&effect.passes[0].shader) {
-                            self.current_shader_source = src;
-                        }
-                        log::info!("Loaded effect: {} ({} passes)", effect.name, effect.passes.len());
+            match PassExecutor::new(
+                &self.gpu.device,
+                hdr_format,
+                self.gpu.surface_config.width,
+                self.gpu.surface_config.height,
+                &passes,
+                &self.effect_loader,
+                &self.uniform_buffer,
+                &self.placeholder,
+            ) {
+                Ok(mut executor) => {
+                    // Build particle system if effect defines one
+                    if let Some(ref particle_def) = effect.particles {
+                        executor.particle_system = self.build_particle_system(particle_def);
                     }
-                    Err(e) => {
-                        log::error!("Failed to load effect '{}': {e}", effect.name);
-                        self.shader_error = Some(format!("Load error: {e}"));
-                    }
+                    self.pass_executor = executor;
+                    self.param_store.load_from_defs(&effect.inputs);
+                    self.shader_error = None;
+                    self.effect_loader.current_effect = Some(index);
+                    self.shader_watcher.drain_changes();
+                    // Apply per-effect postprocess overrides
+                    let pp = effect.postprocess.clone().unwrap_or_default();
+                    self.post_process.enabled = pp.enabled;
+                    self.current_postprocess = pp;
+                    // Track shader sources for hot-reload
+                    self.current_shader_sources = passes
+                        .iter()
+                        .filter_map(|p| self.effect_loader.load_effect_source(&p.shader).ok())
+                        .collect();
+                    log::info!(
+                        "Loaded effect: {} ({} pass{})",
+                        effect.name,
+                        passes.len(),
+                        if passes.len() == 1 { "" } else { "es" }
+                    );
                 }
-            } else {
-                // Single-pass effect (backward compatible): hot-reloadable path
-                match self.effect_loader.load_effect_source(&effect.shader) {
-                    Ok(source) => {
-                        self.param_store.load_from_defs(&effect.inputs);
-                        self.try_recompile_shader(&source);
-                        // Build particle system if effect defines one
-                        if let Some(ref particle_def) = effect.particles {
-                            self.pass_executor.particle_system =
-                                self.build_particle_system(particle_def);
-                        } else {
-                            self.pass_executor.particle_system = None;
-                        }
-                        self.effect_loader.current_effect = Some(index);
-                        self.shader_watcher.drain_changes();
-                        log::info!("Loaded effect: {}", effect.name);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to load effect '{}': {e}", effect.name);
-                        self.shader_error = Some(format!("Load error: {e}"));
-                    }
+                Err(e) => {
+                    log::error!("Failed to load effect '{}': {e}", effect.name);
+                    self.shader_error = Some(format!("Load error: {e}"));
                 }
             }
         }
@@ -431,6 +422,7 @@ impl App {
             self.uniforms.rms,
             self.uniforms.onset,
             self.uniforms.flatness,
+            &self.current_postprocess,
         );
 
         // Flip ping-pong for next frame

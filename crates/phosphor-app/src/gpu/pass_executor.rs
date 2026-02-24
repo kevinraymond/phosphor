@@ -17,8 +17,6 @@ struct CompiledPass {
     target: PingPongTarget,
     /// Bind groups indexed by ping-pong state.
     bind_groups: [wgpu::BindGroup; 2],
-    #[allow(dead_code)]
-    scale: f32,
     has_feedback: bool,
 }
 
@@ -66,7 +64,6 @@ impl PassExecutor {
                 pipeline,
                 target,
                 bind_groups,
-                scale: def.scale,
                 has_feedback: def.feedback,
             });
         }
@@ -100,7 +97,6 @@ impl PassExecutor {
                 pipeline,
                 target: feedback,
                 bind_groups,
-                scale: 1.0,
                 has_feedback: true,
             }],
             particle_system: None,
@@ -190,40 +186,6 @@ impl PassExecutor {
                 pass.has_feedback,
             );
         }
-    }
-
-    /// Recreate bind groups (e.g., after pipeline rebuild).
-    pub fn rebuild_bind_groups(
-        &mut self,
-        device: &Device,
-        uniform_buffer: &UniformBuffer,
-        placeholder: &PlaceholderTexture,
-    ) {
-        for pass in &mut self.passes {
-            pass.bind_groups = create_pass_bind_groups(
-                device,
-                uniform_buffer,
-                &pass.pipeline.bind_group_layout,
-                &pass.target,
-                placeholder,
-                pass.has_feedback,
-            );
-        }
-    }
-
-    /// Get the main (first) pass's pipeline for hot-reload.
-    pub fn main_pipeline_mut(&mut self) -> &mut ShaderPipeline {
-        &mut self.passes[0].pipeline
-    }
-
-    /// Get the main pass's bind group layout.
-    pub fn main_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        &self.passes[0].pipeline.bind_group_layout
-    }
-
-    /// Number of passes.
-    pub fn pass_count(&self) -> usize {
-        self.passes.len()
     }
 
     /// Try to recompile a specific pass's shader (for hot-reload).

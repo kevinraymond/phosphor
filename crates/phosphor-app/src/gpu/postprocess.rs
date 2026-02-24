@@ -7,6 +7,8 @@ use wgpu::{
     TextureSampleType, TextureView, TextureViewDimension, VertexState,
 };
 
+use crate::effect::format::PostProcessDef;
+
 use super::fullscreen_quad::FULLSCREEN_TRIANGLE_VS_WITH_UV;
 use super::render_target::RenderTarget;
 
@@ -192,6 +194,7 @@ impl PostProcessChain {
         rms: f32,
         onset: f32,
         flatness: f32,
+        overrides: &PostProcessDef,
     ) {
         if !self.enabled {
             // Simple blit fallback
@@ -215,7 +218,7 @@ impl PostProcessChain {
 
         // --- Update uniforms ---
         let bloom_params = BloomParams {
-            threshold: 0.8,
+            threshold: overrides.bloom_threshold,
             soft_knee: 0.3,
             rms,
             _pad: 0.0,
@@ -237,9 +240,9 @@ impl PostProcessChain {
         queue.write_buffer(&self.blur_v_params_buffer, 0, bytemuck::bytes_of(&blur_v_params));
 
         let post_params = PostParams {
-            bloom_intensity: 0.35,
+            bloom_intensity: overrides.bloom_intensity,
             ca_intensity: onset * 0.015,
-            vignette_strength: 0.3,
+            vignette_strength: overrides.vignette,
             grain_intensity: flatness * 0.04,
             time,
             rms,
