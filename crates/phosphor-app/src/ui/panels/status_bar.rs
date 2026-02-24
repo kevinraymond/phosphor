@@ -8,6 +8,9 @@ pub fn draw_status_bar(
     shader_error: &Option<String>,
     uniforms: &ShaderUniforms,
     particle_count: Option<u32>,
+    midi_port: &str,
+    midi_active: bool,
+    midi_recently_active: bool,
 ) {
     ui.horizontal(|ui| {
         // FPS
@@ -53,6 +56,17 @@ pub fn draw_status_bar(
                 Color32::from_rgb(0xE0, 0xA0, 0x40)
             };
             ui.colored_label(beat_color, format!("{:.0} BPM", bpm));
+        }
+
+        // MIDI status
+        if midi_active {
+            ui.separator();
+            let color = if midi_recently_active {
+                Color32::from_rgb(0x50, 0xC0, 0x70)
+            } else {
+                Color32::from_rgb(0x80, 0x80, 0x80)
+            };
+            ui.colored_label(color, format!("MIDI: {midi_port}"));
         }
 
         ui.separator();

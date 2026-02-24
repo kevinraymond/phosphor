@@ -8,6 +8,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 **Phase 2 (Multi-Pass Rendering): COMPLETE** — multi-pass rendering infrastructure
 **GPU Particle System: COMPLETE** — compute shader particles with ping-pong buffers
 **Audio Upgrade + Beat Detection: COMPLETE** — multi-resolution FFT, adaptive normalization, 3-stage beat detector
+**BPM Detection Rewrite: COMPLETE** — FFT autocorrelation, Kalman filter, octave disambiguation
 
 ### What's Built
 
@@ -55,9 +56,11 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Multi-resolution FFT: 4096-pt (sub_bass, bass, kick), 1024-pt (low_mid, mid, upper_mid), 512-pt (presence, brilliance)
 - 20-field AudioFeatures: 7 frequency bands, 2 aggregates (rms, kick), 6 spectral shape, 5 beat detection
 - Adaptive normalization: per-feature running min/max replaces all fixed gain multipliers
-- 3-stage beat detection (ported from easey-glyph): OnsetDetector (multi-band spectral flux + adaptive threshold) → TempoEstimator (autocorrelation + harmonic enhancement + octave correction) → BeatScheduler (predictive state machine with phase correction)
+- 3-stage beat detection: OnsetDetector (log-magnitude multi-band spectral flux + adaptive threshold) → TempoEstimator (FFT autocorrelation + Kalman filter) → BeatScheduler (predictive state machine with phase correction)
+- TempoEstimator: 8s onset buffer, FFT-based Wiener-Khinchin autocorrelation (|FFT|², mean-subtracted), genre-aware log-Gaussian tempo prior (center 150 BPM, σ=1.5), multi-ratio octave correction (9 ratios incl. 1:3, 1:4), cascading octave-up correction via local peak detection
+- KalmanBpm: log₂-BPM space filter with octave snap (2:1/1:2 within 5%, 50-frame escape), adaptive Q/R, confidence gating (< 0.15 skipped), divergence reset after 15 frames
 - Dedicated kick detection: half-wave rectified spectral flux in 30-120 Hz from 4096-pt FFT
-- Bass bands use linear RMS, high bands use dB scaling (80dB range)
+- Bass bands use linear RMS, mid/high bands use dB scaling (80dB range)
 - Beat trigger (`beat` field) replaces onset-based beat proxy (`onset > 0.5`)
 - `beat_phase` (0-1 sawtooth at detected tempo), `bpm` (normalized /300), `beat_strength`
 - BPM shown in status bar with beat flash indicator

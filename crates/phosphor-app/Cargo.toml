@@ -37,3 +37,7 @@ bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 # System theme detection
 dark-light = "2"
+# MIDI input
+midir = "0.10"
+# XDG config paths
+dirs = "6"
