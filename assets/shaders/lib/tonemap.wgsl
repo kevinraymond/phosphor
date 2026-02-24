@@ -1,0 +1,16 @@
+// Phosphor tonemapping library — ported from spectral-senses-old tonemap.glsl
+
+// ACES filmic tonemapping
+fn phosphor_aces_tonemap(x: vec3f) -> vec3f {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), vec3f(0.0), vec3f(1.0));
+}
+
+// Linear to sRGB gamma
+fn phosphor_linear_to_srgb(c: vec3f) -> vec3f {
+    return pow(max(c, vec3f(0.0)), vec3f(1.0 / 2.2));
+}

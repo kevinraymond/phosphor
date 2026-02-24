@@ -1,0 +1,39 @@
+[package]
+name = "phosphor-app"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+
+[dependencies]
+# GPU
+wgpu = "27"
+# Windowing
+winit = "0.30"
+# UI
+egui = "0.33"
+egui-wgpu = "0.33"
+egui-winit = "0.33"
+# Audio
+cpal = "0.17"
+# FFT
+rustfft = "6"
+# File watching
+notify = "8"
+notify-debouncer-mini = "0.6"
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Logging
+log = "0.4"
+env_logger = "0.11"
+# Error handling
+anyhow = "1"
+thiserror = "2"
+# Lock-free channels
+crossbeam-channel = "0.5"
+# GPU uniform packing
+bytemuck = { version = "1", features = ["derive"] }
+# Block on async (wgpu init)
+pollster = "0.4"
+# System theme detection
+dark-light = "2"
