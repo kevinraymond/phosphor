@@ -88,6 +88,7 @@ pub struct PfxEffect {
 
 impl PfxEffect {
     /// Normalize: if `passes` is empty but `shader` is set, create a single-pass definition.
+    /// Single-pass effects get feedback enabled by default (matches legacy behavior).
     pub fn normalized_passes(&self) -> Vec<PassDef> {
         if !self.passes.is_empty() {
             return self.passes.clone();
@@ -98,7 +99,7 @@ impl PfxEffect {
                 shader: self.shader.clone(),
                 scale: 1.0,
                 inputs: vec![],
-                feedback: false,
+                feedback: true,
             }]
         } else {
             vec![]
