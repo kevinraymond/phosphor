@@ -19,6 +19,7 @@ pub fn draw_panels(
     shader_error: &Option<String>,
     uniforms: &ShaderUniforms,
     effect_loader: &EffectLoader,
+    post_process_enabled: &mut bool,
 ) {
     if !visible {
         return;
@@ -47,5 +48,10 @@ pub fn draw_panels(
             ui.heading("Parameters");
             ui.separator();
             param_panel::draw_param_panel(ui, params);
+
+            ui.add_space(16.0);
+            ui.heading("Post-Processing");
+            ui.separator();
+            ui.checkbox(post_process_enabled, "Enable bloom & effects");
         });
 }

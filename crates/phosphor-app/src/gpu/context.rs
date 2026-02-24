@@ -76,6 +76,11 @@ impl GpuContext {
         })
     }
 
+    /// HDR intermediate format for render targets (16-bit float for bloom/feedback).
+    pub fn hdr_format() -> TextureFormat {
+        TextureFormat::Rgba16Float
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
             self.surface_config.width = width;
