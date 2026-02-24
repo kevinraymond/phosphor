@@ -27,7 +27,9 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - `PostProcessChain` with enable/disable toggle (UI checkbox in Parameters panel)
 - `PassExecutor` for multi-pass effect execution with per-pass feedback support
 - Extended .pfx format: `passes` array for multi-pass pipelines, `postprocess` overrides
-- Backward compatible: single-shader .pfx files work unchanged
+- Backward compatible: single-shader .pfx files work unchanged via `normalized_passes()`
+- Per-effect `postprocess` overrides (bloom threshold/intensity, vignette) applied at runtime
+- Multi-pass shader hot-reload: all passes recompile on file change, not just pass 0
 - 2 new effects: feedback_test (spinning dot with trails), singularity_feedback (multi-pass demo)
 - New uniforms: `feedback_decay`, `frame_index` (256-byte uniform struct maintained)
 
@@ -45,14 +47,13 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Aspect-ratio-corrected orbital physics: all distance/force calculations in screen space
 - Particle count shown in status bar when active
 - 2 new effects: particle_test (fountain), spectral_eye (orbital light trails with feedback)
+- 1 combo effect: orbital_trails (feedback_test + spectral_eye layered)
 - Feedback + particles requires HDR clamp in background shader (`min(col, vec3f(1.5))`) to prevent runaway accumulation
 
 ### Known Issues
-- ~30 compiler warnings (mostly unused items reserved for future phases)
-- `compiler.rs` has an unused `compile_shader` function
+- ~29 compiler warnings (mostly unused items reserved for future phases)
 - Fonts directory (`assets/fonts/`) is empty — Inter and JetBrains Mono not yet bundled
 - Reduced motion detection (`ui/accessibility/motion.rs`) is stubbed for macOS/Windows
-- Multi-pass hot-reload only recompiles the main (first) pass shader; changes to secondary pass shaders require re-loading the effect
 
 ### Architecture
 ```
