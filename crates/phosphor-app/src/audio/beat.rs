@@ -1,6 +1,10 @@
 //! 3-stage beat detection pipeline: OnsetDetector → TempoEstimator → BeatScheduler.
 //! Ported from easey-glyph's Python implementation.
 
+use rustfft::num_complex::Complex;
+use rustfft::FftPlanner;
+use std::sync::Arc;
+
 // ---------------------------------------------------------------------------
 // Circular buffer (fixed-size ring buffer with statistical methods)
 // ---------------------------------------------------------------------------
@@ -188,9 +192,10 @@ impl OnsetDetector {
                 continue;
             }
 
+            // Log-magnitude spectral flux: better models human loudness perception
             let current_mags: Vec<f64> = spectrum[lo_bin..hi_bin]
                 .iter()
-                .map(|&m| m as f64)
+                .map(|&m| (m as f64 + 1e-10).ln())
                 .collect();
 
             if let Some(ref prev) = self.prev_mags[i] {
@@ -259,12 +264,126 @@ impl OnsetDetector {
 }
 
 // ---------------------------------------------------------------------------
-// Stage 2: Autocorrelation-based tempo estimation
+// Kalman filter for BPM tracking in log2-BPM space
+// ---------------------------------------------------------------------------
+
+struct KalmanBpm {
+    state: f64,         // log2(BPM)
+    variance: f64,      // estimation uncertainty
+    q: f64,             // process noise
+    r: f64,             // measurement noise
+    diverge_count: u32, // consecutive divergent frames
+    snap_count: u32,    // consecutive octave-snapped frames
+    initialized: bool,
+}
+
+impl KalmanBpm {
+    fn new() -> Self {
+        Self {
+            state: 0.0,
+            variance: 1.0,
+            q: 0.001,
+            r: 0.1,
+            diverge_count: 0,
+            snap_count: 0,
+            initialized: false,
+        }
+    }
+
+    /// Update with a raw BPM measurement and confidence. Returns filtered BPM.
+    fn update(&mut self, raw_bpm: f64, confidence: f64) -> f64 {
+        if raw_bpm <= 0.0 {
+            return if self.initialized {
+                2.0f64.powf(self.state)
+            } else {
+                0.0
+            };
+        }
+
+        if !self.initialized {
+            self.state = raw_bpm.log2();
+            self.variance = 1.0;
+            self.initialized = true;
+            return raw_bpm;
+        }
+
+        let current_bpm = 2.0f64.powf(self.state);
+
+        // Octave-aware preprocessing: snap only true octave errors (2:1, 1:2)
+        let ratio = raw_bpm / current_bpm;
+        let mut snapped_bpm = raw_bpm;
+        let mut was_snapped = false;
+        for &hr in &[0.5, 2.0] {
+            if (ratio - hr).abs() / hr < 0.05 {
+                snapped_bpm = current_bpm;
+                was_snapped = true;
+                break;
+            }
+        }
+
+        // Track consecutive snaps — if snapping for too long, the tempo may
+        // have genuinely changed to the half/double. Accept raw measurement.
+        if was_snapped {
+            self.snap_count += 1;
+            if self.snap_count >= 50 {
+                log::debug!(
+                    "Kalman snap escape: accepting {:.1} BPM after {} consecutive snaps",
+                    raw_bpm, self.snap_count
+                );
+                snapped_bpm = raw_bpm;
+                was_snapped = false;
+                self.snap_count = 0;
+            }
+        } else {
+            self.snap_count = 0;
+        }
+        let snapped_measurement = snapped_bpm.log2();
+
+        // Divergence detection: 5 consecutive frames >10% deviation -> hard reset
+        let bpm_deviation = (snapped_bpm - current_bpm).abs() / current_bpm.max(1.0);
+        if bpm_deviation > 0.10 {
+            self.diverge_count += 1;
+        } else {
+            self.diverge_count = 0;
+        }
+
+        if self.diverge_count >= 15 {
+            log::debug!(
+                "Kalman hard reset: {:.1} -> {:.1} BPM (diverged for {} frames)",
+                current_bpm,
+                raw_bpm,
+                self.diverge_count
+            );
+            self.state = raw_bpm.log2();
+            self.variance = 1.0;
+            self.diverge_count = 0;
+            return raw_bpm;
+        }
+
+        // Adaptive noise: R = f(confidence), Q = f(stability)
+        self.r = 0.01 + (1.0 - confidence) * 0.5;
+        self.q = if self.diverge_count > 0 { 0.1 } else { 0.001 };
+
+        // Kalman predict (constant model: state unchanged)
+        self.variance += self.q;
+
+        // Kalman update
+        let innovation = snapped_measurement - self.state;
+        let s = self.variance + self.r;
+        let k = self.variance / s;
+        self.state += k * innovation;
+        self.variance *= 1.0 - k;
+
+        2.0f64.powf(self.state)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stage 2: FFT-based tempo estimation with Kalman tracking
 // ---------------------------------------------------------------------------
 
 struct TempoEstimator {
     bpm_range: (f32, f32),
-    smoothing: f32,
 
     onset_history: CircularBuffer,
     frame_time_history: CircularBuffer,
@@ -278,19 +397,31 @@ struct TempoEstimator {
     current_confidence: f64,
     current_period_frames: f64,
 
-    stable_bpm: f64,
-    stable_period_frames: f64,
-    stability_counter: u32,
+    // FFT-based generalized autocorrelation
+    fft_forward: Arc<dyn rustfft::Fft<f64>>,
+    fft_inverse: Arc<dyn rustfft::Fft<f64>>,
+    fft_size: usize,
+
+    // Genre-aware tempo prior (log-Gaussian)
+    prior_center_log2: f64,
+    prior_sigma: f64,
+
+    // Kalman filter replaces EMA + stability tracking
+    kalman: KalmanBpm,
 }
 
 impl TempoEstimator {
-    fn new(history_seconds: f64, frame_rate: f64) -> Self {
+    fn new(history_seconds: f64, frame_rate: f64, prior_center_bpm: f64) -> Self {
         let history_size = (history_seconds * frame_rate).ceil() as usize;
         let frame_time = 1.0 / frame_rate;
 
+        let fft_size = (2 * history_size).next_power_of_two();
+        let mut planner = FftPlanner::<f64>::new();
+        let fft_forward = planner.plan_fft_forward(fft_size);
+        let fft_inverse = planner.plan_fft_inverse(fft_size);
+
         Self {
             bpm_range: (40.0, 300.0),
-            smoothing: 0.15,
             onset_history: CircularBuffer::new(history_size),
             frame_time_history: CircularBuffer::new(30),
             frame_rate,
@@ -301,9 +432,12 @@ impl TempoEstimator {
             current_bpm: 0.0,
             current_confidence: 0.0,
             current_period_frames: 0.0,
-            stable_bpm: 0.0,
-            stable_period_frames: 0.0,
-            stability_counter: 0,
+            fft_forward,
+            fft_inverse,
+            fft_size,
+            prior_center_log2: prior_center_bpm.log2(),
+            prior_sigma: 1.5,
+            kalman: KalmanBpm::new(),
         }
     }
 
@@ -334,56 +468,39 @@ impl TempoEstimator {
             return (0.0, 0.0, 0.0);
         }
 
-        // Compute autocorrelation every ~6 frames (~10Hz update rate)
+        // Compute autocorrelation every ~6 frames (~16Hz update rate)
         if self.frame_count % 6 != 0 {
             let period_s = self.current_period_frames * self.frame_time;
             return (self.current_bpm, self.current_confidence, period_s);
         }
 
-        let (raw_bpm, confidence, period_frames) = self.compute_tempo();
+        let (raw_bpm, confidence, _raw_period_frames) = self.compute_tempo();
 
-        // Smooth BPM
-        if self.current_bpm > 0.0 && raw_bpm > 0.0 {
-            self.current_bpm = self.smooth_bpm(self.current_bpm, raw_bpm, confidence);
-        } else if raw_bpm > 0.0 {
-            self.current_bpm = raw_bpm;
+        // Confidence gate: don't feed low-confidence garbage to the Kalman.
+        // During noisy sections (off-beats, transitions), the autocorrelation
+        // is unreliable and would corrupt the filter state.
+        if confidence < 0.15 && self.current_bpm > 0.0 {
+            self.current_confidence = confidence;
+            let period_s = self.current_period_frames * self.frame_time;
+            return (self.current_bpm, self.current_confidence, period_s);
         }
 
+        // Kalman filter update
+        let filtered_bpm = self.kalman.update(raw_bpm, confidence);
+
+        self.current_bpm = filtered_bpm;
         self.current_confidence = confidence;
-        self.current_period_frames = period_frames;
-
-        // Track stability
-        if confidence > 0.5 && self.stable_bpm > 0.0 {
-            let bpm_diff = (self.current_bpm - self.stable_bpm).abs() / self.stable_bpm;
-            if bpm_diff < 0.08 {
-                self.stability_counter += 1;
-            } else if bpm_diff > 0.3 && self.stability_counter < 60 {
-                self.stable_bpm = self.current_bpm;
-                self.stable_period_frames = period_frames;
-                self.stability_counter = 0;
-            }
-        } else if confidence > 0.5 && self.current_bpm > 0.0 {
-            self.stable_bpm = self.current_bpm;
-            self.stable_period_frames = period_frames;
-            self.stability_counter = 1;
-        }
-
-        // Use stable tempo when current is erratic
-        let is_jumping = self.stable_bpm > 0.0
-            && (self.current_bpm - self.stable_bpm).abs() / self.stable_bpm.max(1.0) > 0.15;
-        if (confidence < 0.5 || is_jumping)
-            && self.stable_bpm > 0.0
-            && self.stability_counter > 60
-        {
-            self.current_bpm = self.stable_bpm;
-            self.current_period_frames = self.stable_period_frames;
-        }
+        self.current_period_frames = if filtered_bpm > 0.0 {
+            60.0 / (filtered_bpm * self.frame_time)
+        } else {
+            0.0
+        };
 
         let period_s = self.current_period_frames * self.frame_time;
         (self.current_bpm, self.current_confidence, period_s)
     }
 
-    fn compute_tempo(&self) -> (f64, f64, f64) {
+    fn compute_tempo(&mut self) -> (f64, f64, f64) {
         let history = self.onset_history.values();
         let n = history.len();
 
@@ -395,85 +512,162 @@ impl TempoEstimator {
             return (0.0, 0.0, 0.0);
         }
 
-        // Autocorrelation
-        let mut autocorr = vec![0.0f64; max_lag + 1];
-        let energy: f64 = history.iter().map(|v| v * v).sum();
-        autocorr[0] = energy;
-
-        for lag in min_lag..=max_lag {
-            let mut sum = 0.0f64;
-            for j in 0..(n - lag) {
-                sum += history[j] * history[j + lag];
-            }
-            autocorr[lag] = sum;
+        // FFT-based autocorrelation via Wiener-Khinchin: zero-pad -> FFT -> |X|^2 -> IFFT
+        // Using power spectrum (exponent 2) instead of amplitude (exponent 1) because
+        // the power spectrum gives the fundamental period a clear height advantage over
+        // subharmonics, reducing octave ambiguity.
+        // Mean-subtract to remove DC offset — critical for autocorrelation contrast.
+        let mean = history.iter().sum::<f64>() / n as f64;
+        let mut buffer: Vec<Complex<f64>> = vec![Complex::new(0.0, 0.0); self.fft_size];
+        for (i, &v) in history.iter().enumerate() {
+            buffer[i] = Complex::new(v - mean, 0.0);
         }
 
-        // Harmonic enhancement
-        let mut enhanced = vec![0.0f64; max_lag + 1];
-        for lag in min_lag..=max_lag {
-            let mut val = autocorr[lag];
-            if lag * 2 <= max_lag {
-                val += 0.5 * autocorr[lag * 2];
-            }
-            if lag * 3 <= max_lag {
-                val += 0.33 * autocorr[lag * 3];
-            }
-            if lag * 4 <= max_lag {
-                val += 0.25 * autocorr[lag * 4];
-            }
-            enhanced[lag] = val;
+        self.fft_forward.process(&mut buffer);
+
+        // Power spectrum |X|^2 — standard autocorrelation (Wiener-Khinchin)
+        for c in buffer.iter_mut() {
+            let power = c.norm_sqr();
+            *c = Complex::new(power, 0.0);
         }
 
-        // Find peak
+        self.fft_inverse.process(&mut buffer);
+
+        // Normalize by fft_size (rustfft doesn't normalize) and by zero-lag
+        let scale = 1.0 / self.fft_size as f64;
+        let zero_lag = buffer[0].re * scale;
+        if zero_lag <= 0.0 {
+            return (0.0, 0.0, 0.0);
+        }
+
+        // Extract autocorrelation up to 4*max_lag for harmonic scoring
+        let acr_len = (4 * max_lag + 1).min(n).min(self.fft_size);
+        let autocorr: Vec<f64> = buffer[..acr_len]
+            .iter()
+            .map(|c| c.re * scale / zero_lag)
+            .collect();
+        let acr_max = autocorr.len() - 1;
+
+        // Find initial peak using raw autocorrelation (no prior bias)
+        // Prior is applied only in the multi-ratio correction step
         let mut best_lag = min_lag;
-        let mut best_value = enhanced[min_lag];
-        for lag in (min_lag + 1)..=max_lag {
-            if enhanced[lag] > best_value {
-                best_value = enhanced[lag];
+        let mut best_value = f64::NEG_INFINITY;
+
+        for lag in min_lag..=max_lag.min(acr_max) {
+            if autocorr[lag] > best_value {
+                best_value = autocorr[lag];
                 best_lag = lag;
             }
         }
 
-        // Octave correction: check one octave down (2x lag) only.
-        // Only accept if the half-tempo peak is nearly as strong (≥95%).
-        // Limited to 1 step to prevent cascading (e.g. 230→115→58).
-        if best_lag * 2 <= max_lag {
-            let center = best_lag * 2;
-            let search_lo = min_lag.max(center.saturating_sub(2));
-            let search_hi = max_lag.min(center + 2);
+        // Multi-ratio octave correction
+        // Check metrical ratios: for each, compute harmonic score weighted by tempo prior.
+        // 1:3 and 1:4 are needed because the initial peak can land on the 3rd or 4th
+        // subharmonic (e.g., lag 66 for a true period of 22), and without these ratios
+        // the correction can only step down to 2T, never reaching T directly.
+        let ratios: [(f64, f64); 9] = [
+            (1.0, 4.0), // quarter lag -> 4x BPM
+            (1.0, 3.0), // third lag -> 3x BPM
+            (1.0, 2.0), // half lag -> double BPM
+            (2.0, 3.0),
+            (3.0, 4.0),
+            (1.0, 1.0), // same
+            (4.0, 3.0),
+            (3.0, 2.0),
+            (2.0, 1.0), // double lag -> half BPM
+        ];
 
-            let mut best_candidate: Option<usize> = None;
-            let mut best_candidate_val = 0.0f64;
+        let mut best_candidate_lag = best_lag;
+        let mut best_score = f64::NEG_INFINITY;
 
-            for dl in search_lo..=search_hi {
-                let dv = enhanced[dl];
-                // Must be a local peak
-                if dl > min_lag && dv < enhanced[dl - 1] {
-                    continue;
-                }
-                if dl < max_lag && dv < enhanced[dl + 1] {
-                    continue;
-                }
-                if dv > best_candidate_val {
-                    best_candidate = Some(dl);
-                    best_candidate_val = dv;
+        for &(num, den) in &ratios {
+            let candidate_lag = ((best_lag as f64 * num / den).round() as usize).max(1);
+            if candidate_lag < min_lag || candidate_lag > max_lag || candidate_lag > acr_max {
+                continue;
+            }
+
+            // Harmonic score: base + sum(autocorr[h*lag] / h) for h=2,3,4
+            let mut harmonic_score = autocorr[candidate_lag];
+            for h in 2..=4usize {
+                let h_lag = candidate_lag * h;
+                if h_lag <= acr_max {
+                    harmonic_score += autocorr[h_lag] / h as f64;
                 }
             }
 
-            if let Some(candidate) = best_candidate {
-                if best_candidate_val >= best_value * 0.95 {
-                    best_lag = candidate;
-                    best_value = best_candidate_val;
+            let bpm = 60.0 / (candidate_lag as f64 * self.frame_time);
+            let weight = self.tempo_prior_weight(bpm);
+            let weighted_score = harmonic_score * weight;
+
+            if weighted_score > best_score {
+                best_score = weighted_score;
+                best_candidate_lag = candidate_lag;
+            }
+        }
+
+        if best_candidate_lag != best_lag {
+            let old_bpm = 60.0 / (best_lag as f64 * self.frame_time);
+            let new_bpm = 60.0 / (best_candidate_lag as f64 * self.frame_time);
+            log::debug!(
+                "Multi-ratio correction: lag {} ({:.1} BPM) -> lag {} ({:.1} BPM)",
+                best_lag, old_bpm, best_candidate_lag, new_bpm
+            );
+        }
+
+        best_lag = best_candidate_lag;
+
+        // Cascading octave-up correction: repeatedly check if half-lag is a local
+        // peak in the autocorrelation. For a true period T, autocorr has peaks at
+        // T, 2T, 3T, ... If we're stuck at 2T, then T (= 2T/2) will also be a
+        // local peak. But if T is the true period, T/2 will be in a TROUGH
+        // (between peaks at 0 and T), NOT a local peak. This structural test
+        // reliably disambiguates octaves regardless of peak height.
+        loop {
+            let half = best_lag / 2;
+            if half < min_lag || half + 1 > acr_max {
+                break;
+            }
+            let half_bpm = 60.0 / (half as f64 * self.frame_time);
+            if half_bpm > self.bpm_range.1 as f64 {
+                break;
+            }
+
+            // Search ±1 around half-lag for a local peak (handles rounding)
+            let search_lo = half.saturating_sub(1).max(min_lag).max(1);
+            let search_hi = (half + 1).min(acr_max - 1);
+            let mut peak_lag = None;
+            for c in search_lo..=search_hi {
+                if autocorr[c] > autocorr[c - 1] && autocorr[c] > autocorr[c + 1] {
+                    if peak_lag.is_none() || autocorr[c] > autocorr[peak_lag.unwrap()] {
+                        peak_lag = Some(c);
+                    }
                 }
             }
+
+            if let Some(pl) = peak_lag {
+                // Require the peak to be substantial (not just noise)
+                if autocorr[pl] > 0.4 * autocorr[best_lag] {
+                    let old_bpm = 60.0 / (best_lag as f64 * self.frame_time);
+                    let new_bpm = 60.0 / (pl as f64 * self.frame_time);
+                    log::debug!(
+                        "Octave-up correction: lag {} ({:.1} BPM) -> lag {} ({:.1} BPM), \
+                         peak ratio {:.2}",
+                        best_lag, old_bpm, pl, new_bpm,
+                        autocorr[pl] / autocorr[best_lag]
+                    );
+                    best_lag = pl;
+                    continue; // Check even shorter periods
+                }
+            }
+            break;
         }
 
         // Parabolic interpolation for sub-frame precision
         let mut refined_lag = best_lag as f64;
-        if best_lag > min_lag && best_lag < max_lag {
-            let alpha = enhanced[best_lag - 1];
-            let beta = enhanced[best_lag];
-            let gamma = enhanced[best_lag + 1];
+        if best_lag > min_lag && best_lag < max_lag.min(acr_max) {
+            let alpha = autocorr[best_lag - 1];
+            let beta = autocorr[best_lag];
+            let gamma = autocorr[best_lag + 1];
             let denom = 2.0 * (2.0 * beta - alpha - gamma);
             if denom.abs() > 1e-10 {
                 let p = (alpha - gamma) / denom;
@@ -489,52 +683,40 @@ impl TempoEstimator {
             0.0
         };
 
-        // Confidence
-        let raw_conf = if energy > 0.0 {
-            (best_value / energy).min(1.0)
+        // Confidence: peak height relative to noise floor in the BPM range
+        // Generalized autocorrelation (|FFT|^1) gives lower absolute values than
+        // standard autocorrelation, so use relative measure instead
+        let confidence = if best_lag <= acr_max {
+            let range_end = max_lag.min(acr_max);
+            let mut sorted_vals: Vec<f64> = autocorr[min_lag..=range_end].to_vec();
+            sorted_vals.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let noise_floor = sorted_vals[sorted_vals.len() / 2]; // median
+            let peak = autocorr[best_lag];
+            ((peak - noise_floor) / (1.0 - noise_floor).max(1e-6)).max(0.0).min(1.0)
         } else {
             0.0
-        };
-        let confidence = if raw_conf > 0.05 {
-            raw_conf.max(0.15)
-        } else {
-            raw_conf
         };
 
         if bpm < self.bpm_range.0 as f64 || bpm > self.bpm_range.1 as f64 {
             return (0.0, 0.0, 0.0);
         }
 
+        log::debug!(
+            "Tempo estimate: {:.1} BPM (confidence {:.2}, lag {:.1})",
+            bpm, confidence, refined_lag
+        );
+
         (bpm, confidence, refined_lag)
     }
 
-    fn smooth_bpm(&self, current: f64, new: f64, confidence: f64) -> f64 {
-        let ratio = if current > 0.0 { new / current } else { 1.0 };
-        let is_half = (ratio - 0.5).abs() < 0.15;
-        let is_double = (ratio - 2.0).abs() < 0.15;
-        let change = (new - current).abs() / current.max(1.0);
-
-        // Octave shifts
-        if is_half || is_double {
-            if confidence >= 0.7 {
-                return current + 0.5 * (new - current);
-            } else {
-                return current;
-            }
+    /// Log-Gaussian tempo prior weight centered at prior_center_bpm.
+    fn tempo_prior_weight(&self, bpm: f64) -> f64 {
+        if bpm <= 0.0 {
+            return 0.0;
         }
-
-        if change > 0.25 && confidence < 0.7 {
-            return current;
-        }
-
-        let mut effective = self.smoothing as f64;
-        if change > 0.1 && confidence < 0.5 {
-            effective *= 0.3;
-        } else if confidence > 0.7 && change < 0.05 {
-            effective *= 1.5;
-        }
-
-        current + effective * (new - current)
+        let log2_bpm = bpm.log2();
+        let diff = log2_bpm - self.prior_center_log2;
+        (-0.5 * (diff / self.prior_sigma).powi(2)).exp()
     }
 }
 
@@ -821,7 +1003,7 @@ impl BeatDetector {
 
         Self {
             onset_detector: OnsetDetector::new(sample_rate, history_size, long_term_size),
-            tempo_estimator: TempoEstimator::new(4.0, frame_rate),
+            tempo_estimator: TempoEstimator::new(8.0, frame_rate, 150.0),
             beat_scheduler: BeatScheduler::new(),
             held_onset: 0.0,
             onset_decay_tau: 0.20,
