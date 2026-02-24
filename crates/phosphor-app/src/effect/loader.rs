@@ -34,12 +34,20 @@ struct PhosphorUniforms {
     bandwidth: f32,
     zcr: f32,
     params: array<vec4f, 4>,
+    feedback_decay: f32,
+    frame_index: f32,
 }
 
 @group(0) @binding(0) var<uniform> u: PhosphorUniforms;
+@group(0) @binding(1) var prev_frame: texture_2d<f32>;
+@group(0) @binding(2) var prev_sampler: sampler;
 
 fn param(i: u32) -> f32 {
     return u.params[i / 4u][i % 4u];
+}
+
+fn feedback(uv: vec2f) -> vec4f {
+    return textureSample(prev_frame, prev_sampler, uv);
 }
 "#;
 

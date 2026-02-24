@@ -1,5 +1,8 @@
 use bytemuck::{Pod, Zeroable};
-use wgpu::{BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, Buffer, Device, Queue};
+use wgpu::{
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindingResource, Buffer,
+    Device, Queue, Sampler, TextureView,
+};
 
 /// Shader uniforms packed for GPU consumption.
 /// Must be kept in sync with the WGSL `PhosphorUniforms` struct.
@@ -30,8 +33,13 @@ pub struct ShaderUniforms {
     pub params: [f32; 16],
     // 64 bytes (128 total)
 
+    // Feedback / multi-pass uniforms
+    pub feedback_decay: f32,
+    pub frame_index: f32,
+    // 8 bytes (136 total)
+
     // Padding to 256 bytes (wgpu min uniform buffer alignment)
-    pub _pad: [f32; 32],
+    pub _pad: [f32; 30],
 }
 
 pub struct UniformBuffer {
@@ -53,14 +61,31 @@ impl UniformBuffer {
         queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(uniforms));
     }
 
-    pub fn create_bind_group(&self, device: &Device, layout: &BindGroupLayout) -> BindGroup {
+    /// Create a bind group with uniform buffer + feedback texture + sampler.
+    pub fn create_bind_group(
+        &self,
+        device: &Device,
+        layout: &BindGroupLayout,
+        prev_frame_view: &TextureView,
+        prev_frame_sampler: &Sampler,
+    ) -> BindGroup {
         device.create_bind_group(&BindGroupDescriptor {
             label: Some("phosphor-bind-group"),
             layout,
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: self.buffer.as_entire_binding(),
-            }],
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: self.buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(prev_frame_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::Sampler(prev_frame_sampler),
+                },
+            ],
         })
     }
 }

@@ -118,6 +118,7 @@ impl ApplicationHandler for PhosphorApp {
                         &app.shader_error,
                         &app.uniforms,
                         &app.effect_loader,
+                        &mut app.post_process.enabled,
                     );
                 }
                 app.egui_overlay.end_frame(&app.window);

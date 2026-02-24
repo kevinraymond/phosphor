@@ -6,6 +6,10 @@ use winit::window::Window;
 
 use crate::audio::AudioSystem;
 use crate::effect::EffectLoader;
+use crate::gpu::pass_executor::PassExecutor;
+use crate::gpu::placeholder::PlaceholderTexture;
+use crate::gpu::postprocess::PostProcessChain;
+use crate::gpu::render_target::PingPongTarget;
 use crate::gpu::{GpuContext, ShaderPipeline, ShaderUniforms, UniformBuffer};
 use crate::params::ParamStore;
 use crate::shader::ShaderWatcher;
@@ -13,12 +17,11 @@ use crate::ui::EguiOverlay;
 
 pub struct App {
     pub gpu: GpuContext,
-    pub pipeline: ShaderPipeline,
     pub uniform_buffer: UniformBuffer,
-    pub bind_group: wgpu::BindGroup,
     pub uniforms: ShaderUniforms,
     pub start_time: Instant,
     pub last_frame: Instant,
+    pub frame_count: u32,
     pub shader_watcher: ShaderWatcher,
     pub current_shader_source: String,
     pub shader_error: Option<String>,
@@ -27,11 +30,16 @@ pub struct App {
     pub egui_overlay: EguiOverlay,
     pub effect_loader: EffectLoader,
     pub window: Arc<Window>,
+    // Multi-pass rendering
+    pub pass_executor: PassExecutor,
+    pub post_process: PostProcessChain,
+    pub placeholder: PlaceholderTexture,
 }
 
 impl App {
     pub fn new(window: Arc<Window>) -> Result<Self> {
         let gpu = GpuContext::new(window.clone())?;
+        let hdr_format = GpuContext::hdr_format();
 
         // Load default effect or fall back to default shader
         let mut effect_loader = EffectLoader::new();
@@ -42,7 +50,13 @@ impl App {
             .effects
             .iter()
             .position(|e| e.name == "Plasma Wave")
-            .or_else(|| if effect_loader.effects.is_empty() { None } else { Some(0) });
+            .or_else(|| {
+                if effect_loader.effects.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                }
+            });
         let (shader_source, param_store) = if let Some(idx) = default_idx {
             let effect = &effect_loader.effects[idx];
             match effect_loader.load_effect_source(&effect.shader) {
@@ -55,36 +69,65 @@ impl App {
                 Err(e) => {
                     log::warn!("Failed to load effect: {e}, using default shader");
                     let source = std::fs::read_to_string("assets/shaders/default.wgsl")
-                        .unwrap_or_else(|_| include_str!("../../../assets/shaders/default.wgsl").to_string());
+                        .unwrap_or_else(|_| {
+                            include_str!("../../../assets/shaders/default.wgsl").to_string()
+                        });
                     (source, ParamStore::new())
                 }
             }
         } else {
             let source = std::fs::read_to_string("assets/shaders/default.wgsl")
-                .unwrap_or_else(|_| include_str!("../../../assets/shaders/default.wgsl").to_string());
+                .unwrap_or_else(|_| {
+                    include_str!("../../../assets/shaders/default.wgsl").to_string()
+                });
             (source, ParamStore::new())
         };
 
-        let pipeline = ShaderPipeline::new(&gpu.device, gpu.format, &shader_source)?;
+        let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &shader_source)?;
         let uniform_buffer = UniformBuffer::new(&gpu.device);
-        let bind_group =
-            uniform_buffer.create_bind_group(&gpu.device, &pipeline.bind_group_layout);
+
+        // Placeholder 1x1 black texture
+        let placeholder = PlaceholderTexture::new(&gpu.device, &gpu.queue, hdr_format);
+
+        // Ping-pong feedback targets for the single-pass default
+        let feedback = PingPongTarget::new(
+            &gpu.device,
+            gpu.surface_config.width,
+            gpu.surface_config.height,
+            hdr_format,
+            1.0,
+        );
+
+        // Build PassExecutor for the initial single-pass effect
+        let pass_executor = PassExecutor::single_pass(
+            pipeline,
+            feedback,
+            &uniform_buffer,
+            &gpu.device,
+            &placeholder,
+        );
+
+        // Post-processing chain
+        let post_process = PostProcessChain::new(
+            &gpu.device,
+            gpu.format,
+            hdr_format,
+            gpu.surface_config.width,
+            gpu.surface_config.height,
+        );
 
         let shader_watcher = ShaderWatcher::new()?;
-
         let audio = AudioSystem::new();
-
         let egui_overlay = EguiOverlay::new(&gpu.device, gpu.format, &window);
 
         let now = Instant::now();
         Ok(Self {
             gpu,
-            pipeline,
             uniform_buffer,
-            bind_group,
             uniforms: ShaderUniforms::zeroed(),
             start_time: now,
             last_frame: now,
+            frame_count: 0,
             shader_watcher,
             current_shader_source: shader_source,
             shader_error: None,
@@ -93,11 +136,23 @@ impl App {
             egui_overlay,
             effect_loader,
             window,
+            pass_executor,
+            post_process,
+            placeholder,
         })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         self.gpu.resize(width, height);
+        self.pass_executor.resize(
+            &self.gpu.device,
+            width,
+            height,
+            &self.uniform_buffer,
+            &self.placeholder,
+        );
+        self.post_process.resize(&self.gpu.device, width, height);
+
         self.egui_overlay
             .resize(width, height, self.window.scale_factor() as f32);
     }
@@ -114,6 +169,10 @@ impl App {
             self.gpu.surface_config.width as f32,
             self.gpu.surface_config.height as f32,
         ];
+
+        // Feedback uniforms
+        self.uniforms.feedback_decay = 0.88;
+        self.uniforms.frame_index = self.frame_count as f32;
 
         // Drain audio features
         if let Some(features) = self.audio.latest_features() {
@@ -139,16 +198,25 @@ impl App {
         if !changes.is_empty() {
             if let Some(idx) = self.effect_loader.current_effect {
                 let effect = &self.effect_loader.effects[idx];
+                // Resolve the main shader path: use passes[0] if available, else effect.shader
+                let main_shader = if !effect.passes.is_empty() {
+                    &effect.passes[0].shader
+                } else {
+                    &effect.shader
+                };
                 let is_relevant = changes.iter().any(|p| {
-                    p.ends_with(&effect.shader)
-                        || p.to_string_lossy().contains("/lib/")
+                    p.ends_with(main_shader) || p.to_string_lossy().contains("/lib/")
                 });
                 if is_relevant {
-                    match self.effect_loader.load_effect_source(&effect.shader) {
+                    match self.effect_loader.load_effect_source(main_shader) {
                         Ok(source) if source != self.current_shader_source => {
                             log::info!(
                                 "Shader file changed: {}",
-                                changes.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+                                changes
+                                    .iter()
+                                    .map(|p| p.display().to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
                             );
                             self.try_recompile_shader(&source);
                         }
@@ -164,18 +232,19 @@ impl App {
     }
 
     pub fn try_recompile_shader(&mut self, source: &str) {
-        match self.pipeline.recreate_pipeline(
+        let hdr_format = GpuContext::hdr_format();
+        match self.pass_executor.main_pipeline_mut().recreate_pipeline(
             &self.gpu.device,
-            self.gpu.format,
+            hdr_format,
             source,
         ) {
             Ok(()) => {
                 self.current_shader_source = source.to_string();
                 self.shader_error = None;
-                // Recreate bind group for new pipeline
-                self.bind_group = self.uniform_buffer.create_bind_group(
+                self.pass_executor.rebuild_bind_groups(
                     &self.gpu.device,
-                    &self.pipeline.bind_group_layout,
+                    &self.uniform_buffer,
+                    &self.placeholder,
                 );
                 log::info!("Shader recompiled successfully");
             }
@@ -188,19 +257,52 @@ impl App {
 
     pub fn load_effect(&mut self, index: usize) {
         if let Some(effect) = self.effect_loader.effects.get(index).cloned() {
-            match self.effect_loader.load_effect_source(&effect.shader) {
-                Ok(source) => {
-                    self.param_store.load_from_defs(&effect.inputs);
-                    self.try_recompile_shader(&source);
+            let hdr_format = GpuContext::hdr_format();
+            let uses_passes = !effect.passes.is_empty();
 
-                    self.effect_loader.current_effect = Some(index);
-                    // Drain stale watcher events to prevent spurious recompiles
-                    self.shader_watcher.drain_changes();
-                    log::info!("Loaded effect: {}", effect.name);
+            if uses_passes {
+                // Effect defines explicit passes — build a new PassExecutor
+                match PassExecutor::new(
+                    &self.gpu.device,
+                    hdr_format,
+                    self.gpu.surface_config.width,
+                    self.gpu.surface_config.height,
+                    &effect.passes,
+                    &self.effect_loader,
+                    &self.uniform_buffer,
+                    &self.placeholder,
+                ) {
+                    Ok(executor) => {
+                        self.pass_executor = executor;
+                        self.param_store.load_from_defs(&effect.inputs);
+                        self.shader_error = None;
+                        self.effect_loader.current_effect = Some(index);
+                        self.shader_watcher.drain_changes();
+                        // Track the first pass's shader source for hot-reload
+                        if let Ok(src) = self.effect_loader.load_effect_source(&effect.passes[0].shader) {
+                            self.current_shader_source = src;
+                        }
+                        log::info!("Loaded effect: {} ({} passes)", effect.name, effect.passes.len());
+                    }
+                    Err(e) => {
+                        log::error!("Failed to load effect '{}': {e}", effect.name);
+                        self.shader_error = Some(format!("Load error: {e}"));
+                    }
                 }
-                Err(e) => {
-                    log::error!("Failed to load effect '{}': {e}", effect.name);
-                    self.shader_error = Some(format!("Load error: {e}"));
+            } else {
+                // Single-pass effect (backward compatible): hot-reloadable path
+                match self.effect_loader.load_effect_source(&effect.shader) {
+                    Ok(source) => {
+                        self.param_store.load_from_defs(&effect.inputs);
+                        self.try_recompile_shader(&source);
+                        self.effect_loader.current_effect = Some(index);
+                        self.shader_watcher.drain_changes();
+                        log::info!("Loaded effect: {}", effect.name);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to load effect '{}': {e}", effect.name);
+                        self.shader_error = Some(format!("Load error: {e}"));
+                    }
                 }
             }
         }
@@ -208,11 +310,9 @@ impl App {
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.gpu.surface.get_current_texture()?;
-        let view = output
+        let surface_view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-
-        self.uniform_buffer.update(&self.gpu.queue, &self.uniforms);
 
         let mut encoder =
             self.gpu
@@ -221,32 +321,34 @@ impl App {
                     label: Some("phosphor-encoder"),
                 });
 
-        // Effect render pass
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("phosphor-effect-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+        // Execute all effect passes (single or multi-pass)
+        let final_target = self.pass_executor.execute(
+            &mut encoder,
+            &self.uniform_buffer,
+            &self.gpu.queue,
+            &self.uniforms,
+        );
 
-            pass.set_pipeline(&self.pipeline.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.draw(0..3, 0..1);
-        }
+        // Post-processing → surface
+        self.post_process.render(
+            &self.gpu.device,
+            &self.gpu.queue,
+            &mut encoder,
+            final_target,
+            &surface_view,
+            self.uniforms.time,
+            self.uniforms.rms,
+            self.uniforms.onset,
+            self.uniforms.flatness,
+        );
 
-        // egui render pass
+        // Flip ping-pong for next frame
+        self.pass_executor.flip();
+        self.frame_count = self.frame_count.wrapping_add(1);
+
+        // egui overlay → surface
         self.egui_overlay
-            .render(&self.gpu.device, &self.gpu.queue, &mut encoder, &view);
+            .render(&self.gpu.device, &self.gpu.queue, &mut encoder, &surface_view);
 
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
         output.present();

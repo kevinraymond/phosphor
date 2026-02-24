@@ -3,7 +3,8 @@ use wgpu::{
     BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType,
     BufferBindingType, ColorTargetState, Device, FragmentState, MultisampleState,
     PipelineCompilationOptions, PipelineLayoutDescriptor, PrimitiveState, RenderPipeline,
-    ShaderModule, ShaderStages, TextureFormat, VertexState,
+    SamplerBindingType, ShaderModule, ShaderStages, TextureFormat, TextureSampleType,
+    TextureViewDimension, VertexState,
 };
 
 use super::fullscreen_quad::FULLSCREEN_TRIANGLE_VS;
@@ -39,9 +40,6 @@ impl ShaderPipeline {
         fragment_source: &str,
     ) -> Result<(), String> {
         let full_source = format!("{}\n{}", FULLSCREEN_TRIANGLE_VS, fragment_source);
-        // wgpu defers shader validation; we need to use the module in a pipeline
-        // to catch errors. We create the module and pipeline, relying on wgpu's
-        // error handling.
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("phosphor-shader"),
             source: wgpu::ShaderSource::Wgsl(full_source.into()),
@@ -56,16 +54,37 @@ impl ShaderPipeline {
     fn create_bind_group_layout(device: &Device) -> BindGroupLayout {
         device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("phosphor-bind-group-layout"),
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::FRAGMENT,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+            entries: &[
+                // binding(0): uniform buffer
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                // binding(1): previous frame texture (feedback)
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // binding(2): sampler for previous frame
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         })
     }
 
