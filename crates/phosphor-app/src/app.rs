@@ -13,6 +13,8 @@ use crate::gpu::placeholder::PlaceholderTexture;
 use crate::gpu::postprocess::PostProcessChain;
 use crate::gpu::render_target::PingPongTarget;
 use crate::gpu::{GpuContext, ShaderPipeline, ShaderUniforms, UniformBuffer};
+use crate::midi::types::TriggerAction;
+use crate::midi::MidiSystem;
 use crate::params::ParamStore;
 use crate::shader::ShaderWatcher;
 use crate::ui::EguiOverlay;
@@ -32,6 +34,9 @@ pub struct App {
     pub egui_overlay: EguiOverlay,
     pub effect_loader: EffectLoader,
     pub window: Arc<Window>,
+    // MIDI
+    pub midi: MidiSystem,
+    pub pending_midi_triggers: Vec<TriggerAction>,
     // Multi-pass rendering
     pub pass_executor: PassExecutor,
     pub post_process: PostProcessChain,
@@ -121,6 +126,7 @@ impl App {
 
         let shader_watcher = ShaderWatcher::new()?;
         let audio = AudioSystem::new();
+        let midi = MidiSystem::new();
         let egui_overlay = EguiOverlay::new(&gpu.device, gpu.format, &window);
 
         let now = Instant::now();
@@ -136,6 +142,8 @@ impl App {
             shader_error: None,
             param_store,
             audio,
+            midi,
+            pending_midi_triggers: Vec::new(),
             egui_overlay,
             effect_loader,
             window,
@@ -201,6 +209,11 @@ impl App {
             self.uniforms.bpm = features.bpm;
             self.uniforms.beat_strength = features.beat_strength;
         }
+
+        // Drain MIDI and apply mappings
+        let defs = self.param_store.defs.clone();
+        let midi_result = self.midi.update(&mut self.param_store, &defs);
+        self.pending_midi_triggers = midi_result.triggers;
 
         // Pack params
         self.uniforms.params = self.param_store.pack_to_buffer();

@@ -2,6 +2,7 @@ mod app;
 mod audio;
 mod effect;
 mod gpu;
+mod midi;
 mod params;
 mod shader;
 mod ui;
@@ -125,6 +126,7 @@ impl ApplicationHandler for PhosphorApp {
                         &app.effect_loader,
                         &mut app.post_process.enabled,
                         particle_count,
+                        &mut app.midi,
                     );
                 }
                 app.egui_overlay.end_frame(&app.window);
@@ -135,6 +137,32 @@ impl ApplicationHandler for PhosphorApp {
                 });
                 if let Some(idx) = pending.or(app.egui_overlay.pending_effect_load.take()) {
                     app.load_effect(idx);
+                }
+
+                // Handle MIDI triggers
+                let triggers: Vec<_> = app.pending_midi_triggers.drain(..).collect();
+                for trigger in triggers {
+                    use crate::midi::types::TriggerAction;
+                    let num_effects = app.effect_loader.effects.len();
+                    match trigger {
+                        TriggerAction::NextEffect if num_effects > 0 => {
+                            let current = app.effect_loader.current_effect.unwrap_or(0);
+                            app.load_effect((current + 1) % num_effects);
+                        }
+                        TriggerAction::PrevEffect if num_effects > 0 => {
+                            let current = app.effect_loader.current_effect.unwrap_or(0);
+                            app.load_effect(
+                                if current == 0 { num_effects - 1 } else { current - 1 },
+                            );
+                        }
+                        TriggerAction::TogglePostProcess => {
+                            app.post_process.enabled = !app.post_process.enabled;
+                        }
+                        TriggerAction::ToggleOverlay => {
+                            app.egui_overlay.toggle_visible();
+                        }
+                        _ => {}
+                    }
                 }
 
                 match app.render() {
