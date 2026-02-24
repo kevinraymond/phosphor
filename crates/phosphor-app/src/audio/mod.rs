@@ -1,6 +1,8 @@
 pub mod analyzer;
+pub mod beat;
 pub mod capture;
 pub mod features;
+pub mod normalizer;
 pub mod smoother;
 
 pub use features::AudioFeatures;
@@ -11,10 +13,12 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, Sender};
 
 use self::analyzer::FftAnalyzer;
+use self::beat::BeatDetector;
 use self::capture::AudioCapture;
+use self::normalizer::AdaptiveNormalizer;
 use self::smoother::FeatureSmoother;
 
-/// Manages the audio pipeline: capture -> FFT -> smooth -> send to main thread.
+/// Manages the audio pipeline: capture -> FFT -> normalize -> beat detect -> smooth -> send to main thread.
 pub struct AudioSystem {
     receiver: Receiver<AudioFeatures>,
     latest: Option<AudioFeatures>,
@@ -67,9 +71,12 @@ impl AudioSystem {
 
 fn audio_thread(capture: AudioCapture, sample_rate: f32, tx: Sender<AudioFeatures>) {
     let mut analyzer = FftAnalyzer::new(sample_rate);
+    let mut normalizer = AdaptiveNormalizer::new();
+    let mut beat_detector = BeatDetector::new(sample_rate);
     let mut smoother = FeatureSmoother::new();
-    let mut read_buf = vec![0.0f32; 4096];
+    let mut read_buf = vec![0.0f32; 8192]; // larger for 4096-pt FFT
     let mut last_time = Instant::now();
+    let start_time = Instant::now();
 
     loop {
         thread::sleep(Duration::from_millis(10));
@@ -87,9 +94,30 @@ fn audio_thread(capture: AudioCapture, sample_rate: f32, tx: Sender<AudioFeature
 
         let now = Instant::now();
         let dt = now.duration_since(last_time).as_secs_f32();
+        let timestamp = now.duration_since(start_time).as_secs_f64();
         last_time = now;
 
-        let raw = analyzer.analyze(&read_buf[..read]);
+        // Multi-resolution FFT + feature extraction
+        let mut raw = analyzer.analyze(&read_buf[..read]);
+
+        // Adaptive normalization (replaces fixed gains)
+        raw = normalizer.normalize(&raw);
+
+        // Beat detection (on raw magnitude spectra)
+        let beat_result = beat_detector.process(
+            analyzer.bass_magnitude(),
+            analyzer.mid_magnitude(),
+            analyzer.high_magnitude(),
+            raw.rms,
+            timestamp,
+        );
+        raw.onset = beat_result.onset_strength;
+        raw.beat = beat_result.beat;
+        raw.beat_phase = beat_result.beat_phase;
+        raw.bpm = beat_result.bpm / 300.0; // normalize to 0-1
+        raw.beat_strength = beat_result.beat_strength;
+
+        // Smoothing (per-feature asymmetric EMA; beat/beat_phase pass through)
         let smoothed = smoother.smooth(&raw, dt);
 
         // Non-blocking send; drop if main thread is behind

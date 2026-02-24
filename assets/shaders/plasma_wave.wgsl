@@ -27,13 +27,13 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
 
     // Audio-driven palette
     let palette_shift = param(2u);
-    var col = phosphor_audio_palette(p + palette_shift, u.centroid, u.phase);
+    var col = phosphor_audio_palette(p + palette_shift, u.centroid, u.beat_phase);
 
     // Bass pulses intensity
     col *= 0.7 + u.bass * 0.6 + u.rms * 0.3;
 
-    // Treble adds shimmer
-    let shimmer = phosphor_noise2(uv * 20.0 + t * 3.0) * u.treble * 0.15;
+    // Presence adds shimmer
+    let shimmer = phosphor_noise2(uv * 20.0 + t * 3.0) * u.presence * 0.15;
     col += vec3f(shimmer);
 
     // Onset flash

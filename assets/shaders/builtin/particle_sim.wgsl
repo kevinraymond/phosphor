@@ -24,17 +24,18 @@ struct ParticleUniforms {
     attraction_strength: f32,
     seed: f32,
 
+    sub_bass: f32,
     bass: f32,
     mid: f32,
-    treble: f32,
     rms: f32,
+    kick: f32,
     onset: f32,
     centroid: f32,
     flux: f32,
-    flatness: f32,
+    beat: f32,
+    beat_phase: f32,
 
     resolution: vec2f,
-    _pad: vec2f,
 }
 
 struct Particle {
