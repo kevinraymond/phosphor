@@ -49,19 +49,21 @@ pub struct ParticleUniforms {
     pub attraction_strength: f32,
     pub seed: f32,
 
-    // Audio features (32 bytes)
+    // Audio features (40 bytes = 10 floats)
+    pub sub_bass: f32,
     pub bass: f32,
     pub mid: f32,
-    pub treble: f32,
     pub rms: f32,
+    pub kick: f32,
     pub onset: f32,
     pub centroid: f32,
     pub flux: f32,
-    pub flatness: f32,
+    pub beat: f32,
+    pub beat_phase: f32,
 
-    // Resolution (16 bytes) — needed for aspect ratio correction in orbital mechanics
+    // Resolution (8 bytes) — needed for aspect ratio correction in orbital mechanics
     pub resolution: [f32; 2],
-    pub _pad: [f32; 2],
+    // Total: 32 fields = 128 bytes (no padding needed)
 }
 
 /// Particle render uniforms: 16 bytes.

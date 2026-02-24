@@ -7,8 +7,8 @@ fn map_singularity(p: vec3f, time: f32) -> f32 {
     var core = phosphor_sd_sphere(p, core_scale);
 
     // Noise displacement — treble controls detail
-    let octaves = 2 + i32(u.treble * 1.0);
-    let noise_gain = 0.4 + u.treble * 0.15;
+    let octaves = 2 + i32(u.presence * 1.0);
+    let noise_gain = 0.4 + u.presence * 0.15;
     let displacement = phosphor_fbm3(p * 2.0 + time * 0.3, octaves, noise_gain) - 0.5;
     let roughness_param = param(1u);
     let roughness = mix(0.05, 0.35, mix(u.flatness, roughness_param, 0.5));
@@ -62,7 +62,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     let cam_dist_param = param(0u);
     let cam_dist = 3.0 + cam_dist_param * 6.0 + u.zcr * 3.0;
     let rotation_speed = param(3u) * 0.5;
-    let cam_angle = time * rotation_speed + u.phase * 6.28318;
+    let cam_angle = time * rotation_speed + u.beat_phase * 6.28318;
     let ro = vec3f(
         cos(cam_angle) * cam_dist,
         sin(time * 0.1) * 0.5,
@@ -103,7 +103,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
 
         // Audio-driven color
         let color_t = length(p) * 0.3 + time * 0.1;
-        let base_color = phosphor_audio_palette(color_t, u.centroid, u.phase);
+        let base_color = phosphor_audio_palette(color_t, u.centroid, u.beat_phase);
 
         // Surface
         let smoothness = 1.0 - u.flatness;

@@ -4,7 +4,7 @@ use wgpu::{
     Device, Queue, Sampler, TextureView,
 };
 
-/// Shader uniforms packed for GPU consumption.
+/// Shader uniforms packed for GPU consumption (256 bytes).
 /// Must be kept in sync with the WGSL `PhosphorUniforms` struct.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
@@ -14,32 +14,43 @@ pub struct ShaderUniforms {
     pub resolution: [f32; 2],
     // 16 bytes
 
-    // Audio features (12 floats)
+    // Audio bands (7) + rms
+    pub sub_bass: f32,
     pub bass: f32,
+    pub low_mid: f32,
     pub mid: f32,
-    pub treble: f32,
+    pub upper_mid: f32,
+    pub presence: f32,
+    pub brilliance: f32,
     pub rms: f32,
-    pub phase: f32,
-    pub onset: f32,
+    // 32 bytes (48 total)
+
+    // Audio features (12)
+    pub kick: f32,
     pub centroid: f32,
     pub flux: f32,
     pub flatness: f32,
     pub rolloff: f32,
     pub bandwidth: f32,
     pub zcr: f32,
-    // 48 bytes (64 total)
+    pub onset: f32,
+    pub beat: f32,
+    pub beat_phase: f32,
+    pub bpm: f32,
+    pub beat_strength: f32,
+    // 48 bytes (96 total)
 
     // User params
     pub params: [f32; 16],
-    // 64 bytes (128 total)
+    // 64 bytes (160 total)
 
     // Feedback / multi-pass uniforms
     pub feedback_decay: f32,
     pub frame_index: f32,
-    // 8 bytes (136 total)
+    // 8 bytes (168 total)
 
-    // Padding to 256 bytes (wgpu min uniform buffer alignment)
-    pub _pad: [f32; 30],
+    // Padding to 256 bytes
+    pub _pad: [f32; 22],
 }
 
 pub struct UniformBuffer {

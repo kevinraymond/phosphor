@@ -2,18 +2,29 @@ struct PhosphorUniforms {
     time: f32,
     delta_time: f32,
     resolution: vec2f,
+
+    sub_bass: f32,
     bass: f32,
+    low_mid: f32,
     mid: f32,
-    treble: f32,
+    upper_mid: f32,
+    presence: f32,
+    brilliance: f32,
     rms: f32,
-    phase: f32,
-    onset: f32,
+
+    kick: f32,
     centroid: f32,
     flux: f32,
     flatness: f32,
     rolloff: f32,
     bandwidth: f32,
     zcr: f32,
+    onset: f32,
+    beat: f32,
+    beat_phase: f32,
+    bpm: f32,
+    beat_strength: f32,
+
     params: array<vec4f, 4>,
     feedback_decay: f32,
     frame_index: f32,
@@ -60,7 +71,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
 
     let p = plasma(uv, t);
 
-    let color_shift = u.centroid * 0.5 + u.phase * 0.3;
+    let color_shift = u.centroid * 0.5 + u.beat_phase * 0.3;
     var col = pal(p + color_shift);
 
     col *= 0.7 + u.bass * 0.6 + u.rms * 0.3;

@@ -1,38 +1,49 @@
-use super::features::AudioFeatures;
+use super::features::{AudioFeatures, NUM_FEATURES};
 
 /// Per-feature attack/release time constants (seconds).
 struct SmoothParams {
     attack: f32,
     release: f32,
+    bypass: bool, // pass-through without smoothing
 }
 
-/// Asymmetric attack/release EMA smoother.
-/// Ported from spectral-senses/src/audio/feature_smoother.cpp
+/// Asymmetric attack/release EMA smoother for 20 audio features.
 pub struct FeatureSmoother {
-    state: [f32; 12],
-    params: [SmoothParams; 12],
+    state: [f32; NUM_FEATURES],
+    params: [SmoothParams; NUM_FEATURES],
 }
 
 impl FeatureSmoother {
     pub fn new() -> Self {
-        // Time constants from spectral-senses/src/audio/feature_smoother.cpp:11-22
         let params = [
-            SmoothParams { attack: 0.02, release: 0.15 },   // bass
-            SmoothParams { attack: 0.01, release: 0.10 },   // mid
-            SmoothParams { attack: 0.005, release: 0.08 },  // treble
-            SmoothParams { attack: 0.01, release: 0.12 },   // rms
-            SmoothParams { attack: 0.05, release: 0.20 },   // phase
-            SmoothParams { attack: 0.001, release: 0.05 },  // onset (very fast attack)
-            SmoothParams { attack: 0.03, release: 0.15 },   // centroid
-            SmoothParams { attack: 0.005, release: 0.06 },  // flux
-            SmoothParams { attack: 0.05, release: 0.20 },   // flatness
-            SmoothParams { attack: 0.03, release: 0.15 },   // rolloff
-            SmoothParams { attack: 0.03, release: 0.15 },   // bandwidth
-            SmoothParams { attack: 0.02, release: 0.10 },   // zcr
+            // Frequency bands (7)
+            SmoothParams { attack: 0.02, release: 0.15, bypass: false },   // sub_bass
+            SmoothParams { attack: 0.02, release: 0.15, bypass: false },   // bass
+            SmoothParams { attack: 0.01, release: 0.10, bypass: false },   // low_mid
+            SmoothParams { attack: 0.01, release: 0.10, bypass: false },   // mid
+            SmoothParams { attack: 0.005, release: 0.08, bypass: false },  // upper_mid
+            SmoothParams { attack: 0.005, release: 0.08, bypass: false },  // presence
+            SmoothParams { attack: 0.005, release: 0.08, bypass: false },  // brilliance
+            // Aggregates (2)
+            SmoothParams { attack: 0.01, release: 0.12, bypass: false },   // rms
+            SmoothParams { attack: 0.002, release: 0.06, bypass: false },  // kick (fast attack)
+            // Spectral shape (6)
+            SmoothParams { attack: 0.03, release: 0.15, bypass: false },   // centroid
+            SmoothParams { attack: 0.005, release: 0.06, bypass: false },  // flux
+            SmoothParams { attack: 0.05, release: 0.20, bypass: false },   // flatness
+            SmoothParams { attack: 0.03, release: 0.15, bypass: false },   // rolloff
+            SmoothParams { attack: 0.03, release: 0.15, bypass: false },   // bandwidth
+            SmoothParams { attack: 0.02, release: 0.10, bypass: false },   // zcr
+            // Beat detection (5)
+            SmoothParams { attack: 0.001, release: 0.05, bypass: false },  // onset (very fast)
+            SmoothParams { attack: 0.0, release: 0.0, bypass: true },      // beat (pass-through)
+            SmoothParams { attack: 0.0, release: 0.0, bypass: true },      // beat_phase (pass-through)
+            SmoothParams { attack: 0.5, release: 1.0, bypass: false },     // bpm (very slow)
+            SmoothParams { attack: 0.001, release: 0.08, bypass: false },  // beat_strength (fast attack)
         ];
 
         Self {
-            state: [0.0; 12],
+            state: [0.0; NUM_FEATURES],
             params,
         }
     }
@@ -44,7 +55,13 @@ impl FeatureSmoother {
         let mut out = AudioFeatures::default();
         let out_slice = out.as_slice_mut();
 
-        for i in 0..12 {
+        for i in 0..NUM_FEATURES {
+            if self.params[i].bypass {
+                out_slice[i] = raw_slice[i];
+                self.state[i] = raw_slice[i];
+                continue;
+            }
+
             let target = raw_slice[i];
             let rising = target > self.state[i];
             let tau = if rising {
@@ -59,11 +76,5 @@ impl FeatureSmoother {
         }
 
         out
-    }
-}
-
-impl Default for AudioFeatures {
-    fn default() -> Self {
-        bytemuck::Zeroable::zeroed()
     }
 }

@@ -7,6 +7,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 **Phase 1 (Core Rendering MVP): COMPLETE** — committed as `fa187b5`
 **Phase 2 (Multi-Pass Rendering): COMPLETE** — multi-pass rendering infrastructure
 **GPU Particle System: COMPLETE** — compute shader particles with ping-pong buffers
+**Audio Upgrade + Beat Detection: COMPLETE** — multi-resolution FFT, adaptive normalization, 3-stage beat detector
 
 ### What's Built
 
@@ -14,7 +15,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - winit 0.30 window with wgpu 27 Vulkan rendering (fullscreen triangle technique)
 - Shader hot-reload (notify file watcher, 100ms debounce, error recovery keeps old pipeline)
 - Parameter system: ParamDef (Float/Color/Bool/Point2D), ParamStore, uniform packing
-- Audio pipeline: cpal capture → lock-free ring buffer → dedicated thread → 2048-pt FFT (rustfft) → 12 spectral features → asymmetric EMA smoothing → crossbeam channel to main thread
+- Audio pipeline: cpal capture → lock-free ring buffer → dedicated thread → multi-resolution FFT (4096/1024/512-pt) → 20 features (7 bands + aggregates + spectral + beat) → adaptive normalization → 3-stage beat detection → asymmetric EMA smoothing → crossbeam channel to main thread
 - egui overlay (D key toggle): WCAG 2.2 AA dark/light themes, audio spectrum bars, auto-generated param controls, effect browser, status bar
 - .pfx JSON effect format with WGSL shader library (noise, palette, sdf, tonemap) auto-prepended
 - 3 demo effects: plasma_wave, singularity (SDF raymarched), membrane (ocean surface)
@@ -50,6 +51,21 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - 1 combo effect: orbital_trails (feedback_test + spectral_eye layered)
 - Feedback + particles requires HDR clamp in background shader (`min(col, vec3f(1.5))`) to prevent runaway accumulation
 
+#### Audio Upgrade + Beat Detection
+- Multi-resolution FFT: 4096-pt (sub_bass, bass, kick), 1024-pt (low_mid, mid, upper_mid), 512-pt (presence, brilliance)
+- 20-field AudioFeatures: 7 frequency bands, 2 aggregates (rms, kick), 6 spectral shape, 5 beat detection
+- Adaptive normalization: per-feature running min/max replaces all fixed gain multipliers
+- 3-stage beat detection (ported from easey-glyph): OnsetDetector (multi-band spectral flux + adaptive threshold) → TempoEstimator (autocorrelation + harmonic enhancement + octave correction) → BeatScheduler (predictive state machine with phase correction)
+- Dedicated kick detection: half-wave rectified spectral flux in 30-120 Hz from 4096-pt FFT
+- Bass bands use linear RMS, high bands use dB scaling (80dB range)
+- Beat trigger (`beat` field) replaces onset-based beat proxy (`onset > 0.5`)
+- `beat_phase` (0-1 sawtooth at detected tempo), `bpm` (normalized /300), `beat_strength`
+- BPM shown in status bar with beat flash indicator
+- 7-band frequency visualization in audio panel
+- `treble` → `presence` + `brilliance`, `phase` → `beat_phase` in all shaders
+- ShaderUniforms: 256 bytes with 20 audio fields + params + feedback uniforms
+- ParticleUniforms: 128 bytes with 10 most useful audio fields (sub_bass, bass, mid, rms, kick, onset, centroid, flux, beat, beat_phase)
+
 ### Known Issues
 - ~29 compiler warnings (mostly unused items reserved for future phases)
 - Fonts directory (`assets/fonts/`) is empty — Inter and JetBrains Mono not yet bundled
@@ -58,7 +74,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 ### Architecture
 ```
 Main Thread: winit event loop → drain audio/shader channels → update uniforms → PassExecutor (effect passes) → PostProcessChain (bloom/tonemap) → egui overlay → present
-Audio Thread: cpal callback → ring buffer → FFT → smooth → send AudioFeatures
+Audio Thread: cpal callback → ring buffer → multi-res FFT → adaptive normalize → beat detect → smooth → send AudioFeatures
 File Watcher Thread: notify → debounce → send changed paths
 ```
 
@@ -117,7 +133,7 @@ The complete 28-week, 4-phase plan is at `~/ai/audio/phosphor-internal/cross-pla
 ### Remaining Roadmap
 1. ~~Multi-pass rendering~~ ✓
 2. ~~GPU compute particle system~~ ✓
-3. Beat detection (bass energy peak tracking)
+3. ~~Beat detection~~ ✓ (3-stage: onset → tempo → scheduler)
 4. MIDI input with MIDI learn
 5. Preset save/load
 6. Layer-based composition with blend modes

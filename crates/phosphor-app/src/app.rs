@@ -180,18 +180,26 @@ impl App {
 
         // Drain audio features
         if let Some(features) = self.audio.latest_features() {
+            self.uniforms.sub_bass = features.sub_bass;
             self.uniforms.bass = features.bass;
+            self.uniforms.low_mid = features.low_mid;
             self.uniforms.mid = features.mid;
-            self.uniforms.treble = features.treble;
+            self.uniforms.upper_mid = features.upper_mid;
+            self.uniforms.presence = features.presence;
+            self.uniforms.brilliance = features.brilliance;
             self.uniforms.rms = features.rms;
-            self.uniforms.phase = features.phase;
-            self.uniforms.onset = features.onset;
+            self.uniforms.kick = features.kick;
             self.uniforms.centroid = features.centroid;
             self.uniforms.flux = features.flux;
             self.uniforms.flatness = features.flatness;
             self.uniforms.rolloff = features.rolloff;
             self.uniforms.bandwidth = features.bandwidth;
             self.uniforms.zcr = features.zcr;
+            self.uniforms.onset = features.onset;
+            self.uniforms.beat = features.beat;
+            self.uniforms.beat_phase = features.beat_phase;
+            self.uniforms.bpm = features.bpm;
+            self.uniforms.beat_strength = features.beat_strength;
         }
 
         // Pack params
@@ -203,17 +211,19 @@ impl App {
                 dt,
                 self.uniforms.time,
                 self.uniforms.resolution,
-                self.uniforms.onset,
+                self.uniforms.beat,
             );
             ps.update_audio(
+                self.uniforms.sub_bass,
                 self.uniforms.bass,
                 self.uniforms.mid,
-                self.uniforms.treble,
                 self.uniforms.rms,
+                self.uniforms.kick,
                 self.uniforms.onset,
                 self.uniforms.centroid,
                 self.uniforms.flux,
-                self.uniforms.flatness,
+                self.uniforms.beat,
+                self.uniforms.beat_phase,
             );
         }
 

@@ -323,13 +323,13 @@ impl ParticleSystem {
         dt: f32,
         time: f32,
         resolution: [f32; 2],
-        onset: f32,
+        beat: f32,
     ) {
         // Accumulate emissions
         self.emit_accumulator += self.emit_rate * dt;
 
-        // Beat burst
-        if onset > 0.5 && self.burst_on_beat > 0 {
+        // Beat burst — use dedicated beat trigger instead of onset threshold
+        if beat > 0.5 && self.burst_on_beat > 0 {
             self.emit_accumulator += self.burst_on_beat as f32;
         }
 
@@ -368,23 +368,27 @@ impl ParticleSystem {
     /// Copy audio features into particle uniforms.
     pub fn update_audio(
         &mut self,
+        sub_bass: f32,
         bass: f32,
         mid: f32,
-        treble: f32,
         rms: f32,
+        kick: f32,
         onset: f32,
         centroid: f32,
         flux: f32,
-        flatness: f32,
+        beat: f32,
+        beat_phase: f32,
     ) {
+        self.uniforms.sub_bass = sub_bass;
         self.uniforms.bass = bass;
         self.uniforms.mid = mid;
-        self.uniforms.treble = treble;
         self.uniforms.rms = rms;
+        self.uniforms.kick = kick;
         self.uniforms.onset = onset;
         self.uniforms.centroid = centroid;
         self.uniforms.flux = flux;
-        self.uniforms.flatness = flatness;
+        self.uniforms.beat = beat;
+        self.uniforms.beat_phase = beat_phase;
     }
 
     /// Run the compute dispatch (particle simulation).

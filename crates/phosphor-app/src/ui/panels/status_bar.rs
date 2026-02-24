@@ -42,6 +42,19 @@ pub fn draw_status_bar(
             );
         }
 
+        // BPM display
+        let bpm = uniforms.bpm * 300.0;
+        if bpm > 1.0 {
+            ui.separator();
+            // Beat indicator: flash on beat
+            let beat_color = if uniforms.beat > 0.5 {
+                Color32::from_rgb(0xFF, 0x60, 0x40)
+            } else {
+                Color32::from_rgb(0xE0, 0xA0, 0x40)
+            };
+            ui.colored_label(beat_color, format!("{:.0} BPM", bpm));
+        }
+
         ui.separator();
 
         // Hotkey legend (compact)

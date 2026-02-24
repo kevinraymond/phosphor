@@ -16,13 +16,13 @@ fn waves(p: vec2f, time: f32) -> f32 {
     w += cos(p.y * med_freq * 0.7 - time * 0.5 + p.x * 0.3) * 0.25;
 
     // Surface ripples — treble driven
-    let ripple_freq = 2.0 + u.treble * 4.0;
-    let ripple_amp = 0.05 + u.treble * 0.2;
+    let ripple_freq = 2.0 + u.presence * 4.0;
+    let ripple_amp = 0.05 + u.presence * 0.2;
     w += sin(p.x * ripple_freq + time * 2.0) * ripple_amp;
     w += sin(p.y * ripple_freq * 1.3 - time * 1.8 + p.x * 0.5) * ripple_amp * 0.7;
 
     // FBM for organic texture
-    let octaves = 2 + i32(u.treble * 3.0);
+    let octaves = 2 + i32(u.presence * 3.0);
     w += phosphor_fbm2(p * 0.5 + time * 0.1, octaves, 0.45) * 0.3;
 
     return w;
@@ -53,7 +53,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
 
     // Camera above looking down at angle — zcr controls height
     let cam_height = 6.0 + u.zcr * 4.0;
-    let cam_angle = time * 0.05 + u.phase * 3.14159;
+    let cam_angle = time * 0.05 + u.beat_phase * 3.14159;
     let ro = vec3f(
         cos(cam_angle) * 3.0,
         cam_height,
@@ -102,7 +102,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
 
         // Bioluminescent glow from centroid
         let bio_glow = phosphor_audio_palette(
-            surface_pos.x * 0.05 + time * 0.1, u.centroid, u.phase
+            surface_pos.x * 0.05 + time * 0.1, u.centroid, u.beat_phase
         );
 
         // Thin-film iridescence — flatness controls character
@@ -113,7 +113,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
             u.flatness * irid_param * 2.0
         );
         let iridescence = thin_film(cos_theta, film_thickness);
-        let irid_strength = 0.2 + u.treble * 0.3;
+        let irid_strength = 0.2 + u.presence * 0.3;
 
         // Compose surface color
         col = deep_color * (0.3 + diff * 0.5);
@@ -125,7 +125,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
         let caustic_param = param(3u);
         let caustic = smoothstep(0.65, 0.85,
             phosphor_noise2(surface_pos * 3.0 + time * vec2f(1.2, 0.8)));
-        col += bio_glow * caustic * u.treble * 0.8 * (0.5 + caustic_param);
+        col += bio_glow * caustic * u.presence * 0.8 * (0.5 + caustic_param);
 
         // Onset splash eruption
         if (u.onset > 0.1) {
@@ -155,7 +155,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
             vec3f(0.05, 0.1, 0.15),
             u.centroid * 0.3
         );
-        let horizon_col = phosphor_audio_palette(time * 0.02, u.centroid, u.phase) * 0.2;
+        let horizon_col = phosphor_audio_palette(time * 0.02, u.centroid, u.beat_phase) * 0.2;
         col = sky_col + horizon_col * horizon;
     }
 
