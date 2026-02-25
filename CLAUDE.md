@@ -22,7 +22,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Audio pipeline: cpal capture → lock-free ring buffer → dedicated thread → multi-resolution FFT (4096/1024/512-pt) → 20 features (7 bands + aggregates + spectral + beat) → adaptive normalization → 3-stage beat detection → asymmetric EMA smoothing → crossbeam channel to main thread
 - egui overlay (D key toggle): WCAG 2.2 AA dark/light themes, audio spectrum bars, auto-generated param controls, effect browser, status bar
 - .pfx JSON effect format with WGSL shader library (noise, palette, sdf, tonemap) auto-prepended
-- 3 demo effects: plasma_wave, singularity (SDF raymarched), membrane (ocean surface)
+- 8 curated effects (see Effect Set below)
 
 #### Phase 2
 - Off-screen Rgba16Float HDR render targets (`RenderTarget`, `PingPongTarget`)
@@ -35,7 +35,6 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Backward compatible: single-shader .pfx files work unchanged via `normalized_passes()`
 - Per-effect `postprocess` overrides (bloom threshold/intensity, vignette) applied at runtime
 - Multi-pass shader hot-reload: all passes recompile on file change, not just pass 0
-- 2 new effects: feedback_test (spinning dot with trails), singularity_feedback (multi-pass demo)
 - New uniforms: `feedback_decay`, `frame_index` (256-byte uniform struct maintained)
 
 #### GPU Particle System
@@ -51,8 +50,6 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - 128-byte `ParticleUniforms` (includes resolution for aspect ratio correction) separate from main 256-byte `ShaderUniforms`
 - Aspect-ratio-corrected orbital physics: all distance/force calculations in screen space
 - Particle count shown in status bar when active
-- 2 new effects: particle_test (fountain), spectral_eye (orbital light trails with feedback)
-- 1 combo effect: orbital_trails (feedback_test + spectral_eye layered)
 - Feedback + particles requires HDR clamp in background shader (`min(col, vec3f(1.5))`) to prevent runaway accumulation
 
 #### Audio Upgrade + Beat Detection
@@ -114,6 +111,27 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Keyboard: `[`/`]` cycle active layer
 - Presets save/load all layers (locked layers skipped during load)
 - `MidiSystem::update_triggers_only()`: drains MIDI but skips CC→param when active layer is locked
+
+#### Effect Set
+8 curated audio-reactive effects designed for compositing across layers:
+
+1. **Aurora** (`aurora.wgsl`) — 7 frequency bands as horizontal flowing northern light curtains. Params: curtain_speed, band_spread, glow_width. No feedback.
+2. **Drift** (`drift.wgsl`) — Triple domain-warped FBM fluid smoke with advected feedback. Params: warp_intensity, flow_speed, color_mode, density. Uses `mix()` feedback blend (not `max()`) so darks reclaim space.
+3. **Tunnel** (`tunnel.wgsl`) — Log-polar infinite cylindrical flythrough with wall panels, checkerboard shading, and twist rotation. Params: twist_amount (centered at 0.5 = no twist), speed, tunnel_radius, segments. No feedback. IMPORTANT: speed must NOT be multiplied by audio (`t * varying_value` causes back-and-forth jitter).
+4. **Prism** (`prism.wgsl`) — Kaleidoscopic N-fold mirror symmetry over FBM + geometric patterns. Params: fold_count, rotation_speed, zoom, complexity + Bool toggles: sparkle, bass_pulse, beat_flash. No feedback.
+5. **Shards** (`shards.wgsl`) — Animated Voronoi cells with stained-glass fill and glowing fracture edges. Params: cell_scale, edge_glow, fill_amount, saturation (0=gray, 0.5=normal, 1.0=vivid). No feedback.
+6. **Pulse** (`pulse.wgsl`) — Beat-synced concentric rings expanding from center with feedback trails. Params: ring_count, expansion_speed, ring_width. Uses feedback.
+7. **Iris** (`feedback_test.wgsl`) — Spinning dot with fading feedback trails. Params: trail_length. Uses feedback.
+8. **Swarm** (`spectral_eye_bg.wgsl` + `spectral_eye_sim.wgsl`) — Orbital particle cloud with custom compute shader. Params: orbit_speed, trail_decay. Uses feedback + particles.
+
+**Bundled preset**: "Crucible" (`~/.config/phosphor/presets/Crucible.json`) — all 8 layers composited with tuned blend modes, opacities, and params.
+
+**Shader authoring notes**:
+- 16 params per effect (`array<vec4f, 4>`), accessed via `param(0u)` through `param(15u)`
+- Avoid `atan2` in palette/color calculations — causes visible seam at ±π (negative x-axis). Use radius, depth, or time instead.
+- For seamless angular patterns, use `sin(angle * N)` directly (wraps cleanly) or embed angle via `cos(a), sin(a)` for noise lookups.
+- For feedback effects: use `mix()` not `max()` to allow dark areas to reclaim; clamp output (`min(result, vec3f(1.2))`) to prevent blowout; keep decay ≤ 0.88.
+- Never multiply `time * audio_varying_value` for position/speed — causes oscillation. Use constant speed, apply audio to other properties.
 
 ### Known Issues
 - ~33 compiler warnings (mostly unused items reserved for future phases)

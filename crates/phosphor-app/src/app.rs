@@ -709,8 +709,8 @@ impl App {
                 self.uniforms.flatness,
                 &PostProcessDef::default(),
             );
-        } else if enabled_layers.len() == 1 {
-            // Single-layer fast path: skip compositing entirely
+        } else if enabled_layers.len() == 1 && self.layer_stack.layers[enabled_layers[0]].opacity >= 1.0 {
+            // Single-layer fast path: skip compositing entirely (only when fully opaque)
             let idx = enabled_layers[0];
             let final_target = self.layer_stack.layers[idx].execute(&mut encoder, &self.gpu.queue);
             let postprocess = self.current_postprocess();
