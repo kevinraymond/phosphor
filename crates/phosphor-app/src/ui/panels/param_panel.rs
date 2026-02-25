@@ -54,6 +54,17 @@ fn format_mapping_label(msg_type: MidiMsgType, cc: u8) -> String {
     }
 }
 
+/// Format a float value compactly: no trailing zeros, max 2 decimal places.
+fn fmt_val(v: f32) -> String {
+    if v == v.round() {
+        format!("{:.0}", v)
+    } else if (v * 10.0).round() == v * 10.0 {
+        format!("{:.1}", v)
+    } else {
+        format!("{:.2}", v)
+    }
+}
+
 pub fn draw_param_panel(ui: &mut Ui, store: &mut ParamStore, midi: &mut MidiSystem) {
     if store.defs.is_empty() {
         ui.label(RichText::new("No parameters").size(SMALL_SIZE).color(DARK_TEXT_SECONDARY));
@@ -76,16 +87,36 @@ pub fn draw_param_panel(ui: &mut Ui, store: &mut ParamStore, midi: &mut MidiSyst
                 };
                 let mut val = current;
 
-                // Single row: name + slider + MIDI badge
+                // Row 1: name (left) ... value + MIDI badge (right)
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(name).size(SMALL_SIZE).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        draw_midi_badge(ui, midi, name);
+                        ui.label(
+                            RichText::new(fmt_val(val))
+                                .size(SMALL_SIZE)
+                                .color(DARK_TEXT_SECONDARY),
+                        );
+                    });
+                });
+
+                // Row 2: min ... slider ... max
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.label(
+                        RichText::new(fmt_val(*min))
+                            .size(MONO_SIZE)
+                            .color(DARK_TEXT_SECONDARY),
+                    );
                     let slider = egui::Slider::new(&mut val, *min..=*max)
                         .clamping(egui::SliderClamping::Always)
                         .show_value(false);
                     ui.add(slider);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        draw_midi_badge(ui, midi, name);
-                    });
+                    ui.label(
+                        RichText::new(fmt_val(*max))
+                            .size(MONO_SIZE)
+                            .color(DARK_TEXT_SECONDARY),
+                    );
                 });
 
                 if val != current {
@@ -139,13 +170,24 @@ pub fn draw_param_panel(ui: &mut Ui, store: &mut ParamStore, midi: &mut MidiSyst
                 };
                 let mut val = current;
 
-                ui.label(RichText::new(name).size(SMALL_SIZE));
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("X").size(SMALL_SIZE));
+                    ui.label(RichText::new(name).size(SMALL_SIZE).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(format!("{}, {}", fmt_val(val[0]), fmt_val(val[1])))
+                                .size(SMALL_SIZE)
+                                .color(DARK_TEXT_SECONDARY),
+                        );
+                    });
+                });
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.label(RichText::new("X").size(MONO_SIZE).color(DARK_TEXT_SECONDARY));
                     ui.add(egui::Slider::new(&mut val[0], min[0]..=max[0]).show_value(false));
                 });
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Y").size(SMALL_SIZE));
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.label(RichText::new("Y").size(MONO_SIZE).color(DARK_TEXT_SECONDARY));
                     ui.add(egui::Slider::new(&mut val[1], min[1]..=max[1]).show_value(false));
                 });
 
