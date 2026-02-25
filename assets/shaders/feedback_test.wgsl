@@ -17,7 +17,8 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
 
     // Spinning dot
     let speed = 1.5 + u.bass * 2.0;
-    let radius = 0.2 + u.mid * 0.15;
+    let base_radius = param(1u) * 0.55 + 0.05;  // maps 0-1 → 0.05-0.6
+    let radius = base_radius + u.mid * 0.15;
     let dot_pos = vec2f(cos(t * speed), sin(t * speed)) * radius;
     let dist = length(centered - dot_pos);
 
