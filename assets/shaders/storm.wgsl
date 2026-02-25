@@ -21,7 +21,7 @@ fn storm_worley(p: vec2f) -> f32 {
             res += exp(-k * dot(diff, diff));
         }
     }
-    return sqrt(-(1.0 / k) * log(res));
+    return sqrt(max(0.0, -(1.0 / k) * log(res)));
 }
 
 fn storm_hash2v(p: vec2f) -> vec2f {
