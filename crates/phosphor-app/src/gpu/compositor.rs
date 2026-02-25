@@ -29,7 +29,7 @@ pub struct Compositor {
     blit_pipeline: RenderPipeline,
     composite_bgl: BindGroupLayout,
     blit_bgl: BindGroupLayout,
-    uniform_buffer: wgpu::Buffer,
+    uniform_buffers: Vec<wgpu::Buffer>,
     /// Ping-pong accumulator for sequential compositing.
     pub accumulator: PingPongTarget,
 }
@@ -73,12 +73,17 @@ impl Compositor {
             hdr_format,
         );
 
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("compositor-uniforms"),
-            size: std::mem::size_of::<CompositeUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        // One uniform buffer per composite pass (max 8: 1 for first-layer opacity + 7 for layers[1..])
+        let uniform_buffers: Vec<wgpu::Buffer> = (0..8)
+            .map(|i| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(&format!("compositor-uniforms-{i}")),
+                    size: std::mem::size_of::<CompositeUniforms>() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+            })
+            .collect();
 
         let accumulator = PingPongTarget::new(device, width, height, hdr_format, 1.0);
 
@@ -87,7 +92,7 @@ impl Compositor {
             blit_pipeline,
             composite_bgl,
             blit_bgl,
-            uniform_buffer,
+            uniform_buffers,
             accumulator,
         }
     }
@@ -105,44 +110,115 @@ impl Compositor {
     ) -> &'a RenderTarget {
         assert!(!layers.is_empty());
 
-        // Blit first layer to accumulator write target
-        let (first, _, _) = layers[0];
-        let blit_bg = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("compositor-blit-bg"),
-            layout: &self.blit_bgl,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(&first.view),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(&first.sampler),
-                },
-            ],
-        });
-        run_fullscreen_pass(
-            encoder,
-            "compositor-blit",
-            &self.blit_pipeline,
-            &blit_bg,
-            &self.accumulator.write_target().view,
-        );
+        let (first, _, first_opacity) = layers[0];
+
+        // Handle first layer: blit if fully opaque, composite against black if not
+        if first_opacity < 1.0 {
+            // Composite first layer against cleared-to-black accumulator to apply opacity.
+            // run_fullscreen_pass clears to black, so bg is black and fg is the first layer.
+            let uniforms = CompositeUniforms {
+                blend_mode: BlendMode::Normal.as_u32(),
+                opacity: first_opacity,
+                _pad0: 0.0,
+                _pad1: 0.0,
+            };
+            queue.write_buffer(&self.uniform_buffers[0], 0, bytemuck::bytes_of(&uniforms));
+
+            // We need a black background. Use the other accumulator target (cleared to black).
+            let write_idx = self.accumulator.current;
+            let bg_idx = 1 - write_idx;
+            // Clear the bg target by running a blit-like pass (it will be cleared by LoadOp::Clear)
+            // Actually, just use the composite pass — bg will be the cleared target.
+            // We need to clear bg_idx first. Run a dummy clear by beginning+ending a pass.
+            {
+                let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("compositor-clear-bg"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.accumulator.targets[bg_idx].view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+            }
+
+            let composite_bg = device.create_bind_group(&BindGroupDescriptor {
+                label: Some("compositor-first-layer-bg"),
+                layout: &self.composite_bgl,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: BindingResource::TextureView(&self.accumulator.targets[bg_idx].view),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::Sampler(&self.accumulator.targets[bg_idx].sampler),
+                    },
+                    BindGroupEntry {
+                        binding: 2,
+                        resource: BindingResource::TextureView(&first.view),
+                    },
+                    BindGroupEntry {
+                        binding: 3,
+                        resource: BindingResource::Sampler(&first.sampler),
+                    },
+                    BindGroupEntry {
+                        binding: 4,
+                        resource: self.uniform_buffers[0].as_entire_binding(),
+                    },
+                ],
+            });
+
+            run_fullscreen_pass(
+                encoder,
+                "compositor-first-opacity",
+                &self.composite_pipeline,
+                &composite_bg,
+                &self.accumulator.targets[write_idx].view,
+            );
+        } else {
+            // Fast path: blit first layer directly (opacity == 1.0)
+            let blit_bg = device.create_bind_group(&BindGroupDescriptor {
+                label: Some("compositor-blit-bg"),
+                layout: &self.blit_bgl,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: BindingResource::TextureView(&first.view),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::Sampler(&first.sampler),
+                    },
+                ],
+            });
+            run_fullscreen_pass(
+                encoder,
+                "compositor-blit",
+                &self.blit_pipeline,
+                &blit_bg,
+                &self.accumulator.write_target().view,
+            );
+        }
 
         if layers.len() == 1 {
             return self.accumulator.write_target();
         }
 
-        // Composite subsequent layers
-        // After blit, the result is in write_target. We need to flip so it becomes read_target.
-        // But we can't mutate self here. Instead, we'll use a tracking variable.
-        // Since accumulator is ping-pong, we alternate: after blit to write(current),
-        // we need to read from write(current) and write to read(current) = targets[1-current].
-        // We track this manually without flipping.
-        let mut read_idx = self.accumulator.current; // what we just wrote to
+        // Composite subsequent layers using per-pass uniform buffers.
+        // After first layer handling, result is in write_target (accumulator.current).
+        let mut read_idx = self.accumulator.current;
 
-        for &(fg, blend_mode, opacity) in &layers[1..] {
+        for (pass_idx, &(fg, blend_mode, opacity)) in layers[1..].iter().enumerate() {
             let write_idx = 1 - read_idx;
+            // Use buffer [pass_idx + 1] since buffer [0] may be used for first layer opacity
+            let buf_idx = pass_idx + 1;
 
             let uniforms = CompositeUniforms {
                 blend_mode: blend_mode.as_u32(),
@@ -150,7 +226,7 @@ impl Compositor {
                 _pad0: 0.0,
                 _pad1: 0.0,
             };
-            queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+            queue.write_buffer(&self.uniform_buffers[buf_idx], 0, bytemuck::bytes_of(&uniforms));
 
             let bg_target = &self.accumulator.targets[read_idx];
             let write_target = &self.accumulator.targets[write_idx];
@@ -177,7 +253,7 @@ impl Compositor {
                     },
                     BindGroupEntry {
                         binding: 4,
-                        resource: self.uniform_buffer.as_entire_binding(),
+                        resource: self.uniform_buffers[buf_idx].as_entire_binding(),
                     },
                 ],
             });
