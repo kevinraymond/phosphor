@@ -42,6 +42,8 @@ pub fn draw_status_bar(
     midi_recently_active: bool,
     osc_enabled: bool,
     osc_recently_active: bool,
+    web_enabled: bool,
+    web_client_count: usize,
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
@@ -72,6 +74,13 @@ pub fn draw_status_bar(
             label(ui, "FPS");
 
             ui.add_space(6.0);
+
+            // Web
+            if web_enabled {
+                dot(ui, web_client_count > 0, Color32::from_rgb(0x50, 0x90, 0xE0));
+                label(ui, "WEB");
+                ui.add_space(6.0);
+            }
 
             // OSC
             if osc_enabled {

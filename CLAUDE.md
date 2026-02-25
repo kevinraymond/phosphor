@@ -13,6 +13,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 **Preset Save/Load: COMPLETE** — multi-layer presets with effect + params + postprocess, MIDI next/prev
 **Layer Composition: COMPLETE** — up to 8 layers with blend modes, opacity, lock/pin, drag-and-drop reorder, GPU compositing
 **OSC Input/Output: COMPLETE** — rosc UDP, RX on port 9000, TX opt-in on 9001, OSC learn, config persistence
+**Web Control Surface: COMPLETE** — tungstenite WebSocket server, embedded HTML touch UI, bidirectional JSON state sync, multi-client
 
 ### What's Built
 
@@ -93,6 +94,23 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Config persists to `~/.config/phosphor/osc.json` (JSON via `dirs` crate)
 - UI: OSC panel in left sidebar (enable toggle, RX/TX port config, activity dot, trigger learn), per-param OSC badges in right panel, OSC status dot in status bar
 
+#### Web Control Surface
+- tungstenite 0.28 sync WebSocket server on configurable port (default 9002)
+- Same-port HTTP+WS: TcpListener accept loop, detect `Upgrade: websocket` header, serve HTML or upgrade
+- Embedded single-file HTML/CSS/JS touch control surface via `include_str!` (debug mode reads from filesystem for hot-reload)
+- Thread-per-client architecture: accept thread + per-client read/write threads (50ms read timeout for interleaved I/O)
+- Bidirectional JSON state sync: full state snapshot on connect, params/layers/effects/presets
+- Audio features broadcast at 10Hz to all connected clients
+- Multiple simultaneous clients supported (Vec<Sender<String>> with pruning)
+- Client → Server: set_param, set_layer_param, load_effect, select_layer, set_layer_opacity/blend/enabled, trigger, load_preset, set_postprocess_enabled
+- Server → Client: state (full snapshot), audio (10Hz), param_changed, layer_changed, active_layer, effect_loaded, presets
+- Mobile-first touch UI: dark theme, 48px min touch targets, 7-band audio bars, effect grid, auto-generated param sliders, layer cards, preset list, trigger buttons
+- Auto-reconnect with exponential backoff (1/2/4/8s), throttled sends (~30Hz)
+- egui panel: enable toggle, port config, URL display (localhost + LAN IP), client count, activity dot
+- Config persists to `~/.config/phosphor/web.json`
+- Coexists with MIDI/OSC: last-write-wins (web drain runs after OSC)
+- Web status dot in status bar (blue when clients connected)
+
 #### Preset Save/Load
 - `PresetStore`: scan/save/load/delete presets from `~/.config/phosphor/presets/*.json`
 - `Preset` struct: version, layers (Vec<LayerPreset>), active_layer, postprocess (PostProcessDef)
@@ -160,10 +178,12 @@ Main Thread: winit event loop → drain audio/midi/osc/shader channels → updat
 Audio Thread: cpal callback → ring buffer → multi-res FFT → adaptive normalize → beat detect → smooth → send AudioFeatures
 MIDI Thread: midir callback → parse 3-byte MIDI → send MidiMessage via crossbeam bounded(64)
 OSC Thread: UdpSocket recv → rosc decode → send OscInMessage via crossbeam bounded(64)
+Web Accept Thread: TcpListener → HTTP serve or WS upgrade → spawn client thread
+Web Client Thread(s): 50ms read timeout → parse JSON → WsInMessage via crossbeam bounded(64); drain outbound broadcast channel
 File Watcher Thread: notify → debounce → send changed paths
 ```
 
-No mutexes in hot path. Four threads + cpal callback + midir callback.
+No mutexes in hot path (web uses Arc<Mutex> only for client list + latest state, not per-frame). Five+ threads + cpal callback + midir callback.
 
 ### Render Pipeline
 ```
@@ -205,6 +225,9 @@ egui Overlay → Surface
 - Compositor uses ping-pong accumulator: blit first layer, then composite(accumulator.read, layer[i]) → accumulator.write for each subsequent layer, tracking read/write indices manually without flipping.
 - rosc 0.11: pure Rust OSC. `decode_udp` returns `(usize, OscPacket)`. Bundles recursively flattened. `UdpSocket` with 100ms read timeout for clean shutdown.
 - OSC coexists with MIDI: last-write-wins per frame. OSC drain runs after MIDI drain in `App::update()`.
+- Web coexists with MIDI/OSC: last-write-wins. Web drain runs after OSC drain. Order: MIDI → OSC → Web.
+- tungstenite 0.28: `Message::text()` constructor (not `Message::Text(String)`), text payload is `Utf8Bytes` not `String`. Client handler is generic over `S: Read + Write` for `ReplayStream` wrapper.
+- Web same-port HTTP+WS: `ReplayStream` wrapper replays already-read request bytes then delegates to `TcpStream`. Avoids needing separate HTTP server.
 - OSC TX uses fire-and-forget nonblocking UDP. Rate limited by `Instant` comparison (default 30Hz). Sends ~15 messages per frame.
 
 ### Controls
@@ -238,3 +261,4 @@ The complete 28-week, 4-phase plan is at `~/ai/audio/phosphor-internal/cross-pla
 5. ~~Preset save/load~~ ✓
 6. ~~Layer-based composition with blend modes~~ ✓
 7. ~~OSC input/output~~ ✓
+8. ~~Web control surface~~ ✓ (WebSocket server + embedded touch UI)

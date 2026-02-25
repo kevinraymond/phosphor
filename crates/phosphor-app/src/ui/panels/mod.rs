@@ -6,6 +6,7 @@ pub mod osc_panel;
 pub mod param_panel;
 pub mod preset_panel;
 pub mod status_bar;
+pub mod web_panel;
 
 use egui::{Context, Frame, Margin, ScrollArea};
 
@@ -17,6 +18,7 @@ use crate::midi::MidiSystem;
 use crate::osc::OscSystem;
 use crate::params::ParamStore;
 use crate::preset::PresetStore;
+use crate::web::WebSystem;
 use crate::ui::theme::tokens::*;
 use crate::ui::widgets;
 
@@ -33,6 +35,7 @@ pub fn draw_panels(
     particle_count: Option<u32>,
     midi: &mut MidiSystem,
     osc: &mut OscSystem,
+    web: &mut WebSystem,
     preset_store: &PresetStore,
     layers: &[LayerInfo],
     active_layer: usize,
@@ -55,6 +58,8 @@ pub fn draw_panels(
             midi_recently_active,
             osc.config.enabled,
             osc.is_recently_active(),
+            web.config.enabled,
+            web.client_count,
         );
     });
 
@@ -164,6 +169,25 @@ pub fn draw_panels(
                     false,
                     |ui| {
                         osc_panel::draw_osc_panel(ui, osc);
+                    },
+                );
+
+                // Web section (default collapsed)
+                let web_badge = if !web.config.enabled {
+                    Some("OFF")
+                } else if web.client_count > 0 {
+                    Some("ON")
+                } else {
+                    None
+                };
+                widgets::section(
+                    ui,
+                    "sec_web",
+                    "Web",
+                    web_badge,
+                    false,
+                    |ui| {
+                        web_panel::draw_web_panel(ui, web);
                     },
                 );
             });

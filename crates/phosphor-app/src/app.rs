@@ -8,7 +8,7 @@ use crate::audio::AudioSystem;
 use crate::effect::format::PostProcessDef;
 use crate::effect::EffectLoader;
 use crate::gpu::compositor::Compositor;
-use crate::gpu::layer::{BlendMode, Layer, LayerInfo, LayerStack};
+use crate::gpu::layer::{BlendMode, EffectLayer, Layer, LayerContent, LayerInfo, LayerStack};
 use crate::gpu::particle::ParticleSystem;
 use crate::gpu::pass_executor::PassExecutor;
 use crate::gpu::placeholder::PlaceholderTexture;
@@ -19,6 +19,7 @@ use crate::midi::types::TriggerAction;
 use crate::midi::MidiSystem;
 use crate::osc::OscSystem;
 use crate::params::{ParamStore, ParamValue};
+use crate::web::WebSystem;
 use crate::preset::store::LayerPreset;
 use crate::preset::PresetStore;
 use crate::shader::ShaderWatcher;
@@ -41,6 +42,9 @@ pub struct App {
     pub osc: OscSystem,
     pub pending_osc_triggers: Vec<TriggerAction>,
     pub latest_audio: Option<crate::audio::features::AudioFeatures>,
+    // Web (WebSocket control surface)
+    pub web: WebSystem,
+    pub pending_web_triggers: Vec<TriggerAction>,
     // Presets
     pub preset_store: PresetStore,
     // Layers
@@ -122,23 +126,18 @@ impl App {
             &placeholder,
         );
 
-        let initial_layer = Layer {
-            name: "Layer 1".to_string(),
-            custom_name: None,
-            effect_index,
-            pass_executor,
-            uniform_buffer,
+        let initial_layer = Layer::new_effect(
+            "Layer 1".to_string(),
+            EffectLayer {
+                pass_executor,
+                uniform_buffer,
+                uniforms: ShaderUniforms::zeroed(),
+                effect_index,
+                shader_sources: vec![shader_source],
+                shader_error: None,
+            },
             param_store,
-            uniforms: ShaderUniforms::zeroed(),
-            blend_mode: BlendMode::Normal,
-            opacity: 1.0,
-            enabled: true,
-            locked: false,
-            pinned: false,
-            shader_sources: vec![shader_source],
-            shader_error: None,
-            postprocess: PostProcessDef::default(),
-        };
+        );
 
         let mut layer_stack = LayerStack::new();
         layer_stack.layers.push(initial_layer);
@@ -164,6 +163,7 @@ impl App {
         let audio = AudioSystem::new();
         let midi = MidiSystem::new();
         let osc = OscSystem::new();
+        let web = WebSystem::new();
         let mut preset_store = PresetStore::new();
         preset_store.scan();
         let egui_overlay = EguiOverlay::new(&gpu.device, gpu.format, &window);
@@ -182,6 +182,8 @@ impl App {
             osc,
             pending_osc_triggers: Vec::new(),
             latest_audio: None,
+            web,
+            pending_web_triggers: Vec::new(),
             preset_store,
             egui_overlay,
             effect_loader,
@@ -326,42 +328,171 @@ impl App {
             }
         }
 
+        // Drain WebSocket messages (runs after OSC — last-write-wins)
+        if let Some(layer) = self.layer_stack.active_mut() {
+            let locked = layer.locked;
+            let defs = layer.param_store.defs.clone();
+            let web_result = if locked {
+                self.web.update_triggers_only()
+            } else {
+                self.web.update(&mut layer.param_store, &defs)
+            };
+            self.pending_web_triggers = web_result.triggers;
+
+            // Apply layer-targeted WS messages
+            for (layer_idx, name, value) in web_result.layer_params {
+                if let Some(target_layer) = self.layer_stack.layers.get_mut(layer_idx) {
+                    if !target_layer.locked {
+                        if let Some(def) = target_layer.param_store.defs.iter().find(|d| d.name() == name) {
+                            match def.clone() {
+                                crate::params::ParamDef::Float { min, max, .. } => {
+                                    let val = min + (max - min) * value.clamp(0.0, 1.0);
+                                    target_layer.param_store.set(&name, ParamValue::Float(val));
+                                }
+                                crate::params::ParamDef::Bool { .. } => {
+                                    target_layer.param_store.set(&name, ParamValue::Bool(value > 0.5));
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+            for (layer_idx, value) in web_result.layer_opacity {
+                if let Some(target_layer) = self.layer_stack.layers.get_mut(layer_idx) {
+                    if !target_layer.locked {
+                        target_layer.opacity = value;
+                    }
+                }
+            }
+            for (layer_idx, value) in web_result.layer_blend {
+                if let Some(target_layer) = self.layer_stack.layers.get_mut(layer_idx) {
+                    if !target_layer.locked {
+                        use crate::gpu::layer::BlendMode;
+                        target_layer.blend_mode = match value {
+                            0 => BlendMode::Normal,
+                            1 => BlendMode::Add,
+                            2 => BlendMode::Multiply,
+                            3 => BlendMode::Screen,
+                            4 => BlendMode::Overlay,
+                            5 => BlendMode::SoftLight,
+                            6 => BlendMode::Difference,
+                            _ => BlendMode::Normal,
+                        };
+                    }
+                }
+            }
+            for (layer_idx, value) in web_result.layer_enabled {
+                if let Some(target_layer) = self.layer_stack.layers.get_mut(layer_idx) {
+                    if !target_layer.locked {
+                        target_layer.enabled = value;
+                    }
+                }
+            }
+            if let Some(pp_enabled) = web_result.postprocess_enabled {
+                self.post_process.enabled = pp_enabled;
+            }
+
+            // Handle effect loads from web
+            for effect_idx in web_result.effect_loads {
+                let active_locked = self.layer_stack.active().map_or(false, |l| l.locked);
+                if !active_locked {
+                    self.load_effect(effect_idx);
+                }
+            }
+
+            // Handle layer selection from web
+            if let Some(idx) = web_result.select_layer {
+                if idx < self.layer_stack.layers.len() {
+                    self.layer_stack.active_layer = idx;
+                    self.sync_active_layer();
+                    let msg = crate::web::state::build_active_layer_changed(idx);
+                    self.web.broadcast_json(&msg);
+                }
+            }
+
+            // Handle preset loads from web
+            let had_preset_loads = !web_result.preset_loads.is_empty();
+            for preset_idx in web_result.preset_loads {
+                self.load_preset(preset_idx);
+            }
+
+            // After preset load, broadcast full state so all clients update
+            if had_preset_loads && self.web.client_count > 0 {
+                let layer_infos = self.layer_stack.layer_infos(&self.effect_loader.effects);
+                let layer_data: Vec<_> = self.layer_stack.layers.iter().map(|l| {
+                    (&l.param_store, l.effect_index(), l.blend_mode, l.opacity, l.enabled, l.locked)
+                }).collect();
+                let state_json = crate::web::state::build_full_state(
+                    &self.effect_loader.effects,
+                    &layer_infos,
+                    self.layer_stack.active_layer,
+                    &layer_data,
+                    &self.preset_store,
+                    self.post_process.enabled,
+                );
+                self.web.broadcast_json(&state_json);
+            }
+        }
+
         // OSC TX: send audio features + state (throttled internally)
         if let Some(features) = self.latest_audio {
             let active = self.layer_stack.active_layer;
             let effect_name = self.layer_stack.active()
-                .and_then(|l| l.effect_index)
+                .and_then(|l| l.effect_index())
                 .and_then(|i| self.effect_loader.effects.get(i))
                 .map(|e| e.name.as_str())
                 .unwrap_or("");
             self.osc.send_state(&features, active, effect_name);
+
+            // Web: broadcast audio at 10Hz
+            self.web.broadcast_audio(&features);
+        }
+
+        // Web: update latest state for new client initial sync
+        if self.web.client_count > 0 || self.web.is_running() {
+            let layer_infos = self.layer_stack.layer_infos(&self.effect_loader.effects);
+            let layer_data: Vec<_> = self.layer_stack.layers.iter().map(|l| {
+                (&l.param_store, l.effect_index(), l.blend_mode, l.opacity, l.enabled, l.locked)
+            }).collect();
+            let state_json = crate::web::state::build_full_state(
+                &self.effect_loader.effects,
+                &layer_infos,
+                self.layer_stack.active_layer,
+                &layer_data,
+                &self.preset_store,
+                self.post_process.enabled,
+            );
+            self.web.update_latest_state(&state_json);
         }
 
         // Update each layer's uniforms from global template + per-layer params
         for layer in &mut self.layer_stack.layers {
-            layer.uniforms = self.uniforms;
-            layer.uniforms.params = layer.param_store.pack_to_buffer();
+            if let LayerContent::Effect(ref mut e) = layer.content {
+                e.uniforms = self.uniforms;
+                e.uniforms.params = layer.param_store.pack_to_buffer();
 
-            // Update particle systems
-            if let Some(ref mut ps) = layer.pass_executor.particle_system {
-                ps.update_uniforms(
-                    dt,
-                    self.uniforms.time,
-                    self.uniforms.resolution,
-                    self.uniforms.beat,
-                );
-                ps.update_audio(
-                    self.uniforms.sub_bass,
-                    self.uniforms.bass,
-                    self.uniforms.mid,
-                    self.uniforms.rms,
-                    self.uniforms.kick,
-                    self.uniforms.onset,
-                    self.uniforms.centroid,
-                    self.uniforms.flux,
-                    self.uniforms.beat,
-                    self.uniforms.beat_phase,
-                );
+                // Update particle systems
+                if let Some(ref mut ps) = e.pass_executor.particle_system {
+                    ps.update_uniforms(
+                        dt,
+                        self.uniforms.time,
+                        self.uniforms.resolution,
+                        self.uniforms.beat,
+                    );
+                    ps.update_audio(
+                        self.uniforms.sub_bass,
+                        self.uniforms.bass,
+                        self.uniforms.mid,
+                        self.uniforms.rms,
+                        self.uniforms.kick,
+                        self.uniforms.onset,
+                        self.uniforms.centroid,
+                        self.uniforms.flux,
+                        self.uniforms.beat,
+                        self.uniforms.beat_phase,
+                    );
+                }
             }
         }
 
@@ -372,7 +503,8 @@ impl App {
             let hdr_format = GpuContext::hdr_format();
 
             for layer in &mut self.layer_stack.layers {
-                let effect_idx = match layer.effect_index {
+                let LayerContent::Effect(ref mut e) = layer.content else { continue };
+                let effect_idx = match e.effect_index {
                     Some(idx) => idx,
                     None => continue,
                 };
@@ -391,37 +523,37 @@ impl App {
                     }
                     match self.effect_loader.load_effect_source(&pass_def.shader) {
                         Ok(source) => {
-                            let changed = layer
+                            let changed = e
                                 .shader_sources
                                 .get(i)
                                 .map_or(true, |prev| *prev != source);
                             if changed {
                                 log::info!("Shader changed: pass {} ({})", i, pass_def.shader);
-                                match layer.pass_executor.recompile_pass(
+                                match e.pass_executor.recompile_pass(
                                     i,
                                     &self.gpu.device,
                                     hdr_format,
                                     &source,
-                                    &layer.uniform_buffer,
+                                    &e.uniform_buffer,
                                     &self.placeholder,
                                 ) {
                                     Ok(()) => {
-                                        if i < layer.shader_sources.len() {
-                                            layer.shader_sources[i] = source;
+                                        if i < e.shader_sources.len() {
+                                            e.shader_sources[i] = source;
                                         }
-                                        layer.shader_error = None;
+                                        e.shader_error = None;
                                         log::info!("Pass {} recompiled successfully", i);
                                     }
-                                    Err(e) => {
-                                        log::error!("Pass {} compilation failed: {e}", i);
-                                        layer.shader_error = Some(e);
+                                    Err(err) => {
+                                        log::error!("Pass {} compilation failed: {err}", i);
+                                        e.shader_error = Some(err);
                                     }
                                 }
                             }
                         }
-                        Err(e) => {
-                            log::error!("Failed to reload shader for pass {}: {e}", i);
-                            layer.shader_error = Some(format!("Read error: {e}"));
+                        Err(err) => {
+                            log::error!("Failed to reload shader for pass {}: {err}", i);
+                            e.shader_error = Some(format!("Read error: {err}"));
                         }
                     }
                 }
@@ -433,7 +565,7 @@ impl App {
                             .iter()
                             .any(|p| p.ends_with(&particle_def.compute_shader));
                         if compute_relevant {
-                            if let Some(ref mut ps) = layer.pass_executor.particle_system {
+                            if let Some(ref mut ps) = e.pass_executor.particle_system {
                                 match self
                                     .effect_loader
                                     .load_compute_source(&particle_def.compute_shader)
@@ -466,8 +598,12 @@ impl App {
         particles: &crate::gpu::particle::types::ParticleDef,
     ) -> Option<ParticleSystem> {
         let hdr_format = GpuContext::hdr_format();
+        let is_image_emitter = particles.emitter.shape == "image";
 
-        let compute_source = if particles.compute_shader.is_empty() {
+        // For image emitters, use the builtin image_scatter compute shader
+        let compute_source = if is_image_emitter && particles.compute_shader.is_empty() {
+            include_str!("../../../assets/shaders/builtin/image_scatter.wgsl").to_string()
+        } else if particles.compute_shader.is_empty() {
             include_str!("../../../assets/shaders/builtin/particle_sim.wgsl").to_string()
         } else {
             match self.effect_loader.load_compute_source(&particles.compute_shader) {
@@ -482,9 +618,65 @@ impl App {
             }
         };
 
-        match ParticleSystem::new(&self.gpu.device, hdr_format, particles, &compute_source) {
-            Ok(ps) => {
+        match ParticleSystem::new(&self.gpu.device, &self.gpu.queue, hdr_format, particles, &compute_source) {
+            Ok(mut ps) => {
                 log::info!("Particle system created: {} particles", particles.max_count);
+
+                // Load image data for image emitters
+                if is_image_emitter && !particles.emitter.image.is_empty() {
+                    let sample_def = particles.image_sample.clone().unwrap_or(
+                        crate::gpu::particle::types::ImageSampleDef {
+                            mode: "grid".to_string(),
+                            threshold: 0.1,
+                            scale: 1.0,
+                        },
+                    );
+                    let image_path =
+                        std::path::Path::new("assets/images").join(&particles.emitter.image);
+                    match crate::gpu::particle::image_source::sample_image(
+                        &image_path,
+                        &sample_def,
+                        particles.max_count,
+                    ) {
+                        Ok(aux_data) => {
+                            ps.upload_aux_data(&self.gpu.device, &self.gpu.queue, &aux_data);
+                            log::info!(
+                                "Loaded image '{}': {} particles",
+                                particles.emitter.image,
+                                aux_data.len()
+                            );
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to load image '{}': {e}",
+                                particles.emitter.image
+                            );
+                        }
+                    }
+                }
+
+                // Load sprite texture if defined
+                if let Some(ref sprite_def) = particles.sprite {
+                    let sprite_path = std::path::Path::new("assets/images").join(&sprite_def.texture);
+                    match crate::gpu::particle::sprite::SpriteAtlas::load_with_def(
+                        &self.gpu.device,
+                        &self.gpu.queue,
+                        &sprite_path,
+                        sprite_def.cols,
+                        sprite_def.rows,
+                        sprite_def.animated,
+                        sprite_def.frames,
+                    ) {
+                        Ok(atlas) => {
+                            ps.set_sprite(&self.gpu.device, atlas);
+                            log::info!("Loaded sprite atlas: {}", sprite_def.texture);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to load sprite '{}': {e}", sprite_def.texture);
+                        }
+                    }
+                }
+
                 Some(ps)
             }
             Err(e) => {
@@ -523,8 +715,8 @@ impl App {
             .and_then(|pd| self.build_particle_system(pd));
 
         // Need the layer's uniform buffer reference for PassExecutor::new.
-        // Use a temporary reference scope.
-        let uniform_buffer_ref = &self.layer_stack.layers[layer_idx].uniform_buffer;
+        let LayerContent::Effect(ref eff) = self.layer_stack.layers[layer_idx].content;
+        let uniform_buffer_ref = &eff.uniform_buffer;
         let executor_result = PassExecutor::new(
             &self.gpu.device,
             hdr_format,
@@ -541,10 +733,11 @@ impl App {
                 executor.particle_system = particle_system;
 
                 let layer = &mut self.layer_stack.layers[layer_idx];
-                layer.pass_executor = executor;
+                let LayerContent::Effect(ref mut e) = layer.content;
+                e.pass_executor = executor;
                 layer.param_store.load_from_defs(&effect.inputs);
-                layer.shader_error = None;
-                layer.effect_index = Some(effect_index);
+                e.shader_error = None;
+                e.effect_index = Some(effect_index);
                 // Apply per-effect postprocess overrides
                 let pp = effect.postprocess.clone().unwrap_or_default();
                 layer.postprocess = pp.clone();
@@ -554,7 +747,7 @@ impl App {
                     self.effect_loader.current_effect = Some(effect_index);
                 }
                 // Track shader sources for hot-reload
-                layer.shader_sources = passes
+                e.shader_sources = passes
                     .iter()
                     .filter_map(|p| self.effect_loader.load_effect_source(&p.shader).ok())
                     .collect();
@@ -569,8 +762,9 @@ impl App {
             }
             Err(e) => {
                 log::error!("Failed to load effect '{}': {e}", effect.name);
-                self.layer_stack.layers[layer_idx].shader_error =
-                    Some(format!("Load error: {e}"));
+                if let LayerContent::Effect(ref mut eff) = self.layer_stack.layers[layer_idx].content {
+                    eff.shader_error = Some(format!("Load error: {e}"));
+                }
             }
         }
     }
@@ -607,23 +801,18 @@ impl App {
                     &self.placeholder,
                 );
 
-                self.layer_stack.layers.push(Layer {
+                self.layer_stack.layers.push(Layer::new_effect(
                     name,
-                    custom_name: None,
-                    effect_index: None,
-                    pass_executor: executor,
-                    uniform_buffer,
-                    param_store: ParamStore::new(),
-                    uniforms: ShaderUniforms::zeroed(),
-                    blend_mode: BlendMode::Normal,
-                    opacity: 1.0,
-                    enabled: true,
-                    locked: false,
-                    pinned: false,
-                    shader_sources: vec![source],
-                    shader_error: None,
-                    postprocess: PostProcessDef::default(),
-                });
+                    EffectLayer {
+                        pass_executor: executor,
+                        uniform_buffer,
+                        uniforms: ShaderUniforms::zeroed(),
+                        effect_index: None,
+                        shader_sources: vec![source],
+                        shader_error: None,
+                    },
+                    ParamStore::new(),
+                ));
                 // Select the new layer
                 self.layer_stack.active_layer = self.layer_stack.layers.len() - 1;
                 log::info!("Added layer {}", self.layer_stack.layers.len());
@@ -644,7 +833,7 @@ impl App {
     /// Sync effect_loader.current_effect to match active layer.
     pub fn sync_active_layer(&mut self) {
         if let Some(layer) = self.layer_stack.active() {
-            self.effect_loader.current_effect = layer.effect_index;
+            self.effect_loader.current_effect = layer.effect_index();
         }
     }
 
@@ -655,7 +844,7 @@ impl App {
             .iter()
             .map(|l| {
                 let effect_name = l
-                    .effect_index
+                    .effect_index()
                     .and_then(|i| self.effect_loader.effects.get(i))
                     .map(|e| e.name.clone())
                     .unwrap_or_default();

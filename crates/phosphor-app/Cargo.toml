@@ -43,3 +43,11 @@ midir = "0.10"
 rosc = "0.11"
 # XDG config paths
 dirs = "6"
+# WebSocket server
+tungstenite = "0.28"
+# Image loading (particle sprites, media layers)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
+# Native file dialogs
+rfd = "0.15"
+# Linear algebra (camera, projection)
+glam = "0.29"
