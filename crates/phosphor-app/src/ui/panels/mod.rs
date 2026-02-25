@@ -5,7 +5,7 @@ pub mod param_panel;
 pub mod preset_panel;
 pub mod status_bar;
 
-use egui::Context;
+use egui::{Context, Frame, Margin, ScrollArea};
 
 use crate::audio::AudioSystem;
 use crate::effect::EffectLoader;
@@ -13,6 +13,8 @@ use crate::gpu::ShaderUniforms;
 use crate::midi::MidiSystem;
 use crate::params::ParamStore;
 use crate::preset::PresetStore;
+use crate::ui::theme::tokens::*;
+use crate::ui::widgets;
 
 /// Draw all UI panels when overlay is visible.
 pub fn draw_panels(
@@ -47,40 +49,113 @@ pub fn draw_panels(
         );
     });
 
+    let panel_frame = Frame {
+        fill: DARK_PANEL,
+        inner_margin: Margin::same(6),
+        ..Default::default()
+    };
+
     egui::SidePanel::left("left_panel")
-        .default_width(280.0)
-        .max_width(320.0)
+        .default_width(260.0)
+        .max_width(300.0)
+        .frame(panel_frame)
         .show(ctx, |ui| {
-            ui.heading("Audio");
-            ui.separator();
-            audio_panel::draw_audio_panel(ui, audio, uniforms);
+            ScrollArea::vertical().show(ui, |ui| {
+                // Audio section
+                let bpm = uniforms.bpm * 300.0;
+                let bpm_badge = if bpm > 1.0 {
+                    Some(format!("{:.0}", bpm))
+                } else {
+                    None
+                };
+                widgets::section(
+                    ui,
+                    "sec_audio",
+                    "Audio",
+                    bpm_badge.as_deref(),
+                    true,
+                    |ui| {
+                        audio_panel::draw_audio_panel(ui, audio, uniforms);
+                    },
+                );
 
-            ui.add_space(16.0);
-            ui.heading("Effects");
-            ui.separator();
-            effect_panel::draw_effect_panel(ui, effect_loader);
+                // Effects section
+                let fx_badge = format!("{}", effect_loader.effects.len());
+                widgets::section(
+                    ui,
+                    "sec_effects",
+                    "Effects",
+                    Some(&fx_badge),
+                    true,
+                    |ui| {
+                        effect_panel::draw_effect_panel(ui, effect_loader);
+                    },
+                );
 
-            ui.add_space(16.0);
-            ui.heading("Presets");
-            ui.separator();
-            preset_panel::draw_preset_panel(ui, preset_store);
+                // Presets section
+                let preset_badge = if preset_store.presets.is_empty() {
+                    None
+                } else {
+                    Some(format!("{}", preset_store.presets.len()))
+                };
+                widgets::section(
+                    ui,
+                    "sec_presets",
+                    "Presets",
+                    preset_badge.as_deref(),
+                    true,
+                    |ui| {
+                        preset_panel::draw_preset_panel(ui, preset_store);
+                    },
+                );
 
-            ui.add_space(16.0);
-            ui.heading("MIDI");
-            ui.separator();
-            midi_panel::draw_midi_panel(ui, midi);
+                // MIDI section (default collapsed)
+                let midi_badge = if midi.connected_port().is_some() {
+                    Some("ON")
+                } else {
+                    None
+                };
+                widgets::section(
+                    ui,
+                    "sec_midi",
+                    "MIDI",
+                    midi_badge,
+                    false,
+                    |ui| {
+                        midi_panel::draw_midi_panel(ui, midi);
+                    },
+                );
+            });
         });
 
     egui::SidePanel::right("right_panel")
-        .default_width(280.0)
+        .default_width(260.0)
+        .frame(panel_frame)
         .show(ctx, |ui| {
-            ui.heading("Parameters");
-            ui.separator();
-            param_panel::draw_param_panel(ui, params, midi);
+            ScrollArea::vertical().show(ui, |ui| {
+                // Parameters section
+                widgets::section(
+                    ui,
+                    "sec_params",
+                    "Parameters",
+                    None,
+                    true,
+                    |ui| {
+                        param_panel::draw_param_panel(ui, params, midi);
+                    },
+                );
 
-            ui.add_space(16.0);
-            ui.heading("Post-Processing");
-            ui.separator();
-            ui.checkbox(post_process_enabled, "Enable bloom & effects");
+                // Post-Processing section
+                widgets::section(
+                    ui,
+                    "sec_postprocess",
+                    "Post-Processing",
+                    None,
+                    true,
+                    |ui| {
+                        ui.checkbox(post_process_enabled, "Enable bloom & effects");
+                    },
+                );
+            });
         });
 }

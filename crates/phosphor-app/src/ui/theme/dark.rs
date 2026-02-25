@@ -14,15 +14,15 @@ pub fn dark_visuals() -> Visuals {
     v.selection.bg_fill = DARK_ACCENT.gamma_multiply(0.4);
     v.selection.stroke = Stroke::new(1.0, DARK_ACCENT);
 
-    v.widgets.noninteractive.bg_fill = DARK_PANEL;
+    v.widgets.noninteractive.bg_fill = CARD_BG;
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, DARK_TEXT_SECONDARY);
     v.widgets.noninteractive.corner_radius = CornerRadius::same(WIDGET_ROUNDING);
-    v.widgets.noninteractive.bg_stroke = Stroke::new(0.5, DARK_SEPARATOR);
+    v.widgets.noninteractive.bg_stroke = Stroke::new(0.5, CARD_BORDER);
 
     v.widgets.inactive.bg_fill = DARK_WIDGET_BG;
     v.widgets.inactive.fg_stroke = Stroke::new(1.0, DARK_TEXT_PRIMARY);
     v.widgets.inactive.corner_radius = CornerRadius::same(WIDGET_ROUNDING);
-    v.widgets.inactive.bg_stroke = Stroke::new(0.5, DARK_SEPARATOR);
+    v.widgets.inactive.bg_stroke = Stroke::new(0.5, CARD_BORDER);
 
     v.widgets.hovered.bg_fill = DARK_WIDGET_BG_HOVER;
     v.widgets.hovered.fg_stroke = Stroke::new(1.0, DARK_TEXT_PRIMARY);
@@ -40,7 +40,7 @@ pub fn dark_visuals() -> Visuals {
     v.widgets.open.bg_stroke = Stroke::new(1.0, DARK_ACCENT);
 
     v.window_corner_radius = CornerRadius::same(PANEL_ROUNDING);
-    v.window_stroke = Stroke::new(1.0, DARK_SEPARATOR);
+    v.window_stroke = Stroke::new(1.0, CARD_BORDER);
 
     v
 }

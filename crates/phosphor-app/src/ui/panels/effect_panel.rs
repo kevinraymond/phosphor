@@ -1,30 +1,60 @@
-use egui::Ui;
+use egui::{Color32, CornerRadius, RichText, Stroke, Ui, Vec2};
 
 use crate::effect::EffectLoader;
+use crate::ui::theme::tokens::*;
+
+const COLS: usize = 3;
 
 pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
     if loader.effects.is_empty() {
-        ui.label("No effects found in assets/effects/");
+        ui.label(RichText::new("No effects found").size(SMALL_SIZE).color(DARK_TEXT_SECONDARY));
         return;
     }
 
-    for (i, effect) in loader.effects.iter().enumerate() {
-        let is_current = loader.current_effect == Some(i);
-        let text = if is_current {
-            format!("> {}", effect.name)
-        } else {
-            effect.name.clone()
-        };
+    let available_width = ui.available_width();
+    let gap = 4.0;
+    let total_gaps = (COLS - 1) as f32 * gap;
+    let btn_width = ((available_width - total_gaps) / COLS as f32).max(40.0);
+    let btn_height = 22.0;
 
-        let response = ui.selectable_label(is_current, &text);
-        if response.clicked() && !is_current {
-            // Signal to main loop to load this effect
-            // This is handled by checking pending_effect_load in the event loop
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("pending_effect"), i));
-        }
+    let effects: Vec<_> = loader.effects.iter().enumerate().collect();
+    for row in effects.chunks(COLS) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for &(i, effect) in row {
+                let is_current = loader.current_effect == Some(i);
 
-        if !effect.description.is_empty() {
-            response.on_hover_text(&effect.description);
-        }
+                let (fill, text_color, stroke) = if is_current {
+                    (DARK_ACCENT, Color32::WHITE, Stroke::NONE)
+                } else {
+                    (CARD_BG, DARK_TEXT_PRIMARY, Stroke::new(1.0, CARD_BORDER))
+                };
+
+                let btn = egui::Button::new(
+                    RichText::new(truncate_name(&effect.name, 10))
+                        .size(SMALL_SIZE)
+                        .color(text_color),
+                )
+                .fill(fill)
+                .stroke(stroke)
+                .corner_radius(CornerRadius::same(4));
+
+                let response = ui.add_sized(Vec2::new(btn_width, btn_height), btn);
+                if response.clicked() && !is_current {
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("pending_effect"), i));
+                }
+                if !effect.description.is_empty() {
+                    response.on_hover_text(&effect.description);
+                }
+            }
+        });
+    }
+}
+
+fn truncate_name(name: &str, max_len: usize) -> String {
+    if name.len() <= max_len {
+        name.to_string()
+    } else {
+        format!("{}\u{2026}", &name[..max_len - 1])
     }
 }

@@ -18,10 +18,11 @@ pub struct EguiOverlay {
 impl EguiOverlay {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, window: &Window) -> Self {
         let ctx = Context::default();
-        let theme = ThemeMode::detect_system();
+        // Force dark theme for VJ aesthetic
+        let theme = ThemeMode::Dark;
         ctx.set_visuals(theme.visuals());
 
-        // Set interaction sizes for WCAG 2.5.8 target sizes
+        // Dense VJ typography and spacing
         let mut style = (*ctx.style()).clone();
         style.spacing.interact_size = egui::vec2(
             super::theme::tokens::MIN_INTERACT_WIDTH,
@@ -29,9 +30,25 @@ impl EguiOverlay {
         );
         style.spacing.item_spacing = egui::vec2(
             super::theme::tokens::SPACING,
-            super::theme::tokens::SPACING,
+            super::theme::tokens::SPACING_Y,
         );
-        style.spacing.button_padding = egui::vec2(8.0, 4.0);
+        style.spacing.button_padding = egui::vec2(6.0, 2.0);
+        style.text_styles.insert(
+            egui::TextStyle::Body,
+            egui::FontId::proportional(super::theme::tokens::BODY_SIZE),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Small,
+            egui::FontId::proportional(super::theme::tokens::SMALL_SIZE),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Heading,
+            egui::FontId::proportional(super::theme::tokens::HEADING_SIZE),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Monospace,
+            egui::FontId::monospace(super::theme::tokens::MONO_SIZE),
+        );
         ctx.set_style(style);
 
         let viewport_id = ctx.viewport_id();
