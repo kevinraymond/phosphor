@@ -6,7 +6,8 @@ use wgpu::{
     TextureView, VertexState,
 };
 
-use super::types::{Particle, ParticleDef, ParticleRenderUniforms, ParticleUniforms};
+use super::sprite::SpriteAtlas;
+use super::types::{Particle, ParticleAux, ParticleDef, ParticleRenderUniforms, ParticleUniforms};
 
 const WORKGROUP_SIZE: u32 = 256;
 
@@ -22,6 +23,9 @@ pub struct ParticleSystem {
     current: usize,
     // Atomic emission counter
     emit_counter_buffer: wgpu::Buffer,
+    // Auxiliary data buffer (home positions, packed colors for image decomposition)
+    aux_buffer: wgpu::Buffer,
+    pub has_aux_data: bool,
     // Uniform buffers
     uniform_buffer: wgpu::Buffer,
     render_uniform_buffer: wgpu::Buffer,
@@ -31,10 +35,18 @@ pub struct ParticleSystem {
     compute_bind_groups: [BindGroup; 2],
     compute_bgl: BindGroupLayout,
 
-    // Render
-    render_pipeline: RenderPipeline,
+    // Render (additive blend — default)
+    render_pipeline_additive: RenderPipeline,
+    // Render (alpha blend — for non-glowing sprites)
+    render_pipeline_alpha: RenderPipeline,
     render_bind_groups: [BindGroup; 2],
     render_bgl: BindGroupLayout,
+    // Sprite texture bind group (bind group 1)
+    sprite_bind_group: BindGroup,
+    sprite_bgl: BindGroupLayout,
+    pub sprite: Option<SpriteAtlas>,
+    /// Active blend mode: "additive" or "alpha"
+    pub blend_mode: String,
 
     // Emission accumulator (fractional particles per frame)
     emit_accumulator: f32,
@@ -48,6 +60,7 @@ pub struct ParticleSystem {
 impl ParticleSystem {
     pub fn new(
         device: &Device,
+        queue: &Queue,
         hdr_format: TextureFormat,
         def: &ParticleDef,
         compute_source: &str,
@@ -76,6 +89,16 @@ impl ParticleSystem {
         let emit_counter_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("emit-counter"),
             size: 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Auxiliary buffer (home positions for image decomposition)
+        // Placeholder: 1 element = 16 bytes (real data uploaded when image is loaded)
+        let aux_size = std::mem::size_of::<ParticleAux>() as u64;
+        let aux_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("particle-aux"),
+            size: aux_size,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -143,6 +166,17 @@ impl ParticleSystem {
                     },
                     count: None,
                 },
+                // binding 4: auxiliary data (home positions, packed colors)
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -172,6 +206,7 @@ impl ParticleSystem {
             &uniform_buffer,
             &storage_buffers,
             &emit_counter_buffer,
+            &aux_buffer,
         );
 
         // --- Render pipeline ---
@@ -203,6 +238,35 @@ impl ParticleSystem {
             ],
         });
 
+        // Sprite texture bind group layout (bind group 1)
+        let sprite_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("particle-sprite-bgl"),
+            entries: &[
+                // binding 0: sprite texture
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // binding 1: sprite sampler
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        // Create placeholder sprite for when no sprite texture is loaded
+        let placeholder_sprite = super::sprite::create_placeholder_sprite(device, queue);
+        let sprite_bind_group = create_sprite_bind_group(device, &sprite_bgl, &placeholder_sprite);
+
         let render_source =
             include_str!("../../../../../assets/shaders/builtin/particle_render.wgsl");
         let render_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -212,49 +276,95 @@ impl ParticleSystem {
 
         let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("particle-render-layout"),
-            bind_group_layouts: &[&render_bgl],
+            bind_group_layouts: &[&render_bgl, &sprite_bgl],
             push_constant_ranges: &[],
         });
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("particle-render-pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: VertexState {
-                module: &render_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: PipelineCompilationOptions::default(),
-            },
-            fragment: Some(FragmentState {
-                module: &render_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(ColorTargetState {
-                    format: hdr_format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::SrcAlpha,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: PipelineCompilationOptions::default(),
-            }),
-            primitive: PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
+        // Additive blend (default: SrcAlpha + One)
+        let render_pipeline_additive =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("particle-render-additive"),
+                layout: Some(&render_pipeline_layout),
+                vertex: VertexState {
+                    module: &render_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: PipelineCompilationOptions::default(),
+                },
+                fragment: Some(FragmentState {
+                    module: &render_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(ColorTargetState {
+                        format: hdr_format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::SrcAlpha,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: PipelineCompilationOptions::default(),
+                }),
+                primitive: PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
+
+        // Alpha blend (SrcAlpha + OneMinusSrcAlpha) for non-glowing sprites
+        let render_pipeline_alpha =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("particle-render-alpha"),
+                layout: Some(&render_pipeline_layout),
+                vertex: VertexState {
+                    module: &render_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: PipelineCompilationOptions::default(),
+                },
+                fragment: Some(FragmentState {
+                    module: &render_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(ColorTargetState {
+                        format: hdr_format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::SrcAlpha,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: PipelineCompilationOptions::default(),
+                }),
+                primitive: PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
+
+        let blend_mode = def.blend.clone();
 
         let render_bind_groups = create_render_bind_groups(
             device,
@@ -271,14 +381,21 @@ impl ParticleSystem {
             storage_buffers,
             current: 0,
             emit_counter_buffer,
+            aux_buffer,
+            has_aux_data: false,
             uniform_buffer,
             render_uniform_buffer,
             compute_pipeline,
             compute_bind_groups,
             compute_bgl,
-            render_pipeline,
+            render_pipeline_additive,
+            render_pipeline_alpha,
             render_bind_groups,
             render_bgl,
+            sprite_bind_group,
+            sprite_bgl,
+            sprite: None,
+            blend_mode,
             emit_accumulator: 0.0,
             emit_rate: def.emit_rate,
             burst_on_beat: def.burst_on_beat,
@@ -438,10 +555,52 @@ impl ParticleSystem {
             occlusion_query_set: None,
         });
 
-        pass.set_pipeline(&self.render_pipeline);
+        let pipeline = if self.blend_mode == "alpha" {
+            &self.render_pipeline_alpha
+        } else {
+            &self.render_pipeline_additive
+        };
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &self.render_bind_groups[output_idx], &[]);
+        pass.set_bind_group(1, &self.sprite_bind_group, &[]);
         // 6 vertices per particle (two triangles = instanced quad)
         pass.draw(0..6, 0..self.max_particles);
+    }
+
+    /// Load a sprite atlas and update the sprite bind group.
+    pub fn set_sprite(&mut self, device: &Device, atlas: SpriteAtlas) {
+        self.sprite_bind_group = create_sprite_bind_group(device, &self.sprite_bgl, &atlas);
+        self.render_uniforms.render_mode = if atlas.animated { 2 } else { 1 };
+        self.render_uniforms.sprite_cols = atlas.cols;
+        self.render_uniforms.sprite_rows = atlas.rows;
+        self.render_uniforms.sprite_frames = atlas.frames;
+        self.sprite = Some(atlas);
+    }
+
+    /// Upload auxiliary data (home positions, packed colors) for image decomposition.
+    /// Recreates aux buffer and compute bind groups.
+    pub fn upload_aux_data(&mut self, device: &Device, queue: &Queue, data: &[ParticleAux]) {
+        let aux_size = (std::mem::size_of::<ParticleAux>() * data.len().max(1)) as u64;
+        self.aux_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("particle-aux"),
+            size: aux_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        if !data.is_empty() {
+            queue.write_buffer(&self.aux_buffer, 0, bytemuck::cast_slice(data));
+        }
+        self.has_aux_data = !data.is_empty();
+
+        // Recreate compute bind groups with new aux buffer
+        self.compute_bind_groups = create_compute_bind_groups(
+            device,
+            &self.compute_bgl,
+            &self.uniform_buffer,
+            &self.storage_buffers,
+            &self.emit_counter_buffer,
+            &self.aux_buffer,
+        );
     }
 
     /// Flip ping-pong buffers for next frame.
@@ -456,6 +615,7 @@ fn create_compute_bind_groups(
     uniform_buffer: &wgpu::Buffer,
     storage_buffers: &[wgpu::Buffer; 2],
     emit_counter: &wgpu::Buffer,
+    aux_buffer: &wgpu::Buffer,
 ) -> [BindGroup; 2] {
     // bind_group[0]: read from storage[0], write to storage[1]
     let bg0 = device.create_bind_group(&BindGroupDescriptor {
@@ -477,6 +637,10 @@ fn create_compute_bind_groups(
             BindGroupEntry {
                 binding: 3,
                 resource: emit_counter.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 4,
+                resource: aux_buffer.as_entire_binding(),
             },
         ],
     });
@@ -501,9 +665,34 @@ fn create_compute_bind_groups(
                 binding: 3,
                 resource: emit_counter.as_entire_binding(),
             },
+            BindGroupEntry {
+                binding: 4,
+                resource: aux_buffer.as_entire_binding(),
+            },
         ],
     });
     [bg0, bg1]
+}
+
+fn create_sprite_bind_group(
+    device: &Device,
+    layout: &BindGroupLayout,
+    sprite: &SpriteAtlas,
+) -> BindGroup {
+    device.create_bind_group(&BindGroupDescriptor {
+        label: Some("particle-sprite-bg"),
+        layout,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::TextureView(&sprite.view),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::Sampler(&sprite.sampler),
+            },
+        ],
+    })
 }
 
 fn create_render_bind_groups(

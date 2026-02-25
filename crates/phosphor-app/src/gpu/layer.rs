@@ -6,6 +6,7 @@ use crate::gpu::placeholder::PlaceholderTexture;
 use crate::gpu::render_target::RenderTarget;
 use crate::gpu::uniforms::UniformBuffer;
 use crate::gpu::ShaderUniforms;
+use crate::media::MediaLayer;
 use crate::params::ParamStore;
 
 /// Blend mode for compositing layers.
@@ -56,39 +57,147 @@ impl BlendMode {
     }
 }
 
+/// Effect-specific layer data: shader pipeline, uniforms, hot-reload state.
+pub struct EffectLayer {
+    pub pass_executor: PassExecutor,
+    pub uniform_buffer: UniformBuffer,
+    pub uniforms: ShaderUniforms,
+    pub effect_index: Option<usize>,
+    pub shader_sources: Vec<String>,
+    pub shader_error: Option<String>,
+}
+
+/// Content type for a layer.
+pub enum LayerContent {
+    Effect(EffectLayer),
+    Media(MediaLayer),
+}
+
 /// A single compositing layer. Owns its own rendering pipeline and parameters.
 pub struct Layer {
     pub name: String,
     pub custom_name: Option<String>,
-    pub effect_index: Option<usize>,
-    pub pass_executor: PassExecutor,
-    pub uniform_buffer: UniformBuffer,
     pub param_store: ParamStore,
-    pub uniforms: ShaderUniforms,
+    pub content: LayerContent,
     pub blend_mode: BlendMode,
     pub opacity: f32,
     pub enabled: bool,
     pub locked: bool,
     pub pinned: bool,
-    pub shader_sources: Vec<String>,
-    pub shader_error: Option<String>,
     pub postprocess: PostProcessDef,
 }
 
 impl Layer {
+    /// Create a new Effect layer.
+    pub fn new_effect(
+        name: String,
+        effect: EffectLayer,
+        param_store: ParamStore,
+    ) -> Self {
+        Self {
+            name,
+            custom_name: None,
+            param_store,
+            content: LayerContent::Effect(effect),
+            blend_mode: BlendMode::Normal,
+            opacity: 1.0,
+            enabled: true,
+            locked: false,
+            pinned: false,
+            postprocess: PostProcessDef::default(),
+        }
+    }
+
+    /// Create a new Media layer.
+    pub fn new_media(name: String, media: MediaLayer) -> Self {
+        Self {
+            name,
+            custom_name: None,
+            param_store: ParamStore::new(),
+            content: LayerContent::Media(media),
+            blend_mode: BlendMode::Normal,
+            opacity: 1.0,
+            enabled: true,
+            locked: false,
+            pinned: false,
+            postprocess: PostProcessDef::default(),
+        }
+    }
+
+    /// Get the effect content, if this is an Effect layer.
+    pub fn as_effect(&self) -> Option<&EffectLayer> {
+        match &self.content {
+            LayerContent::Effect(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    /// Get mutable effect content, if this is an Effect layer.
+    pub fn as_effect_mut(&mut self) -> Option<&mut EffectLayer> {
+        match &mut self.content {
+            LayerContent::Effect(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    /// Get the media content, if this is a Media layer.
+    pub fn as_media(&self) -> Option<&MediaLayer> {
+        match &self.content {
+            LayerContent::Media(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Get mutable media content, if this is a Media layer.
+    pub fn as_media_mut(&mut self) -> Option<&mut MediaLayer> {
+        match &mut self.content {
+            LayerContent::Media(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Check if this is a media layer.
+    pub fn is_media(&self) -> bool {
+        matches!(&self.content, LayerContent::Media(_))
+    }
+
+    /// Get effect_index (None for non-effect layers).
+    pub fn effect_index(&self) -> Option<usize> {
+        self.as_effect().and_then(|e| e.effect_index)
+    }
+
+    /// Get shader error string, if any.
+    pub fn shader_error(&self) -> Option<&str> {
+        self.as_effect().and_then(|e| e.shader_error.as_deref())
+    }
+
+    /// Check if this layer has an active particle system.
+    pub fn has_particles(&self) -> bool {
+        self.as_effect()
+            .map_or(false, |e| e.pass_executor.particle_system.is_some())
+    }
+
     /// Execute this layer's render passes. Returns the final HDR target.
     pub fn execute(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         queue: &wgpu::Queue,
     ) -> &RenderTarget {
-        self.pass_executor
-            .execute(encoder, &self.uniform_buffer, queue, &self.uniforms)
+        match &self.content {
+            LayerContent::Effect(e) => {
+                e.pass_executor
+                    .execute(encoder, &e.uniform_buffer, queue, &e.uniforms)
+            }
+            LayerContent::Media(m) => m.execute(encoder),
+        }
     }
 
     /// Flip ping-pong targets for next frame.
     pub fn flip(&mut self) {
-        self.pass_executor.flip();
+        match &mut self.content {
+            LayerContent::Effect(e) => e.pass_executor.flip(),
+            LayerContent::Media(_) => {} // no ping-pong for media
+        }
     }
 
     /// Resize all render targets.
@@ -99,8 +208,22 @@ impl Layer {
         height: u32,
         placeholder: &PlaceholderTexture,
     ) {
-        self.pass_executor
-            .resize(device, width, height, &self.uniform_buffer, placeholder);
+        match &mut self.content {
+            LayerContent::Effect(e) => {
+                e.pass_executor
+                    .resize(device, width, height, &e.uniform_buffer, placeholder);
+            }
+            LayerContent::Media(_) => {
+                // Media resize handled separately (needs queue for uniform upload)
+            }
+        }
+    }
+
+    /// Resize media layer (needs queue for uniform upload).
+    pub fn resize_media(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, width: u32, height: u32) {
+        if let LayerContent::Media(ref mut m) = self.content {
+            m.resize(device, queue, width, height);
+        }
     }
 }
 
@@ -118,6 +241,9 @@ pub struct LayerInfo {
     pub pinned: bool,
     pub has_particles: bool,
     pub shader_error: Option<String>,
+    pub is_media: bool,
+    pub media_file_name: Option<String>,
+    pub media_is_animated: bool,
 }
 
 /// Manages an ordered stack of layers.
@@ -132,28 +258,6 @@ impl LayerStack {
             layers: Vec::new(),
             active_layer: 0,
         }
-    }
-
-    /// Add a new empty layer with default pass executor.
-    pub fn add_layer(&mut self, device: &wgpu::Device, name: String, default_executor: PassExecutor) {
-        let uniform_buffer = UniformBuffer::new(device);
-        self.layers.push(Layer {
-            name,
-            custom_name: None,
-            effect_index: None,
-            pass_executor: default_executor,
-            uniform_buffer,
-            param_store: ParamStore::new(),
-            uniforms: ShaderUniforms::zeroed(),
-            blend_mode: BlendMode::Normal,
-            opacity: 1.0,
-            enabled: true,
-            locked: false,
-            pinned: false,
-            shader_sources: Vec::new(),
-            shader_error: None,
-            postprocess: PostProcessDef::default(),
-        });
     }
 
     /// Remove a layer by index. Adjusts active_layer if needed.
@@ -196,18 +300,27 @@ impl LayerStack {
     pub fn layer_infos(&self, effects: &[crate::effect::format::PfxEffect]) -> Vec<LayerInfo> {
         self.layers
             .iter()
-            .map(|l| LayerInfo {
-                name: l.name.clone(),
-                custom_name: l.custom_name.clone(),
-                effect_index: l.effect_index,
-                effect_name: l.effect_index.and_then(|i| effects.get(i)).map(|e| e.name.clone()),
-                blend_mode: l.blend_mode,
-                opacity: l.opacity,
-                enabled: l.enabled,
-                locked: l.locked,
-                pinned: l.pinned,
-                has_particles: l.pass_executor.particle_system.is_some(),
-                shader_error: l.shader_error.clone(),
+            .map(|l| {
+                let (is_media, media_file_name, media_is_animated) = match &l.content {
+                    LayerContent::Media(m) => (true, Some(m.file_name.clone()), m.is_animated()),
+                    _ => (false, None, false),
+                };
+                LayerInfo {
+                    name: l.name.clone(),
+                    custom_name: l.custom_name.clone(),
+                    effect_index: l.effect_index(),
+                    effect_name: l.effect_index().and_then(|i| effects.get(i)).map(|e| e.name.clone()),
+                    blend_mode: l.blend_mode,
+                    opacity: l.opacity,
+                    enabled: l.enabled,
+                    locked: l.locked,
+                    pinned: l.pinned,
+                    has_particles: l.has_particles(),
+                    shader_error: l.shader_error().map(|s| s.to_string()),
+                    is_media,
+                    media_file_name,
+                    media_is_animated,
+                }
             })
             .collect()
     }

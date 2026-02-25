@@ -26,6 +26,12 @@ pub struct LayerPreset {
     pub pinned: bool,
     #[serde(default)]
     pub custom_name: Option<String>,
+    #[serde(default)]
+    pub media_path: Option<String>,
+    #[serde(default)]
+    pub media_speed: Option<f32>,
+    #[serde(default)]
+    pub media_looping: Option<bool>,
 }
 
 fn default_opacity() -> f32 {

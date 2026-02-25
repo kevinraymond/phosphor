@@ -9,6 +9,9 @@ pub struct EmitterDef {
     pub radius: f32,
     #[serde(default)]
     pub position: [f32; 2],
+    /// Image file path (relative to assets/images/) for "image" shape emitters.
+    #[serde(default)]
+    pub image: String,
 }
 
 impl Default for EmitterDef {
@@ -17,6 +20,7 @@ impl Default for EmitterDef {
             shape: "point".to_string(),
             radius: 0.0,
             position: [0.0, 0.0],
+            image: String::new(),
         }
     }
 }
@@ -33,6 +37,7 @@ impl EmitterDef {
             "ring" => 1,
             "line" => 2,
             "screen" => 3,
+            "image" => 4,
             _ => 0,
         }
     }
