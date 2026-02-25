@@ -2,11 +2,13 @@
 // FBM-Worley density for puffy cloud shapes, Beer-Lambert light march for
 // volumetric self-shadowing, silver lining at cloud edges.
 
-// Worley (cellular) noise — creates rounded billow boundaries
+// Smooth Worley noise — log-sum-exp blends cell distances to eliminate
+// hard gradient discontinuities at cell boundaries (Inigo Quilez technique)
 fn storm_worley(p: vec2f) -> f32 {
     let i = floor(p);
     let f = fract(p);
-    var min_dist = 1.0;
+    let k = 20.0; // sharpness: higher = sharper cells, lower = smoother blend
+    var res = 0.0;
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
             let neighbor = vec2f(f32(x), f32(y));
@@ -16,10 +18,10 @@ fn storm_worley(p: vec2f) -> f32 {
                 phosphor_hash2(cell + vec2f(57.0, 113.0))
             );
             let diff = neighbor + point - f;
-            min_dist = min(min_dist, dot(diff, diff));
+            res += exp(-k * dot(diff, diff));
         }
     }
-    return sqrt(min_dist);
+    return sqrt(-(1.0 / k) * log(res));
 }
 
 fn storm_hash2v(p: vec2f) -> vec2f {
