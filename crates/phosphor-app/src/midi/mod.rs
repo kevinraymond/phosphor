@@ -127,6 +127,12 @@ impl MidiSystem {
         self.config.save();
     }
 
+    /// Enable or disable MIDI processing.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.config.enabled = enabled;
+        self.config.save();
+    }
+
     /// Main per-frame update. Call from App::update().
     pub fn update(
         &mut self,
@@ -168,6 +174,14 @@ impl MidiSystem {
         }
 
         self.last_activity = Some(Instant::now());
+
+        // When disabled, drain but don't process
+        if !self.config.enabled {
+            if let Some(msg) = messages.last() {
+                self.last_message = Some(*msg);
+            }
+            return result;
+        }
 
         for msg in messages {
             self.last_message = Some(msg);
@@ -276,6 +290,14 @@ impl MidiSystem {
         }
 
         self.last_activity = Some(Instant::now());
+
+        // When disabled, drain but don't process
+        if !self.config.enabled {
+            if let Some(msg) = messages.last() {
+                self.last_message = Some(*msg);
+            }
+            return result;
+        }
 
         for msg in messages {
             self.last_message = Some(msg);

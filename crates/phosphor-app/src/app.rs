@@ -119,6 +119,7 @@ impl App {
 
         let initial_layer = Layer {
             name: "Layer 1".to_string(),
+            custom_name: None,
             effect_index,
             pass_executor,
             uniform_buffer,
@@ -521,6 +522,7 @@ impl App {
 
                 self.layer_stack.layers.push(Layer {
                     name,
+                    custom_name: None,
                     effect_index: None,
                     pass_executor: executor,
                     uniform_buffer,
@@ -543,6 +545,13 @@ impl App {
                 log::error!("Failed to create layer: {e}");
             }
         }
+    }
+
+    /// Remove all layers and create one fresh empty layer.
+    pub fn clear_all_layers(&mut self) {
+        self.layer_stack.layers.clear();
+        self.layer_stack.active_layer = 0;
+        self.add_layer();
     }
 
     /// Sync effect_loader.current_effect to match active layer.
@@ -571,6 +580,7 @@ impl App {
                     enabled: l.enabled,
                     locked: l.locked,
                     pinned: l.pinned,
+                    custom_name: l.custom_name.clone(),
                 }
             })
             .collect();
@@ -646,6 +656,7 @@ impl App {
                 layer.enabled = lp.enabled;
                 layer.locked = lp.locked;
                 layer.pinned = lp.pinned;
+                layer.custom_name = lp.custom_name.clone();
             }
         }
 
@@ -656,6 +667,11 @@ impl App {
         self.sync_active_layer();
         self.post_process.enabled = preset.postprocess.enabled;
         self.preset_store.current_preset = Some(index);
+        self.preset_store.dirty = false;
+        // Reset param changed flags so loading doesn't immediately mark dirty
+        for layer in &mut self.layer_stack.layers {
+            layer.param_store.changed = false;
+        }
         log::info!("Loaded preset '{}'", self.preset_store.presets[index].0);
     }
 

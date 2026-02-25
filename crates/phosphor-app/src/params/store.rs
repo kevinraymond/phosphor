@@ -5,6 +5,7 @@ use super::types::{ParamDef, ParamValue};
 pub struct ParamStore {
     pub defs: Vec<ParamDef>,
     pub values: HashMap<String, ParamValue>,
+    pub changed: bool,
 }
 
 impl ParamStore {
@@ -12,12 +13,14 @@ impl ParamStore {
         Self {
             defs: Vec::new(),
             values: HashMap::new(),
+            changed: false,
         }
     }
 
     pub fn load_from_defs(&mut self, defs: &[ParamDef]) {
         self.defs = defs.to_vec();
         self.values.clear();
+        self.changed = false;
         for def in defs {
             self.values
                 .insert(def.name().to_string(), def.default_value());
@@ -26,6 +29,7 @@ impl ParamStore {
 
     pub fn set(&mut self, name: &str, value: ParamValue) {
         self.values.insert(name.to_string(), value);
+        self.changed = true;
     }
 
     pub fn get(&self, name: &str) -> Option<&ParamValue> {

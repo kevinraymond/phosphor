@@ -180,6 +180,7 @@ impl ApplicationHandler for PhosphorApp {
                     let active_locked = app.layer_stack.active().map_or(false, |l| l.locked);
                     if !active_locked {
                         app.load_effect(idx);
+                        app.preset_store.mark_dirty();
                     }
                 }
 
@@ -204,6 +205,13 @@ impl ApplicationHandler for PhosphorApp {
                         log::error!("Failed to delete preset: {e}");
                     }
                 }
+                let deselect_preset: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("deselect_preset"))
+                });
+                if deselect_preset.is_some() {
+                    app.preset_store.current_preset = None;
+                    app.preset_store.dirty = false;
+                }
 
                 // Handle layer UI signals
                 let add_layer: Option<bool> = app.egui_overlay.context().data_mut(|d| {
@@ -211,6 +219,7 @@ impl ApplicationHandler for PhosphorApp {
                 });
                 if add_layer.is_some() {
                     app.add_layer();
+                    app.preset_store.mark_dirty();
                 }
 
                 let remove_layer: Option<usize> = app.egui_overlay.context().data_mut(|d| {
@@ -219,6 +228,27 @@ impl ApplicationHandler for PhosphorApp {
                 if let Some(idx) = remove_layer {
                     app.layer_stack.remove_layer(idx);
                     app.sync_active_layer();
+                    app.preset_store.mark_dirty();
+                }
+
+                // Handle clear all layers
+                let clear_all: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("clear_all_layers"))
+                });
+                if clear_all.is_some() {
+                    app.clear_all_layers();
+                    app.preset_store.mark_dirty();
+                }
+
+                // Handle layer rename
+                let layer_rename: Option<(usize, Option<String>)> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("layer_rename"))
+                });
+                if let Some((idx, new_name)) = layer_rename {
+                    if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
+                        layer.custom_name = new_name;
+                        app.preset_store.mark_dirty();
+                    }
                 }
 
                 let select_layer: Option<usize> = app.egui_overlay.context().data_mut(|d| {
@@ -238,6 +268,7 @@ impl ApplicationHandler for PhosphorApp {
                 if let Some((idx, locked)) = toggle_lock {
                     if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
                         layer.locked = locked;
+                        app.preset_store.mark_dirty();
                     }
                 }
 
@@ -247,6 +278,7 @@ impl ApplicationHandler for PhosphorApp {
                 if let Some((idx, pinned)) = toggle_pin {
                     if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
                         layer.pinned = pinned;
+                        app.preset_store.mark_dirty();
                     }
                 }
 
@@ -266,6 +298,7 @@ impl ApplicationHandler for PhosphorApp {
                                 6 => BlendMode::Difference,
                                 _ => BlendMode::Normal,
                             };
+                            app.preset_store.mark_dirty();
                         }
                     }
                 }
@@ -277,6 +310,7 @@ impl ApplicationHandler for PhosphorApp {
                     if let Some(layer) = app.layer_stack.active_mut() {
                         if !layer.locked {
                             layer.opacity = opacity;
+                            app.preset_store.mark_dirty();
                         }
                     }
                 }
@@ -287,6 +321,7 @@ impl ApplicationHandler for PhosphorApp {
                 if let Some((from, to)) = layer_move {
                     app.layer_stack.move_layer(from, to);
                     app.sync_active_layer();
+                    app.preset_store.mark_dirty();
                 }
 
                 let toggle_enable: Option<(usize, bool)> = app.egui_overlay.context().data_mut(|d| {
@@ -296,7 +331,16 @@ impl ApplicationHandler for PhosphorApp {
                     if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
                         if !layer.locked {
                             layer.enabled = enabled;
+                            app.preset_store.mark_dirty();
                         }
+                    }
+                }
+
+                // Check if active layer params changed (marks preset dirty)
+                if let Some(layer) = app.layer_stack.active_mut() {
+                    if layer.param_store.changed {
+                        layer.param_store.changed = false;
+                        app.preset_store.mark_dirty();
                     }
                 }
 

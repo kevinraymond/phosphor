@@ -127,7 +127,9 @@ pub fn draw_panels(
                 );
 
                 // MIDI section (default collapsed)
-                let midi_badge = if midi.connected_port().is_some() {
+                let midi_badge = if !midi.config.enabled {
+                    Some("OFF")
+                } else if midi.connected_port().is_some() {
                     Some("ON")
                 } else {
                     None

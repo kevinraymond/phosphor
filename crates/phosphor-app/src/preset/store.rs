@@ -24,6 +24,8 @@ pub struct LayerPreset {
     pub locked: bool,
     #[serde(default)]
     pub pinned: bool,
+    #[serde(default)]
+    pub custom_name: Option<String>,
 }
 
 fn default_opacity() -> f32 {
@@ -52,6 +54,7 @@ pub struct Preset {
 pub struct PresetStore {
     pub presets: Vec<(String, Preset)>,
     pub current_preset: Option<usize>,
+    pub dirty: bool,
 }
 
 impl PresetStore {
@@ -59,7 +62,22 @@ impl PresetStore {
         Self {
             presets: Vec::new(),
             current_preset: None,
+            dirty: false,
         }
+    }
+
+    /// Mark the current preset as dirty (modified since last save/load).
+    pub fn mark_dirty(&mut self) {
+        if self.current_preset.is_some() {
+            self.dirty = true;
+        }
+    }
+
+    /// Get the name of the currently loaded preset, if any.
+    pub fn current_name(&self) -> Option<&str> {
+        self.current_preset
+            .and_then(|i| self.presets.get(i))
+            .map(|(name, _)| name.as_str())
     }
 
     pub fn presets_dir() -> PathBuf {
@@ -106,6 +124,7 @@ impl PresetStore {
 
         self.presets.sort_by(|a, b| a.0.cmp(&b.0));
         self.current_preset = None;
+        self.dirty = false;
 
         log::info!("Scanned {} presets from {}", self.presets.len(), dir.display());
     }
@@ -157,6 +176,7 @@ impl PresetStore {
             .position(|(n, _)| n == &name)
             .unwrap_or(0);
         self.current_preset = Some(idx);
+        self.dirty = false;
         Ok(idx)
     }
 

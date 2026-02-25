@@ -7,6 +7,13 @@ use crate::ui::theme::tokens::*;
 const MIDI_BLUE: Color32 = Color32::from_rgb(0x60, 0xA0, 0xE0);
 
 pub fn draw_midi_panel(ui: &mut Ui, midi: &mut MidiSystem) {
+    // Master toggle
+    let mut enabled = midi.config.enabled;
+    if ui.checkbox(&mut enabled, RichText::new("Enable MIDI").size(SMALL_SIZE)).changed() {
+        midi.set_enabled(enabled);
+    }
+    ui.add_space(2.0);
+
     // Port selector
     let current_label = midi
         .connected_port()
@@ -114,12 +121,14 @@ fn draw_trigger_badge(ui: &mut Ui, midi: &mut MidiSystem, action: TriggerAction)
             MidiMsgType::Cc => format!("CC{}", mapping.cc),
             MidiMsgType::Note => format!("N{}", mapping.cc),
         };
-        if ui
+        let resp = ui
             .button(RichText::new(&label).color(MIDI_BLUE).size(SMALL_SIZE))
-            .on_hover_text("Click to re-learn")
-            .clicked()
-        {
+            .on_hover_text("Click to re-learn, right-click to clear");
+        if resp.clicked() {
             midi.start_learn(LearnTarget::Trigger(action));
+        }
+        if resp.secondary_clicked() {
+            midi.clear_trigger_mapping(action);
         }
     } else {
         if ui
