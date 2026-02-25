@@ -10,8 +10,8 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 **Audio Upgrade + Beat Detection: COMPLETE** — multi-resolution FFT, adaptive normalization, 3-stage beat detector
 **BPM Detection Rewrite: COMPLETE** — FFT autocorrelation, Kalman filter, octave disambiguation
 **MIDI Input: COMPLETE** — midir integration, MIDI learn, auto-connect, hot-plug, config persistence
-**Preset Save/Load: COMPLETE** — global presets with effect + params + postprocess, MIDI next/prev
-**Layer Composition: COMPLETE** — up to 8 layers with blend modes, opacity, GPU compositing
+**Preset Save/Load: COMPLETE** — multi-layer presets with effect + params + postprocess, MIDI next/prev
+**Layer Composition: COMPLETE** — up to 8 layers with blend modes, opacity, lock/pin, drag-and-drop reorder, GPU compositing
 
 ### What's Built
 
@@ -85,10 +85,11 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 
 #### Preset Save/Load
 - `PresetStore`: scan/save/load/delete presets from `~/.config/phosphor/presets/*.json`
-- `Preset` struct: version, effect_name, params (HashMap<String, ParamValue>), postprocess (PostProcessDef)
+- `Preset` struct: version, layers (Vec<LayerPreset>), active_layer, postprocess (PostProcessDef)
+- `LayerPreset`: effect_name, params, blend_mode, opacity, enabled, locked, pinned (serde defaults for backward compat)
 - Preset panel in left sidebar: text input + Save button, selectable list with delete buttons
-- Save captures current effect + tweaked params + postprocess overrides
-- Load switches effect, applies saved params (unknown params skipped with warning), applies postprocess
+- Save captures all layers (effect + params + blend + opacity + enabled + locked + pinned) + active_layer + postprocess
+- Load adjusts layer count to match preset, loads each layer (skips locked layers), restores active_layer + postprocess
 - Overwrite on save (standard VJ workflow), graceful mismatch handling
 - Name sanitization: strip `/ \ .`, trim whitespace, max 64 chars
 - MIDI triggers: NextPreset/PrevPreset cycle through preset list
@@ -98,17 +99,21 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Up to 8 layers, each with own `PassExecutor`, `UniformBuffer`, `ParamStore`, `ShaderUniforms`
 - 7 blend modes: Normal, Add, Multiply, Screen, Overlay, SoftLight, Difference
 - Per-layer opacity (0-1), enable/disable toggle
+- Per-layer lock (prevents all setting changes, blocks MIDI CC params, blocks effect loading, skipped during preset load)
+- Per-layer pin (prevents drag reordering, hides drag handle)
+- Drag-and-drop reordering via egui DnD (manual `DragAndDrop::set_payload` on handle only, not whole card)
 - GPU `Compositor`: ping-pong accumulator blits first layer, composites subsequent layers with blend shader
 - Single-layer fast path: skip compositing entirely when only 1 layer enabled (zero overhead, backward compatible)
 - `LayerStack` manages ordered layer vec + active_layer index
 - `LayerInfo` snapshot struct passed to UI to avoid borrow conflicts
-- Layer panel in left sidebar: enable checkbox, layer name/effect, up/down reorder, delete, blend mode dropdown, opacity slider
+- Layer panel in left sidebar: drag handle, enable checkbox, lock/pin icons, layer name/effect, delete, blend mode dropdown, opacity slider
 - Effects panel loads effects onto active layer
 - Shader hot-reload iterates ALL layers (each tracks own shader_sources)
 - Particle systems per-layer (each layer can have particles independently)
 - MIDI triggers: NextLayer/PrevLayer cycle active layer
 - Keyboard: `[`/`]` cycle active layer
-- Presets operate on active layer only (save/load active layer's effect + params + postprocess)
+- Presets save/load all layers (locked layers skipped during load)
+- `MidiSystem::update_triggers_only()`: drains MIDI but skips CC→param when active layer is locked
 
 ### Known Issues
 - ~33 compiler warnings (mostly unused items reserved for future phases)
