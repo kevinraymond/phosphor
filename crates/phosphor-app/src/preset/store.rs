@@ -5,21 +5,44 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::effect::format::PostProcessDef;
+use crate::gpu::layer::BlendMode;
 use crate::params::ParamValue;
 
+/// Per-layer state saved in a preset.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Preset {
-    #[serde(default = "default_version")]
-    pub version: u32,
+pub struct LayerPreset {
     pub effect_name: String,
     #[serde(default)]
     pub params: HashMap<String, ParamValue>,
     #[serde(default)]
-    pub postprocess: PostProcessDef,
+    pub blend_mode: BlendMode,
+    #[serde(default = "default_opacity")]
+    pub opacity: f32,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
 }
 
-fn default_version() -> u32 {
-    1
+fn default_opacity() -> f32 {
+    1.0
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for BlendMode {
+    fn default() -> Self {
+        BlendMode::Normal
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Preset {
+    pub layers: Vec<LayerPreset>,
+    #[serde(default)]
+    pub active_layer: usize,
+    #[serde(default)]
+    pub postprocess: PostProcessDef,
 }
 
 pub struct PresetStore {
@@ -78,14 +101,11 @@ impl PresetStore {
         }
 
         self.presets.sort_by(|a, b| a.0.cmp(&b.0));
-
-        // Revalidate current_preset index
         self.current_preset = None;
 
         log::info!("Scanned {} presets from {}", self.presets.len(), dir.display());
     }
 
-    /// Sanitize a preset name: strip dangerous chars, trim, max 64 chars.
     fn sanitize_name(name: &str) -> String {
         let sanitized: String = name
             .chars()
@@ -102,8 +122,8 @@ impl PresetStore {
     pub fn save(
         &mut self,
         name: &str,
-        effect_name: &str,
-        params: &HashMap<String, ParamValue>,
+        layers: Vec<LayerPreset>,
+        active_layer: usize,
         postprocess: &PostProcessDef,
     ) -> Result<usize> {
         let name = Self::sanitize_name(name);
@@ -115,9 +135,8 @@ impl PresetStore {
         std::fs::create_dir_all(&dir)?;
 
         let preset = Preset {
-            version: 1,
-            effect_name: effect_name.to_string(),
-            params: params.clone(),
+            layers,
+            active_layer,
             postprocess: postprocess.clone(),
         };
 
@@ -128,7 +147,6 @@ impl PresetStore {
 
         self.scan();
 
-        // Find the index of the saved preset
         let idx = self
             .presets
             .iter()

@@ -18,6 +18,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 
 use app::App;
+use gpu::layer::BlendMode;
 
 struct PhosphorApp {
     app: Option<App>,
@@ -102,38 +103,76 @@ impl ApplicationHandler for PhosphorApp {
                     KeyCode::KeyD => {
                         app.egui_overlay.toggle_visible();
                     }
+                    KeyCode::BracketLeft => {
+                        // Previous layer
+                        let num = app.layer_stack.layers.len();
+                        if num > 1 {
+                            let current = app.layer_stack.active_layer;
+                            app.layer_stack.active_layer =
+                                if current == 0 { num - 1 } else { current - 1 };
+                            app.sync_active_layer();
+                        }
+                    }
+                    KeyCode::BracketRight => {
+                        // Next layer
+                        let num = app.layer_stack.layers.len();
+                        if num > 1 {
+                            let current = app.layer_stack.active_layer;
+                            app.layer_stack.active_layer = (current + 1) % num;
+                            app.sync_active_layer();
+                        }
+                    }
                     _ => {}
                 }
             }
             WindowEvent::RedrawRequested => {
                 app.update();
 
+                // Collect layer info snapshots before UI (avoids borrow conflicts)
+                let layer_infos = app.layer_infos();
+                let active_layer = app.layer_stack.active_layer;
+
                 // Prepare egui frame
                 app.egui_overlay.begin_frame(&app.window);
                 {
                     let ctx = app.egui_overlay.context();
+
+                    // Get particle count from active layer
                     let particle_count = app
-                        .pass_executor
-                        .particle_system
-                        .as_ref()
+                        .layer_stack
+                        .active()
+                        .and_then(|l| l.pass_executor.particle_system.as_ref())
                         .map(|ps| ps.max_particles);
-                    crate::ui::panels::draw_panels(
-                        &ctx,
-                        app.egui_overlay.visible,
-                        &mut app.audio,
-                        &mut app.param_store,
-                        &app.shader_error,
-                        &app.uniforms,
-                        &app.effect_loader,
-                        &mut app.post_process.enabled,
-                        particle_count,
-                        &mut app.midi,
-                        &app.preset_store,
-                    );
+
+                    // Get active layer's shader error
+                    let shader_error = app
+                        .layer_stack
+                        .active()
+                        .and_then(|l| l.shader_error.clone());
+
+                    // Get active layer's param_store (mutable for MIDI badges)
+                    let active_params = app.layer_stack.active_mut();
+                    if let Some(layer) = active_params {
+                        crate::ui::panels::draw_panels(
+                            &ctx,
+                            app.egui_overlay.visible,
+                            &mut app.audio,
+                            &mut layer.param_store,
+                            &shader_error,
+                            &app.uniforms,
+                            &app.effect_loader,
+                            &mut app.post_process.enabled,
+                            particle_count,
+                            &mut app.midi,
+                            &app.preset_store,
+                            &layer_infos,
+                            active_layer,
+                        );
+                    }
                 }
                 app.egui_overlay.end_frame(&app.window);
 
-                // Handle effect loading from UI
+                // Handle effect loading from UI → loads on active layer
                 let pending: Option<usize> = app.egui_overlay.context().data_mut(|d| {
                     d.remove_temp(egui::Id::new("pending_effect"))
                 });
@@ -163,6 +202,76 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
 
+                // Handle layer UI signals
+                let add_layer: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("add_layer"))
+                });
+                if add_layer.is_some() {
+                    app.add_layer();
+                }
+
+                let remove_layer: Option<usize> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("remove_layer"))
+                });
+                if let Some(idx) = remove_layer {
+                    app.layer_stack.remove_layer(idx);
+                    app.sync_active_layer();
+                }
+
+                let select_layer: Option<usize> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("select_layer"))
+                });
+                if let Some(idx) = select_layer {
+                    if idx < app.layer_stack.layers.len() {
+                        app.layer_stack.active_layer = idx;
+                        app.sync_active_layer();
+                    }
+                }
+
+                let layer_blend: Option<u32> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("layer_blend"))
+                });
+                if let Some(mode_u32) = layer_blend {
+                    if let Some(layer) = app.layer_stack.active_mut() {
+                        layer.blend_mode = match mode_u32 {
+                            0 => BlendMode::Normal,
+                            1 => BlendMode::Add,
+                            2 => BlendMode::Multiply,
+                            3 => BlendMode::Screen,
+                            4 => BlendMode::Overlay,
+                            5 => BlendMode::SoftLight,
+                            6 => BlendMode::Difference,
+                            _ => BlendMode::Normal,
+                        };
+                    }
+                }
+
+                let layer_opacity: Option<f32> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("layer_opacity"))
+                });
+                if let Some(opacity) = layer_opacity {
+                    if let Some(layer) = app.layer_stack.active_mut() {
+                        layer.opacity = opacity;
+                    }
+                }
+
+                let layer_move: Option<(usize, usize)> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("layer_move"))
+                });
+                if let Some((from, to)) = layer_move {
+                    app.layer_stack.move_layer(from, to);
+                    app.sync_active_layer();
+                }
+
+                let toggle_enable: Option<(usize, bool)> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("layer_toggle_enable"))
+                });
+                if let Some((idx, enabled)) = toggle_enable {
+                    if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
+                        layer.enabled = enabled;
+                    }
+                }
+
                 // Handle MIDI triggers
                 let triggers: Vec<_> = app.pending_midi_triggers.drain(..).collect();
                 for trigger in triggers {
@@ -170,11 +279,19 @@ impl ApplicationHandler for PhosphorApp {
                     let num_effects = app.effect_loader.effects.len();
                     match trigger {
                         TriggerAction::NextEffect if num_effects > 0 => {
-                            let current = app.effect_loader.current_effect.unwrap_or(0);
+                            let current = app
+                                .layer_stack
+                                .active()
+                                .and_then(|l| l.effect_index)
+                                .unwrap_or(0);
                             app.load_effect((current + 1) % num_effects);
                         }
                         TriggerAction::PrevEffect if num_effects > 0 => {
-                            let current = app.effect_loader.current_effect.unwrap_or(0);
+                            let current = app
+                                .layer_stack
+                                .active()
+                                .and_then(|l| l.effect_index)
+                                .unwrap_or(0);
                             app.load_effect(
                                 if current == 0 { num_effects - 1 } else { current - 1 },
                             );
@@ -194,6 +311,19 @@ impl ApplicationHandler for PhosphorApp {
                             let num = app.preset_store.presets.len();
                             let current = app.preset_store.current_preset.unwrap_or(0);
                             app.load_preset(if current == 0 { num - 1 } else { current - 1 });
+                        }
+                        TriggerAction::NextLayer if app.layer_stack.layers.len() > 1 => {
+                            let num = app.layer_stack.layers.len();
+                            let current = app.layer_stack.active_layer;
+                            app.layer_stack.active_layer = (current + 1) % num;
+                            app.sync_active_layer();
+                        }
+                        TriggerAction::PrevLayer if app.layer_stack.layers.len() > 1 => {
+                            let num = app.layer_stack.layers.len();
+                            let current = app.layer_stack.active_layer;
+                            app.layer_stack.active_layer =
+                                if current == 0 { num - 1 } else { current - 1 };
+                            app.sync_active_layer();
                         }
                         _ => {}
                     }

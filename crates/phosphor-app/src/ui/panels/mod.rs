@@ -1,5 +1,6 @@
 pub mod audio_panel;
 pub mod effect_panel;
+pub mod layer_panel;
 pub mod midi_panel;
 pub mod param_panel;
 pub mod preset_panel;
@@ -9,6 +10,7 @@ use egui::{Context, Frame, Margin, ScrollArea};
 
 use crate::audio::AudioSystem;
 use crate::effect::EffectLoader;
+use crate::gpu::layer::LayerInfo;
 use crate::gpu::ShaderUniforms;
 use crate::midi::MidiSystem;
 use crate::params::ParamStore;
@@ -29,6 +31,8 @@ pub fn draw_panels(
     particle_count: Option<u32>,
     midi: &mut MidiSystem,
     preset_store: &PresetStore,
+    layers: &[LayerInfo],
+    active_layer: usize,
 ) {
     if !visible {
         return;
@@ -57,7 +61,7 @@ pub fn draw_panels(
 
     egui::SidePanel::left("left_panel")
         .default_width(260.0)
-        .max_width(300.0)
+        .max_width(400.0)
         .frame(panel_frame)
         .show(ctx, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
@@ -89,6 +93,19 @@ pub fn draw_panels(
                     true,
                     |ui| {
                         effect_panel::draw_effect_panel(ui, effect_loader);
+                    },
+                );
+
+                // Layers section
+                let layer_badge = format!("{}", layers.len());
+                widgets::section(
+                    ui,
+                    "sec_layers",
+                    "Layers",
+                    Some(&layer_badge),
+                    true,
+                    |ui| {
+                        layer_panel::draw_layer_panel(ui, layers, active_layer);
                     },
                 );
 

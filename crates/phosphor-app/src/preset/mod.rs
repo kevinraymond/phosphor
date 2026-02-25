@@ -1,3 +1,3 @@
 pub mod store;
 
-pub use store::{Preset, PresetStore};
+pub use store::PresetStore;
