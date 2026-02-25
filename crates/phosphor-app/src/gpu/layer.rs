@@ -59,6 +59,7 @@ impl BlendMode {
 /// A single compositing layer. Owns its own rendering pipeline and parameters.
 pub struct Layer {
     pub name: String,
+    pub custom_name: Option<String>,
     pub effect_index: Option<usize>,
     pub pass_executor: PassExecutor,
     pub uniform_buffer: UniformBuffer,
@@ -107,6 +108,7 @@ impl Layer {
 #[derive(Debug, Clone)]
 pub struct LayerInfo {
     pub name: String,
+    pub custom_name: Option<String>,
     pub effect_index: Option<usize>,
     pub effect_name: Option<String>,
     pub blend_mode: BlendMode,
@@ -137,6 +139,7 @@ impl LayerStack {
         let uniform_buffer = UniformBuffer::new(device);
         self.layers.push(Layer {
             name,
+            custom_name: None,
             effect_index: None,
             pass_executor: default_executor,
             uniform_buffer,
@@ -195,6 +198,7 @@ impl LayerStack {
             .iter()
             .map(|l| LayerInfo {
                 name: l.name.clone(),
+                custom_name: l.custom_name.clone(),
                 effect_index: l.effect_index,
                 effect_name: l.effect_index.and_then(|i| effects.get(i)).map(|e| e.name.clone()),
                 blend_mode: l.blend_mode,

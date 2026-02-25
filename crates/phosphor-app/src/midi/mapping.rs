@@ -63,6 +63,8 @@ impl MidiMapping {
 pub struct MidiConfig {
     #[serde(default = "default_version")]
     pub version: u32,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     #[serde(default)]
     pub params: HashMap<String, MidiMapping>,
     #[serde(default)]
@@ -75,10 +77,15 @@ fn default_version() -> u32 {
     1
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl Default for MidiConfig {
     fn default() -> Self {
         Self {
             version: 1,
+            enabled: true,
             params: HashMap::new(),
             triggers: HashMap::new(),
             port_name: None,

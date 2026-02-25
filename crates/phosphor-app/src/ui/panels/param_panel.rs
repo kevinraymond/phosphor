@@ -27,12 +27,14 @@ fn draw_midi_badge(ui: &mut Ui, midi: &mut MidiSystem, param_name: &str) {
     } else if is_mapped {
         let mapping = &midi.config.params[param_name];
         let label = format_mapping_label(mapping.msg_type, mapping.cc);
-        if ui
+        let resp = ui
             .button(RichText::new(&label).color(MIDI_BLUE).size(SMALL_SIZE))
-            .on_hover_text("Click to re-learn, right-click to clear")
-            .clicked()
-        {
+            .on_hover_text("Click to re-learn, right-click to clear");
+        if resp.clicked() {
             midi.start_learn(LearnTarget::Param(param_name.to_string()));
+        }
+        if resp.secondary_clicked() {
+            midi.clear_param_mapping(param_name);
         }
     } else {
         if ui

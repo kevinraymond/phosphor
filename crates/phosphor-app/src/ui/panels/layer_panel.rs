@@ -383,39 +383,103 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                                         "Pin layer (prevent reordering)"
                                     });
 
-                                    // Layer name / effect
-                                    let effect_display =
-                                        layer.effect_name.as_deref().unwrap_or("(empty)");
-                                    let display = format!("{} {}", i + 1, effect_display);
+                                    // Layer name / effect (with inline rename)
+                                    let rename_idx: Option<usize> = ui.ctx().data_mut(|d| {
+                                        d.get_temp(egui::Id::new("layer_rename_idx"))
+                                    });
+                                    let is_renaming = rename_idx == Some(i);
 
                                     let btns_width =
                                         if num_layers > 1 { 19.0 } else { 0.0 };
                                     let label_width =
                                         (ui.available_width() - btns_width).max(20.0);
 
-                                    let label = ui.add_sized(
-                                        Vec2::new(
-                                            label_width,
-                                            ui.spacing().interact_size.y,
-                                        ),
-                                        egui::Label::new(
-                                            RichText::new(&display)
-                                                .size(BODY_SIZE)
-                                                .color(title_color),
-                                        )
-                                        .selectable(false)
-                                        .sense(egui::Sense::click()),
-                                    );
-                                    if label.clicked() {
-                                        ui.ctx().data_mut(|d| {
-                                            d.insert_temp(
-                                                egui::Id::new("select_layer"),
-                                                i,
-                                            );
+                                    if is_renaming {
+                                        let mut text = ui.ctx().data_mut(|d| {
+                                            d.get_temp::<String>(egui::Id::new("layer_rename_text"))
+                                                .unwrap_or_default()
                                         });
-                                    }
-                                    if !is_active {
-                                        label.on_hover_text("Click to select layer");
+                                        let te_id = egui::Id::new(format!("layer_rename_edit_{i}"));
+                                        let te = ui.add_sized(
+                                            Vec2::new(label_width, ui.spacing().interact_size.y),
+                                            egui::TextEdit::singleline(&mut text)
+                                                .id(te_id)
+                                                .font(egui::FontId::proportional(BODY_SIZE))
+                                                .desired_width(label_width),
+                                        );
+                                        // Auto-focus on first frame
+                                        if te.gained_focus() || ui.ctx().data_mut(|d| {
+                                            d.get_temp::<bool>(egui::Id::new("layer_rename_focus")).unwrap_or(true)
+                                        }) {
+                                            te.request_focus();
+                                            ui.ctx().data_mut(|d| {
+                                                d.insert_temp(egui::Id::new("layer_rename_focus"), false);
+                                            });
+                                        }
+                                        // Enter: commit
+                                        if te.lost_focus() && ui.input(|inp| inp.key_pressed(egui::Key::Enter)) {
+                                            let new_name = if text.trim().is_empty() { None } else { Some(text.trim().to_string()) };
+                                            ui.ctx().data_mut(|d| {
+                                                d.insert_temp(egui::Id::new("layer_rename"), (i, new_name));
+                                                d.remove_temp::<usize>(egui::Id::new("layer_rename_idx"));
+                                                d.remove_temp::<String>(egui::Id::new("layer_rename_text"));
+                                                d.remove_temp::<bool>(egui::Id::new("layer_rename_focus"));
+                                            });
+                                        }
+                                        // Escape: cancel
+                                        if ui.input(|inp| inp.key_pressed(egui::Key::Escape)) {
+                                            ui.ctx().data_mut(|d| {
+                                                d.remove_temp::<usize>(egui::Id::new("layer_rename_idx"));
+                                                d.remove_temp::<String>(egui::Id::new("layer_rename_text"));
+                                                d.remove_temp::<bool>(egui::Id::new("layer_rename_focus"));
+                                            });
+                                        }
+                                        ui.ctx().data_mut(|d| {
+                                            d.insert_temp(egui::Id::new("layer_rename_text"), text);
+                                        });
+                                    } else {
+                                        let effect_display =
+                                            layer.effect_name.as_deref().unwrap_or("(empty)");
+                                        let display = match &layer.custom_name {
+                                            Some(cn) => cn.clone(),
+                                            None => format!("{} {}", i + 1, effect_display),
+                                        };
+
+                                        let label = ui.add_sized(
+                                            Vec2::new(
+                                                label_width,
+                                                ui.spacing().interact_size.y,
+                                            ),
+                                            egui::Label::new(
+                                                RichText::new(&display)
+                                                    .size(BODY_SIZE)
+                                                    .color(title_color),
+                                            )
+                                            .selectable(false)
+                                            .sense(egui::Sense::click()),
+                                        );
+                                        if label.clicked() {
+                                            ui.ctx().data_mut(|d| {
+                                                d.insert_temp(
+                                                    egui::Id::new("select_layer"),
+                                                    i,
+                                                );
+                                            });
+                                        }
+                                        // Double-click to rename (when not locked)
+                                        if label.double_clicked() && !layer.locked {
+                                            let initial = layer.custom_name.clone().unwrap_or_default();
+                                            ui.ctx().data_mut(|d| {
+                                                d.insert_temp(egui::Id::new("layer_rename_idx"), i);
+                                                d.insert_temp(egui::Id::new("layer_rename_text"), initial);
+                                                d.insert_temp(egui::Id::new("layer_rename_focus"), true);
+                                            });
+                                        }
+                                        if !is_active {
+                                            label.on_hover_text("Click to select, double-click to rename");
+                                        } else {
+                                            label.on_hover_text("Double-click to rename");
+                                        }
                                     }
 
                                     // Delete
@@ -623,5 +687,53 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
         add_btn.on_hover_text("Add a new layer (max 8)");
     } else {
         add_btn.on_hover_text("Maximum 8 layers reached");
+    }
+
+    // Clear All button (only when >1 layer)
+    if num_layers > 1 {
+        let now = ui.input(|i| i.time);
+        let clear_armed: Option<f64> = ui
+            .ctx()
+            .data_mut(|d| d.get_temp(egui::Id::new("clear_all_armed")));
+        let clear_armed = clear_armed.filter(|t| now - t < 2.0);
+        let is_armed = clear_armed.is_some();
+
+        let (label, color) = if is_armed {
+            ("Confirm?", Color32::from_rgb(0xE0, 0x60, 0x40))
+        } else {
+            ("Clear All", DARK_TEXT_SECONDARY)
+        };
+
+        let clear_btn = ui.add(
+            egui::Button::new(RichText::new(label).size(SMALL_SIZE).color(color))
+                .fill(Color32::TRANSPARENT)
+                .stroke(Stroke::new(1.0, if is_armed { color } else { CARD_BORDER }))
+                .corner_radius(CornerRadius::same(4))
+                .min_size(Vec2::new(ui.available_width(), MIN_INTERACT_HEIGHT)),
+        );
+        if clear_btn.clicked() {
+            if is_armed {
+                // Confirmed — emit signal
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new("clear_all_layers"), true);
+                    d.remove_temp::<f64>(egui::Id::new("clear_all_armed"));
+                });
+            } else {
+                // Arm
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new("clear_all_armed"), now);
+                });
+            }
+        }
+        clear_btn.on_hover_text(if is_armed {
+            "Click again to clear all layers"
+        } else {
+            "Remove all layers and start fresh"
+        });
+
+        // Repaint while armed (for timeout expiry)
+        if is_armed {
+            ui.ctx().request_repaint();
+        }
     }
 }
