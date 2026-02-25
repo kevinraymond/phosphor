@@ -7,6 +7,8 @@ use winit::window::Window;
 use crate::audio::AudioSystem;
 use crate::effect::format::PostProcessDef;
 use crate::effect::EffectLoader;
+use crate::gpu::compositor::Compositor;
+use crate::gpu::layer::{BlendMode, Layer, LayerInfo, LayerStack};
 use crate::gpu::particle::ParticleSystem;
 use crate::gpu::pass_executor::PassExecutor;
 use crate::gpu::placeholder::PlaceholderTexture;
@@ -16,21 +18,17 @@ use crate::gpu::{GpuContext, ShaderPipeline, ShaderUniforms, UniformBuffer};
 use crate::midi::types::TriggerAction;
 use crate::midi::MidiSystem;
 use crate::params::ParamStore;
+use crate::preset::store::LayerPreset;
 use crate::preset::PresetStore;
 use crate::shader::ShaderWatcher;
 use crate::ui::EguiOverlay;
 
 pub struct App {
     pub gpu: GpuContext,
-    pub uniform_buffer: UniformBuffer,
-    pub uniforms: ShaderUniforms,
     pub start_time: Instant,
     pub last_frame: Instant,
     pub frame_count: u32,
     pub shader_watcher: ShaderWatcher,
-    pub current_shader_sources: Vec<String>,
-    pub shader_error: Option<String>,
-    pub param_store: ParamStore,
     pub audio: AudioSystem,
     pub egui_overlay: EguiOverlay,
     pub effect_loader: EffectLoader,
@@ -40,11 +38,14 @@ pub struct App {
     pub pending_midi_triggers: Vec<TriggerAction>,
     // Presets
     pub preset_store: PresetStore,
-    // Multi-pass rendering
-    pub pass_executor: PassExecutor,
+    // Layers
+    pub layer_stack: LayerStack,
+    // Compositor + post-processing (separate from layer_stack to avoid borrow conflicts)
+    pub compositor: Compositor,
     pub post_process: PostProcessChain,
-    pub current_postprocess: PostProcessDef,
     pub placeholder: PlaceholderTexture,
+    // Global uniforms template (time, audio, etc. — params overwritten per-layer)
+    pub uniforms: ShaderUniforms,
 }
 
 impl App {
@@ -68,14 +69,14 @@ impl App {
                     Some(0)
                 }
             });
-        let (shader_source, param_store) = if let Some(idx) = default_idx {
+        let (shader_source, param_store, effect_index) = if let Some(idx) = default_idx {
             let effect = &effect_loader.effects[idx];
             match effect_loader.load_effect_source(&effect.shader) {
                 Ok(source) => {
                     let mut store = ParamStore::new();
                     store.load_from_defs(&effect.inputs);
                     effect_loader.current_effect = Some(idx);
-                    (source, store)
+                    (source, store, Some(idx))
                 }
                 Err(e) => {
                     log::warn!("Failed to load effect: {e}, using default shader");
@@ -83,7 +84,7 @@ impl App {
                         .unwrap_or_else(|_| {
                             include_str!("../../../assets/shaders/default.wgsl").to_string()
                         });
-                    (source, ParamStore::new())
+                    (source, ParamStore::new(), None)
                 }
             }
         } else {
@@ -91,16 +92,16 @@ impl App {
                 .unwrap_or_else(|_| {
                     include_str!("../../../assets/shaders/default.wgsl").to_string()
                 });
-            (source, ParamStore::new())
+            (source, ParamStore::new(), None)
         };
 
         let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &shader_source)?;
-        let uniform_buffer = UniformBuffer::new(&gpu.device);
 
         // Placeholder 1x1 black texture
         let placeholder = PlaceholderTexture::new(&gpu.device, &gpu.queue, hdr_format);
 
-        // Ping-pong feedback targets for the single-pass default
+        // Build initial layer with default effect
+        let uniform_buffer = UniformBuffer::new(&gpu.device);
         let feedback = PingPongTarget::new(
             &gpu.device,
             gpu.surface_config.width,
@@ -108,14 +109,38 @@ impl App {
             hdr_format,
             1.0,
         );
-
-        // Build PassExecutor for the initial single-pass effect
         let pass_executor = PassExecutor::single_pass(
             pipeline,
             feedback,
             &uniform_buffer,
             &gpu.device,
             &placeholder,
+        );
+
+        let initial_layer = Layer {
+            name: "Layer 1".to_string(),
+            effect_index,
+            pass_executor,
+            uniform_buffer,
+            param_store,
+            uniforms: ShaderUniforms::zeroed(),
+            blend_mode: BlendMode::Normal,
+            opacity: 1.0,
+            enabled: true,
+            shader_sources: vec![shader_source],
+            shader_error: None,
+            postprocess: PostProcessDef::default(),
+        };
+
+        let mut layer_stack = LayerStack::new();
+        layer_stack.layers.push(initial_layer);
+
+        // Compositor
+        let compositor = Compositor::new(
+            &gpu.device,
+            hdr_format,
+            gpu.surface_config.width,
+            gpu.surface_config.height,
         );
 
         // Post-processing chain
@@ -137,15 +162,11 @@ impl App {
         let now = Instant::now();
         Ok(Self {
             gpu,
-            uniform_buffer,
             uniforms: ShaderUniforms::zeroed(),
             start_time: now,
             last_frame: now,
             frame_count: 0,
             shader_watcher,
-            current_shader_sources: vec![shader_source],
-            shader_error: None,
-            param_store,
             audio,
             midi,
             pending_midi_triggers: Vec::new(),
@@ -153,24 +174,20 @@ impl App {
             egui_overlay,
             effect_loader,
             window,
-            pass_executor,
+            layer_stack,
+            compositor,
             post_process,
-            current_postprocess: PostProcessDef::default(),
             placeholder,
         })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         self.gpu.resize(width, height);
-        self.pass_executor.resize(
-            &self.gpu.device,
-            width,
-            height,
-            &self.uniform_buffer,
-            &self.placeholder,
-        );
+        for layer in &mut self.layer_stack.layers {
+            layer.resize(&self.gpu.device, width, height, &self.placeholder);
+        }
+        self.compositor.resize(&self.gpu.device, width, height);
         self.post_process.resize(&self.gpu.device, width, height);
-
         self.egui_overlay
             .resize(width, height, self.window.scale_factor() as f32);
     }
@@ -180,7 +197,7 @@ impl App {
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
 
-        // Update time uniforms
+        // Update global time uniforms
         self.uniforms.time = now.duration_since(self.start_time).as_secs_f32();
         self.uniforms.delta_time = dt;
         self.uniforms.resolution = [
@@ -216,97 +233,110 @@ impl App {
             self.uniforms.beat_strength = features.beat_strength;
         }
 
-        // Drain MIDI and apply mappings
-        let defs = self.param_store.defs.clone();
-        let midi_result = self.midi.update(&mut self.param_store, &defs);
-        self.pending_midi_triggers = midi_result.triggers;
-
-        // Pack params
-        self.uniforms.params = self.param_store.pack_to_buffer();
-
-        // Update particle system uniforms
-        if let Some(ref mut ps) = self.pass_executor.particle_system {
-            ps.update_uniforms(
-                dt,
-                self.uniforms.time,
-                self.uniforms.resolution,
-                self.uniforms.beat,
-            );
-            ps.update_audio(
-                self.uniforms.sub_bass,
-                self.uniforms.bass,
-                self.uniforms.mid,
-                self.uniforms.rms,
-                self.uniforms.kick,
-                self.uniforms.onset,
-                self.uniforms.centroid,
-                self.uniforms.flux,
-                self.uniforms.beat,
-                self.uniforms.beat_phase,
-            );
+        // Drain MIDI and apply to active layer's param_store
+        if let Some(layer) = self.layer_stack.active_mut() {
+            let defs = layer.param_store.defs.clone();
+            let midi_result = self.midi.update(&mut layer.param_store, &defs);
+            self.pending_midi_triggers = midi_result.triggers;
         }
 
-        // Check for shader changes — only reload if a relevant file changed
+        // Update each layer's uniforms from global template + per-layer params
+        for layer in &mut self.layer_stack.layers {
+            layer.uniforms = self.uniforms;
+            layer.uniforms.params = layer.param_store.pack_to_buffer();
+
+            // Update particle systems
+            if let Some(ref mut ps) = layer.pass_executor.particle_system {
+                ps.update_uniforms(
+                    dt,
+                    self.uniforms.time,
+                    self.uniforms.resolution,
+                    self.uniforms.beat,
+                );
+                ps.update_audio(
+                    self.uniforms.sub_bass,
+                    self.uniforms.bass,
+                    self.uniforms.mid,
+                    self.uniforms.rms,
+                    self.uniforms.kick,
+                    self.uniforms.onset,
+                    self.uniforms.centroid,
+                    self.uniforms.flux,
+                    self.uniforms.beat,
+                    self.uniforms.beat_phase,
+                );
+            }
+        }
+
+        // Shader hot-reload — iterate all layers
         let changes = self.shader_watcher.drain_changes();
         if !changes.is_empty() {
-            if let Some(idx) = self.effect_loader.current_effect {
-                let effect = self.effect_loader.effects[idx].clone();
-                let passes = effect.normalized_passes();
-                let lib_changed = changes.iter().any(|p| p.to_string_lossy().contains("/lib/"));
+            let lib_changed = changes.iter().any(|p| p.to_string_lossy().contains("/lib/"));
+            let hdr_format = GpuContext::hdr_format();
 
-                // Hot-reload each pass's fragment shader
-                let hdr_format = GpuContext::hdr_format();
+            for layer in &mut self.layer_stack.layers {
+                let effect_idx = match layer.effect_index {
+                    Some(idx) => idx,
+                    None => continue,
+                };
+                let effect = match self.effect_loader.effects.get(effect_idx) {
+                    Some(e) => e.clone(),
+                    None => continue,
+                };
+                let passes = effect.normalized_passes();
+
+                // Hot-reload fragment shaders
                 for (i, pass_def) in passes.iter().enumerate() {
-                    let pass_relevant = lib_changed
-                        || changes.iter().any(|p| p.ends_with(&pass_def.shader));
+                    let pass_relevant =
+                        lib_changed || changes.iter().any(|p| p.ends_with(&pass_def.shader));
                     if !pass_relevant {
                         continue;
                     }
                     match self.effect_loader.load_effect_source(&pass_def.shader) {
                         Ok(source) => {
-                            let changed = self
-                                .current_shader_sources
+                            let changed = layer
+                                .shader_sources
                                 .get(i)
                                 .map_or(true, |prev| *prev != source);
                             if changed {
                                 log::info!("Shader changed: pass {} ({})", i, pass_def.shader);
-                                match self.pass_executor.recompile_pass(
+                                match layer.pass_executor.recompile_pass(
                                     i,
                                     &self.gpu.device,
                                     hdr_format,
                                     &source,
-                                    &self.uniform_buffer,
+                                    &layer.uniform_buffer,
                                     &self.placeholder,
                                 ) {
                                     Ok(()) => {
-                                        if i < self.current_shader_sources.len() {
-                                            self.current_shader_sources[i] = source;
+                                        if i < layer.shader_sources.len() {
+                                            layer.shader_sources[i] = source;
                                         }
-                                        self.shader_error = None;
+                                        layer.shader_error = None;
                                         log::info!("Pass {} recompiled successfully", i);
                                     }
                                     Err(e) => {
                                         log::error!("Pass {} compilation failed: {e}", i);
-                                        self.shader_error = Some(e);
+                                        layer.shader_error = Some(e);
                                     }
                                 }
                             }
                         }
                         Err(e) => {
                             log::error!("Failed to reload shader for pass {}: {e}", i);
-                            self.shader_error = Some(format!("Read error: {e}"));
+                            layer.shader_error = Some(format!("Read error: {e}"));
                         }
                     }
                 }
 
-                // Hot-reload compute shader if applicable
+                // Hot-reload compute shader
                 if let Some(ref particle_def) = effect.particles {
                     if !particle_def.compute_shader.is_empty() {
                         let compute_relevant = changes
                             .iter()
                             .any(|p| p.ends_with(&particle_def.compute_shader));
                         if compute_relevant {
-                            if let Some(ref mut ps) = self.pass_executor.particle_system {
+                            if let Some(ref mut ps) = layer.pass_executor.particle_system {
                                 match self
                                     .effect_loader
                                     .load_compute_source(&particle_def.compute_shader)
@@ -320,7 +350,7 @@ impl App {
                                             Err(e) => log::error!("Compute shader error: {e}"),
                                         }
                                     }
-                                    Ok(_) => {} // content unchanged, skip
+                                    Ok(_) => {}
                                     Err(e) => {
                                         log::error!("Failed to reload compute shader: {e}")
                                     }
@@ -340,15 +370,16 @@ impl App {
     ) -> Option<ParticleSystem> {
         let hdr_format = GpuContext::hdr_format();
 
-        // Load compute shader source
         let compute_source = if particles.compute_shader.is_empty() {
-            // Use builtin default
             include_str!("../../../assets/shaders/builtin/particle_sim.wgsl").to_string()
         } else {
             match self.effect_loader.load_compute_source(&particles.compute_shader) {
                 Ok(src) => src,
                 Err(e) => {
-                    log::error!("Failed to load compute shader '{}': {e}", particles.compute_shader);
+                    log::error!(
+                        "Failed to load compute shader '{}': {e}",
+                        particles.compute_shader
+                    );
                     return None;
                 }
             }
@@ -366,75 +397,182 @@ impl App {
         }
     }
 
+    /// Load an effect on the active layer.
     pub fn load_effect(&mut self, index: usize) {
-        if let Some(effect) = self.effect_loader.effects.get(index).cloned() {
-            let hdr_format = GpuContext::hdr_format();
-            let passes = effect.normalized_passes();
-            if passes.is_empty() {
-                log::error!("Effect '{}' has no shader or passes defined", effect.name);
-                return;
-            }
+        self.load_effect_on_layer(self.layer_stack.active_layer, index);
+    }
 
-            match PassExecutor::new(
-                &self.gpu.device,
-                hdr_format,
-                self.gpu.surface_config.width,
-                self.gpu.surface_config.height,
-                &passes,
-                &self.effect_loader,
-                &self.uniform_buffer,
-                &self.placeholder,
-            ) {
-                Ok(mut executor) => {
-                    // Build particle system if effect defines one
-                    if let Some(ref particle_def) = effect.particles {
-                        executor.particle_system = self.build_particle_system(particle_def);
-                    }
-                    self.pass_executor = executor;
-                    self.param_store.load_from_defs(&effect.inputs);
-                    self.shader_error = None;
-                    self.effect_loader.current_effect = Some(index);
-                    self.shader_watcher.drain_changes();
-                    // Apply per-effect postprocess overrides
-                    let pp = effect.postprocess.clone().unwrap_or_default();
+    /// Load an effect on a specific layer.
+    pub fn load_effect_on_layer(&mut self, layer_idx: usize, effect_index: usize) {
+        let effect = match self.effect_loader.effects.get(effect_index).cloned() {
+            Some(e) => e,
+            None => return,
+        };
+        if layer_idx >= self.layer_stack.layers.len() {
+            return;
+        }
+
+        let hdr_format = GpuContext::hdr_format();
+        let passes = effect.normalized_passes();
+        if passes.is_empty() {
+            log::error!("Effect '{}' has no shader or passes defined", effect.name);
+            return;
+        }
+
+        // Build particle system before borrowing layer mutably (avoids borrow conflict)
+        let particle_system = effect
+            .particles
+            .as_ref()
+            .and_then(|pd| self.build_particle_system(pd));
+
+        // Need the layer's uniform buffer reference for PassExecutor::new.
+        // Use a temporary reference scope.
+        let uniform_buffer_ref = &self.layer_stack.layers[layer_idx].uniform_buffer;
+        let executor_result = PassExecutor::new(
+            &self.gpu.device,
+            hdr_format,
+            self.gpu.surface_config.width,
+            self.gpu.surface_config.height,
+            &passes,
+            &self.effect_loader,
+            uniform_buffer_ref,
+            &self.placeholder,
+        );
+
+        match executor_result {
+            Ok(mut executor) => {
+                executor.particle_system = particle_system;
+
+                let layer = &mut self.layer_stack.layers[layer_idx];
+                layer.pass_executor = executor;
+                layer.param_store.load_from_defs(&effect.inputs);
+                layer.shader_error = None;
+                layer.effect_index = Some(effect_index);
+                // Apply per-effect postprocess overrides
+                let pp = effect.postprocess.clone().unwrap_or_default();
+                layer.postprocess = pp.clone();
+                // If this is the active layer, update global postprocess
+                if layer_idx == self.layer_stack.active_layer {
                     self.post_process.enabled = pp.enabled;
-                    self.current_postprocess = pp;
-                    // Track shader sources for hot-reload
-                    self.current_shader_sources = passes
-                        .iter()
-                        .filter_map(|p| self.effect_loader.load_effect_source(&p.shader).ok())
-                        .collect();
-                    log::info!(
-                        "Loaded effect: {} ({} pass{})",
-                        effect.name,
-                        passes.len(),
-                        if passes.len() == 1 { "" } else { "es" }
-                    );
+                    self.effect_loader.current_effect = Some(effect_index);
                 }
-                Err(e) => {
-                    log::error!("Failed to load effect '{}': {e}", effect.name);
-                    self.shader_error = Some(format!("Load error: {e}"));
-                }
+                // Track shader sources for hot-reload
+                layer.shader_sources = passes
+                    .iter()
+                    .filter_map(|p| self.effect_loader.load_effect_source(&p.shader).ok())
+                    .collect();
+                self.shader_watcher.drain_changes();
+                log::info!(
+                    "Layer {}: loaded effect '{}' ({} pass{})",
+                    layer_idx,
+                    effect.name,
+                    passes.len(),
+                    if passes.len() == 1 { "" } else { "es" }
+                );
+            }
+            Err(e) => {
+                log::error!("Failed to load effect '{}': {e}", effect.name);
+                self.layer_stack.layers[layer_idx].shader_error =
+                    Some(format!("Load error: {e}"));
             }
         }
     }
 
-    pub fn save_preset(&mut self, name: &str) {
-        let effect_name = self
-            .effect_loader
-            .current_effect
-            .and_then(|i| self.effect_loader.effects.get(i))
-            .map(|e| e.name.clone())
-            .unwrap_or_default();
-        if effect_name.is_empty() {
-            log::warn!("No effect loaded, cannot save preset");
+    /// Add a new empty layer with the default shader.
+    pub fn add_layer(&mut self) {
+        let num = self.layer_stack.layers.len();
+        if num >= 8 {
             return;
         }
+        let name = format!("Layer {}", num + 1);
+        let hdr_format = GpuContext::hdr_format();
+
+        let source = std::fs::read_to_string("assets/shaders/default.wgsl").unwrap_or_else(|_| {
+            include_str!("../../../assets/shaders/default.wgsl").to_string()
+        });
+
+        let uniform_buffer = UniformBuffer::new(&self.gpu.device);
+        let feedback = PingPongTarget::new(
+            &self.gpu.device,
+            self.gpu.surface_config.width,
+            self.gpu.surface_config.height,
+            hdr_format,
+            1.0,
+        );
+
+        match ShaderPipeline::new(&self.gpu.device, hdr_format, &source) {
+            Ok(pipeline) => {
+                let executor = PassExecutor::single_pass(
+                    pipeline,
+                    feedback,
+                    &uniform_buffer,
+                    &self.gpu.device,
+                    &self.placeholder,
+                );
+
+                self.layer_stack.layers.push(Layer {
+                    name,
+                    effect_index: None,
+                    pass_executor: executor,
+                    uniform_buffer,
+                    param_store: ParamStore::new(),
+                    uniforms: ShaderUniforms::zeroed(),
+                    blend_mode: BlendMode::Normal,
+                    opacity: 1.0,
+                    enabled: true,
+                    shader_sources: vec![source],
+                    shader_error: None,
+                    postprocess: PostProcessDef::default(),
+                });
+                // Select the new layer
+                self.layer_stack.active_layer = self.layer_stack.layers.len() - 1;
+                log::info!("Added layer {}", self.layer_stack.layers.len());
+            }
+            Err(e) => {
+                log::error!("Failed to create layer: {e}");
+            }
+        }
+    }
+
+    /// Sync effect_loader.current_effect to match active layer.
+    pub fn sync_active_layer(&mut self) {
+        if let Some(layer) = self.layer_stack.active() {
+            self.effect_loader.current_effect = layer.effect_index;
+        }
+    }
+
+    pub fn save_preset(&mut self, name: &str) {
+        let layer_presets: Vec<LayerPreset> = self
+            .layer_stack
+            .layers
+            .iter()
+            .map(|l| {
+                let effect_name = l
+                    .effect_index
+                    .and_then(|i| self.effect_loader.effects.get(i))
+                    .map(|e| e.name.clone())
+                    .unwrap_or_default();
+                LayerPreset {
+                    effect_name,
+                    params: l.param_store.values.clone(),
+                    blend_mode: l.blend_mode,
+                    opacity: l.opacity,
+                    enabled: l.enabled,
+                }
+            })
+            .collect();
+
+        if layer_presets.iter().all(|l| l.effect_name.is_empty()) {
+            log::warn!("No effects loaded, cannot save preset");
+            return;
+        }
+
+        let postprocess = self.current_postprocess();
         match self.preset_store.save(
             name,
-            &effect_name,
-            &self.param_store.values,
-            &self.current_postprocess,
+            layer_presets,
+            self.layer_stack.active_layer,
+            &postprocess,
         ) {
             Ok(idx) => log::info!("Saved preset '{}' at index {}", name, idx),
             Err(e) => log::error!("Failed to save preset: {e}"),
@@ -447,36 +585,69 @@ impl App {
             None => return,
         };
 
-        // Find and load the effect by name
-        let effect_idx = self
-            .effect_loader
-            .effects
-            .iter()
-            .position(|e| e.name == preset.effect_name);
-        match effect_idx {
-            Some(idx) => {
-                self.load_effect(idx);
-                // Apply saved params (skip unknown)
-                for (name, value) in &preset.params {
-                    if self.param_store.values.contains_key(name) {
-                        self.param_store.set(name, value.clone());
-                    } else {
-                        log::warn!("Preset param '{}' not found in effect, skipping", name);
+        // Remove extra layers or add missing ones to match preset
+        while self.layer_stack.layers.len() > preset.layers.len()
+            && self.layer_stack.layers.len() > 1
+        {
+            let last = self.layer_stack.layers.len() - 1;
+            self.layer_stack.layers.remove(last);
+        }
+        while self.layer_stack.layers.len() < preset.layers.len() {
+            self.add_layer();
+        }
+
+        // Load each layer
+        for (i, lp) in preset.layers.iter().enumerate() {
+            if !lp.effect_name.is_empty() {
+                let effect_idx = self
+                    .effect_loader
+                    .effects
+                    .iter()
+                    .position(|e| e.name == lp.effect_name);
+                if let Some(idx) = effect_idx {
+                    self.load_effect_on_layer(i, idx);
+                } else {
+                    log::warn!(
+                        "Effect '{}' not found for layer {}, skipping",
+                        lp.effect_name,
+                        i
+                    );
+                }
+            }
+
+            if let Some(layer) = self.layer_stack.layers.get_mut(i) {
+                for (name, value) in &lp.params {
+                    if layer.param_store.values.contains_key(name) {
+                        layer.param_store.set(name, value.clone());
                     }
                 }
-                // Apply postprocess
-                self.current_postprocess = preset.postprocess.clone();
-                self.post_process.enabled = preset.postprocess.enabled;
-                self.preset_store.current_preset = Some(index);
-                log::info!("Loaded preset '{}'", self.preset_store.presets[index].0);
-            }
-            None => {
-                log::warn!(
-                    "Effect '{}' not found for preset, skipping load",
-                    preset.effect_name
-                );
+                layer.blend_mode = lp.blend_mode;
+                layer.opacity = lp.opacity;
+                layer.enabled = lp.enabled;
             }
         }
+
+        // Restore active layer + global postprocess
+        self.layer_stack.active_layer = preset
+            .active_layer
+            .min(self.layer_stack.layers.len().saturating_sub(1));
+        self.sync_active_layer();
+        self.post_process.enabled = preset.postprocess.enabled;
+        self.preset_store.current_preset = Some(index);
+        log::info!("Loaded preset '{}'", self.preset_store.presets[index].0);
+    }
+
+    /// Collect LayerInfo snapshots for UI (avoids borrow conflicts).
+    pub fn layer_infos(&self) -> Vec<LayerInfo> {
+        self.layer_stack.layer_infos(&self.effect_loader.effects)
+    }
+
+    /// Get the current postprocess def from active layer.
+    pub fn current_postprocess(&self) -> PostProcessDef {
+        self.layer_stack
+            .active()
+            .map(|l| l.postprocess.clone())
+            .unwrap_or_default()
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -492,30 +663,87 @@ impl App {
                     label: Some("phosphor-encoder"),
                 });
 
-        // Execute all effect passes (single or multi-pass)
-        let final_target = self.pass_executor.execute(
-            &mut encoder,
-            &self.uniform_buffer,
-            &self.gpu.queue,
-            &self.uniforms,
-        );
+        // Execute all enabled layers
+        let enabled_layers: Vec<usize> = self
+            .layer_stack
+            .layers
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.enabled)
+            .map(|(i, _)| i)
+            .collect();
 
-        // Post-processing → surface
-        self.post_process.render(
-            &self.gpu.device,
-            &self.gpu.queue,
-            &mut encoder,
-            final_target,
-            &surface_view,
-            self.uniforms.time,
-            self.uniforms.rms,
-            self.uniforms.onset,
-            self.uniforms.flatness,
-            &self.current_postprocess,
-        );
+        if enabled_layers.is_empty() {
+            // Nothing to render — just clear and present
+            self.post_process.render(
+                &self.gpu.device,
+                &self.gpu.queue,
+                &mut encoder,
+                &self.compositor.accumulator.write_target(),
+                &surface_view,
+                self.uniforms.time,
+                self.uniforms.rms,
+                self.uniforms.onset,
+                self.uniforms.flatness,
+                &PostProcessDef::default(),
+            );
+        } else if enabled_layers.len() == 1 {
+            // Single-layer fast path: skip compositing entirely
+            let idx = enabled_layers[0];
+            let final_target = self.layer_stack.layers[idx].execute(&mut encoder, &self.gpu.queue);
+            let postprocess = self.current_postprocess();
 
-        // Flip ping-pong for next frame
-        self.pass_executor.flip();
+            self.post_process.render(
+                &self.gpu.device,
+                &self.gpu.queue,
+                &mut encoder,
+                final_target,
+                &surface_view,
+                self.uniforms.time,
+                self.uniforms.rms,
+                self.uniforms.onset,
+                self.uniforms.flatness,
+                &postprocess,
+            );
+        } else {
+            // Multi-layer: render each layer, then composite
+            // Collect layer render results
+            let mut layer_outputs: Vec<(&crate::gpu::render_target::RenderTarget, BlendMode, f32)> =
+                Vec::new();
+            for &idx in &enabled_layers {
+                let target = self.layer_stack.layers[idx].execute(&mut encoder, &self.gpu.queue);
+                let blend = self.layer_stack.layers[idx].blend_mode;
+                let opacity = self.layer_stack.layers[idx].opacity;
+                layer_outputs.push((target, blend, opacity));
+            }
+
+            // Composite layers
+            let composited = self.compositor.composite(
+                &self.gpu.device,
+                &self.gpu.queue,
+                &mut encoder,
+                &layer_outputs,
+            );
+
+            let postprocess = self.current_postprocess();
+            self.post_process.render(
+                &self.gpu.device,
+                &self.gpu.queue,
+                &mut encoder,
+                composited,
+                &surface_view,
+                self.uniforms.time,
+                self.uniforms.rms,
+                self.uniforms.onset,
+                self.uniforms.flatness,
+                &postprocess,
+            );
+        }
+
+        // Flip ping-pong for all layers
+        for layer in &mut self.layer_stack.layers {
+            layer.flip();
+        }
         self.frame_count = self.frame_count.wrapping_add(1);
 
         // egui overlay → surface

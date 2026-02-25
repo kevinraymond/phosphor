@@ -11,6 +11,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 **BPM Detection Rewrite: COMPLETE** — FFT autocorrelation, Kalman filter, octave disambiguation
 **MIDI Input: COMPLETE** — midir integration, MIDI learn, auto-connect, hot-plug, config persistence
 **Preset Save/Load: COMPLETE** — global presets with effect + params + postprocess, MIDI next/prev
+**Layer Composition: COMPLETE** — up to 8 layers with blend modes, opacity, GPU compositing
 
 ### What's Built
 
@@ -77,7 +78,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Hot-plug detection: polls `list_ports()` every 2s, auto-disconnect on removal, auto-reconnect on reappear
 - MIDI learn: click "M" on any param or trigger, move a knob/press a button to bind
 - Params: Float and Bool mappable via CC (raw 0-127 scaled to param range, no smoothing)
-- Triggers: NextEffect, PrevEffect, TogglePostProcess, ToggleOverlay, NextPreset, PrevPreset with rising-edge detection
+- Triggers: NextEffect, PrevEffect, TogglePostProcess, ToggleOverlay, NextPreset, PrevPreset, NextLayer, PrevLayer with rising-edge detection
 - Config persists to `~/.config/phosphor/midi.json` (JSON via `dirs` crate)
 - Channel 0 = omni (respond to all channels)
 - UI: port dropdown + activity dot + learn prompt in left panel, per-param MIDI badges + trigger learn in right panel, MIDI status in status bar
@@ -93,14 +94,30 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - MIDI triggers: NextPreset/PrevPreset cycle through preset list
 - Persists to disk as JSON, survives app restart
 
+#### Layer Composition
+- Up to 8 layers, each with own `PassExecutor`, `UniformBuffer`, `ParamStore`, `ShaderUniforms`
+- 7 blend modes: Normal, Add, Multiply, Screen, Overlay, SoftLight, Difference
+- Per-layer opacity (0-1), enable/disable toggle
+- GPU `Compositor`: ping-pong accumulator blits first layer, composites subsequent layers with blend shader
+- Single-layer fast path: skip compositing entirely when only 1 layer enabled (zero overhead, backward compatible)
+- `LayerStack` manages ordered layer vec + active_layer index
+- `LayerInfo` snapshot struct passed to UI to avoid borrow conflicts
+- Layer panel in left sidebar: enable checkbox, layer name/effect, up/down reorder, delete, blend mode dropdown, opacity slider
+- Effects panel loads effects onto active layer
+- Shader hot-reload iterates ALL layers (each tracks own shader_sources)
+- Particle systems per-layer (each layer can have particles independently)
+- MIDI triggers: NextLayer/PrevLayer cycle active layer
+- Keyboard: `[`/`]` cycle active layer
+- Presets operate on active layer only (save/load active layer's effect + params + postprocess)
+
 ### Known Issues
-- ~29 compiler warnings (mostly unused items reserved for future phases)
+- ~33 compiler warnings (mostly unused items reserved for future phases)
 - Fonts directory (`assets/fonts/`) is empty — Inter and JetBrains Mono not yet bundled
 - Reduced motion detection (`ui/accessibility/motion.rs`) is stubbed for macOS/Windows
 
 ### Architecture
 ```
-Main Thread: winit event loop → drain audio/midi/shader channels → update uniforms → PassExecutor (effect passes) → PostProcessChain (bloom/tonemap) → egui overlay → present
+Main Thread: winit event loop → drain audio/midi/shader channels → update per-layer uniforms → per-layer PassExecutor → Compositor (multi-layer blend) → PostProcessChain (bloom/tonemap) → egui overlay → present
 Audio Thread: cpal callback → ring buffer → multi-res FFT → adaptive normalize → beat detect → smooth → send AudioFeatures
 MIDI Thread: midir callback → parse 3-byte MIDI → send MidiMessage via crossbeam bounded(64)
 File Watcher Thread: notify → debounce → send changed paths
@@ -110,17 +127,23 @@ No mutexes in hot path. Three threads + cpal callback + midir callback.
 
 ### Render Pipeline
 ```
-Compute Dispatch (particle sim, if active)
-                      ↓
-Effect Pass(es) → PingPong HDR Target(s) [Rgba16Float]
-                      ↓
-Particle Render Pass (instanced quads, additive blend, LoadOp::Load)
-                      ↓
+For each enabled layer:
+  Compute Dispatch (particle sim, if active)
+                        ↓
+  Effect Pass(es) → PingPong HDR Target(s) [Rgba16Float]
+                        ↓
+  Particle Render Pass (instanced quads, additive blend, LoadOp::Load)
+
+Single layer (fast path):
+  Layer output → PostProcessChain → Surface [sRGB]
+Multiple layers:
+  Layer outputs → Compositor (blit first, blend subsequent) → Accumulator HDR
+                        ↓
 PostProcessChain (if enabled):
   Bloom Extract (quarter-res) → Blur H → Blur V → Composite → Surface [sRGB]
 PostProcessChain (if disabled):
   Simple Blit → Surface [sRGB]
-                      ↓
+                        ↓
 egui Overlay → Surface
 ```
 
@@ -137,11 +160,15 @@ egui Overlay → Surface
 - Particle render uses vertex-pulling (no vertex buffer) — 6 vertices per instance expand to screen-space quads with aspect ratio correction.
 - midir 0.10: `MidiInputConnection<()>` is RAII — drop closes the port. No explicit close needed.
 - Presets stored at `~/.config/phosphor/presets/{name}.json`. `PresetStore` re-scans after every save/delete.
+- Layer system: each Layer owns its own `PassExecutor` + `UniformBuffer` + `ParamStore` + `ShaderUniforms`. Compositor is separate App field (not inside LayerStack) to avoid borrow conflicts when passing layer render targets to compositor.
+- `LayerInfo` snapshot struct: collected before mutable UI borrow to avoid simultaneous mutable+immutable borrow of layers vec.
+- Compositor uses ping-pong accumulator: blit first layer, then composite(accumulator.read, layer[i]) → accumulator.write for each subsequent layer, tracking read/write indices manually without flipping.
 
 ### Controls
 - `D` — Toggle egui overlay
 - `F` — Toggle fullscreen
 - `Esc` — Quit
+- `[` / `]` — Cycle active layer
 - `Tab` — Cycle widgets (when overlay visible)
 - Sliders have +/- buttons for WCAG 2.5.7 compliance
 
@@ -166,5 +193,5 @@ The complete 28-week, 4-phase plan is at `~/ai/audio/phosphor-internal/cross-pla
 3. ~~Beat detection~~ ✓ (3-stage: onset → tempo → scheduler)
 4. ~~MIDI input with MIDI learn~~ ✓
 5. ~~Preset save/load~~ ✓
-6. Layer-based composition with blend modes
+6. ~~Layer-based composition with blend modes~~ ✓
 7. OSC input/output

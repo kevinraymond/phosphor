@@ -1,5 +1,7 @@
+pub mod compositor;
 pub mod context;
 pub mod fullscreen_quad;
+pub mod layer;
 pub mod particle;
 pub mod pass_executor;
 pub mod pipeline;

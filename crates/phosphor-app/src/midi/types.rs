@@ -25,6 +25,8 @@ pub enum TriggerAction {
     ToggleOverlay,
     NextPreset,
     PrevPreset,
+    NextLayer,
+    PrevLayer,
 }
 
 impl TriggerAction {
@@ -35,6 +37,8 @@ impl TriggerAction {
         TriggerAction::ToggleOverlay,
         TriggerAction::NextPreset,
         TriggerAction::PrevPreset,
+        TriggerAction::NextLayer,
+        TriggerAction::PrevLayer,
     ];
 
     pub fn display_name(&self) -> &'static str {
@@ -45,6 +49,8 @@ impl TriggerAction {
             TriggerAction::ToggleOverlay => "Toggle Overlay",
             TriggerAction::NextPreset => "Next Preset",
             TriggerAction::PrevPreset => "Prev Preset",
+            TriggerAction::NextLayer => "Next Layer",
+            TriggerAction::PrevLayer => "Prev Layer",
         }
     }
 }
