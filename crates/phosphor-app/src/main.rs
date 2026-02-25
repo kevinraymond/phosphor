@@ -8,6 +8,7 @@ mod params;
 mod preset;
 mod shader;
 mod ui;
+mod web;
 
 use std::sync::Arc;
 
@@ -142,14 +143,15 @@ impl ApplicationHandler for PhosphorApp {
                     let particle_count = app
                         .layer_stack
                         .active()
-                        .and_then(|l| l.pass_executor.particle_system.as_ref())
+                        .and_then(|l| l.as_effect())
+                        .and_then(|e| e.pass_executor.particle_system.as_ref())
                         .map(|ps| ps.max_particles);
 
                     // Get active layer's shader error
                     let shader_error = app
                         .layer_stack
                         .active()
-                        .and_then(|l| l.shader_error.clone());
+                        .and_then(|l| l.shader_error().map(|s| s.to_string()));
 
                     // Get active layer's param_store (mutable for MIDI badges)
                     let active_params = app.layer_stack.active_mut();
@@ -166,6 +168,7 @@ impl ApplicationHandler for PhosphorApp {
                             particle_count,
                             &mut app.midi,
                             &mut app.osc,
+                            &mut app.web,
                             &app.preset_store,
                             &layer_infos,
                             active_layer,
@@ -349,6 +352,7 @@ impl ApplicationHandler for PhosphorApp {
                 // Handle MIDI + OSC triggers
                 let mut triggers: Vec<_> = app.pending_midi_triggers.drain(..).collect();
                 triggers.extend(app.pending_osc_triggers.drain(..));
+                triggers.extend(app.pending_web_triggers.drain(..));
                 for trigger in triggers {
                     use crate::midi::types::TriggerAction;
                     let num_effects = app.effect_loader.effects.len();
@@ -357,7 +361,7 @@ impl ApplicationHandler for PhosphorApp {
                             let current = app
                                 .layer_stack
                                 .active()
-                                .and_then(|l| l.effect_index)
+                                .and_then(|l| l.effect_index())
                                 .unwrap_or(0);
                             app.load_effect((current + 1) % num_effects);
                         }
@@ -365,7 +369,7 @@ impl ApplicationHandler for PhosphorApp {
                             let current = app
                                 .layer_stack
                                 .active()
-                                .and_then(|l| l.effect_index)
+                                .and_then(|l| l.effect_index())
                                 .unwrap_or(0);
                             app.load_effect(
                                 if current == 0 { num_effects - 1 } else { current - 1 },

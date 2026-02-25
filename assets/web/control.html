@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Phosphor</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #1a1a1a; --surface: #242424; --surface2: #2e2e2e;
+  --border: #3a3a3a; --text: #e0e0e0; --text2: #888;
+  --accent: #5090e0; --accent2: #3a70c0;
+  --beat: #ff6040; --green: #50c070;
+  --slider-h: 52px; --btn-min: 52px;
+}
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, system-ui, sans-serif; font-size: 15px; overflow: hidden; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+body { display: flex; flex-direction: column; }
+
+/* Header */
+.header { display: flex; align-items: center; padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; gap: 10px; min-height: 48px; }
+.header h1 { font-size: 17px; font-weight: 600; }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; background: #555; flex-shrink: 0; transition: background 0.15s; }
+.status-dot.connected { background: var(--green); }
+.status-dot.beat { background: var(--beat); }
+.header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text2); }
+
+/* Audio bars — labeled, 60px tall */
+.audio-section { background: var(--surface); padding: 6px 12px 8px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.audio-bars { display: flex; height: 56px; gap: 4px; }
+.audio-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.audio-bar { flex: 1; width: 100%; background: var(--border); border-radius: 3px; position: relative; overflow: hidden; }
+.audio-bar-fill { position: absolute; bottom: 0; left: 0; right: 0; background: var(--accent); border-radius: 3px; transition: height 60ms linear; }
+.audio-label { font-size: 9px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.3px; line-height: 1; }
+
+/* Tabs — WCAG 2.5.8 min 48px */
+.tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.tab { flex: 1; padding: 14px 8px; text-align: center; font-size: 14px; color: var(--text2); border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; min-height: 48px; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* Content */
+.content { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 10px; }
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* Section */
+.section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text2); letter-spacing: 0.5px; margin: 16px 0 8px; }
+.section-title:first-child { margin-top: 4px; }
+
+/* Effects grid — min 52px buttons */
+.effects-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.effect-btn { padding: 14px 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; text-align: center; cursor: pointer; min-height: var(--btn-min); display: flex; align-items: center; justify-content: center; }
+.effect-btn.active { background: var(--accent2); border-color: var(--accent); color: #fff; }
+.effect-btn:active { opacity: 0.8; }
+
+/* Param sliders — 52px height, fat thumb */
+.param-row { margin-bottom: 10px; }
+.param-label { display: flex; justify-content: space-between; margin-bottom: 4px; padding: 0 2px; }
+.param-name { font-size: 13px; color: var(--text2); }
+.param-value { font-size: 13px; color: var(--text2); font-variant-numeric: tabular-nums; }
+.param-slider { -webkit-appearance: none; appearance: none; width: 100%; height: var(--slider-h); background: var(--surface2); border-radius: 8px; outline: none; touch-action: none; border: 1px solid var(--border); }
+.param-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 32px; height: 44px; background: var(--accent); border-radius: 6px; cursor: pointer; }
+.param-slider::-moz-range-thumb { width: 32px; height: 44px; background: var(--accent); border-radius: 6px; cursor: pointer; border: none; }
+.param-slider::-webkit-slider-runnable-track { height: var(--slider-h); border-radius: 8px; }
+.param-slider::-moz-range-track { height: var(--slider-h); border-radius: 8px; background: var(--surface2); }
+
+/* Bool toggles — 52px min */
+.param-toggle { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; min-height: var(--btn-min); margin-bottom: 10px; font-size: 14px; }
+.param-toggle.on { background: var(--accent2); border-color: var(--accent); }
+.param-toggle-dot { width: 14px; height: 14px; border-radius: 50%; background: #555; flex-shrink: 0; }
+.param-toggle.on .param-toggle-dot { background: #fff; }
+
+/* Layers — bigger cards */
+.layer-card { display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; min-height: var(--btn-min); }
+.layer-card.active { border-color: var(--accent); border-width: 2px; }
+.layer-card.disabled { opacity: 0.5; }
+.layer-info { flex: 1; cursor: pointer; min-height: 40px; display: flex; flex-direction: column; justify-content: center; }
+.layer-name { font-size: 14px; font-weight: 500; }
+.layer-effect { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.layer-controls { display: flex; align-items: center; gap: 8px; }
+.layer-opacity { width: 70px; }
+.layer-opacity input { width: 100%; height: 32px; -webkit-appearance: none; appearance: none; background: var(--border); border-radius: 4px; touch-action: none; }
+.layer-opacity input::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 28px; background: var(--accent); border-radius: 4px; }
+.layer-opacity input::-moz-range-thumb { width: 18px; height: 28px; background: var(--accent); border-radius: 4px; border: none; }
+
+/* Blend dropdown — bigger */
+.blend-select { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 8px; font-size: 13px; min-height: 40px; }
+
+/* Enable checkbox — bigger touch target */
+.layer-cb { width: 24px; height: 24px; accent-color: var(--accent); cursor: pointer; }
+
+/* Presets — bigger */
+.preset-btn { display: block; width: 100%; padding: 16px 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; margin-bottom: 8px; min-height: var(--btn-min); }
+.preset-btn.active { background: var(--accent2); border-color: var(--accent); color: #fff; }
+.preset-btn:active { opacity: 0.8; }
+
+/* Triggers — bigger */
+.trigger-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.trigger-btn { padding: 16px 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; text-align: center; cursor: pointer; min-height: var(--btn-min); }
+.trigger-btn:active { background: var(--accent2); }
+
+/* PostProcess toggle */
+.pp-toggle { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; margin-bottom: 12px; min-height: var(--btn-min); font-size: 14px; }
+.pp-toggle.on { border-color: var(--accent); }
+.pp-toggle:active { opacity: 0.8; }
+
+/* Empty state */
+.empty-msg { text-align: center; color: var(--text2); padding: 32px 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="status-dot" id="statusDot"></div>
+  <h1>Phosphor</h1>
+  <div class="header-right">
+    <span id="bpmDisplay"></span>
+    <div class="status-dot" id="beatDot"></div>
+  </div>
+</div>
+
+<div class="audio-section">
+  <div class="audio-bars" id="audioBars">
+    <div class="audio-col"><div class="audio-bar"><div class="audio-bar-fill" id="bar0"></div></div><div class="audio-label">Sub</div></div>
+    <div class="audio-col"><div class="audio-bar"><div class="audio-bar-fill" id="bar1"></div></div><div class="audio-label">Bass</div></div>
+    <div class="audio-col"><div class="audio-bar"><div class="audio-bar-fill" id="bar2"></div></div><div class="audio-label">Low</div></div>
+    <div class="audio-col"><div class="audio-bar"><div class="audio-bar-fill" id="bar3"></div></div><div class="audio-label">Mid</div></div>
+    <div class="audio-col"><div class="audio-bar"><div class="audio-bar-fill" id="bar4"></div></div><div class="audio-label">High</div></div>
+    <div class="audio-col"><div class="audio-bar"><div class="audio-bar-fill" id="bar5"></div></div><div class="audio-label">Pres</div></div>
+    <div class="audio-col"><div class="audio-bar"><div class="audio-bar-fill" id="bar6"></div></div><div class="audio-label">Air</div></div>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-panel="effects">Effects</div>
+  <div class="tab" data-panel="params">Params</div>
+  <div class="tab" data-panel="layers">Layers</div>
+  <div class="tab" data-panel="presets">Presets</div>
+</div>
+
+<div class="content">
+  <div class="panel active" id="panel-effects">
+    <div class="effects-grid" id="effectsGrid"></div>
+    <div class="section-title" style="margin-top:16px">Triggers</div>
+    <div class="trigger-grid">
+      <div class="trigger-btn" data-trigger="prev_effect">Prev Effect</div>
+      <div class="trigger-btn" data-trigger="next_effect">Next Effect</div>
+      <div class="trigger-btn" data-trigger="prev_layer">Prev Layer</div>
+      <div class="trigger-btn" data-trigger="next_layer">Next Layer</div>
+      <div class="trigger-btn" data-trigger="prev_preset">Prev Preset</div>
+      <div class="trigger-btn" data-trigger="next_preset">Next Preset</div>
+      <div class="trigger-btn" data-trigger="toggle_postprocess">Post-FX</div>
+      <div class="trigger-btn" data-trigger="toggle_overlay">Overlay</div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-params">
+    <div id="paramHeader" style="margin-bottom:10px;padding:8px 4px;border-bottom:1px solid var(--border);font-size:13px;color:var(--text2);"></div>
+    <div class="pp-toggle" id="ppToggle">
+      <div class="param-toggle-dot"></div>
+      <span>Post-Processing</span>
+    </div>
+    <div id="paramsContainer"></div>
+  </div>
+
+  <div class="panel" id="panel-layers">
+    <div id="layersContainer"></div>
+  </div>
+
+  <div class="panel" id="panel-presets">
+    <div id="presetsContainer"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  let ws = null;
+  let state = null;
+  let reconnectDelay = 1000;
+  let reconnectTimer = null;
+  let sendThrottle = {};
+  let beatTimeout = null;
+
+  const statusDot = document.getElementById('statusDot');
+  const beatDot = document.getElementById('beatDot');
+  const bpmDisplay = document.getElementById('bpmDisplay');
+  const effectsGrid = document.getElementById('effectsGrid');
+  const paramsContainer = document.getElementById('paramsContainer');
+  const layersContainer = document.getElementById('layersContainer');
+  const presetsContainer = document.getElementById('presetsContainer');
+  const ppToggle = document.getElementById('ppToggle');
+  const bars = [0,1,2,3,4,5,6].map(i => document.getElementById('bar'+i));
+
+  // Tabs
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+    });
+  });
+
+  // Triggers
+  document.querySelectorAll('.trigger-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      send({ type: 'trigger', action: btn.dataset.trigger });
+    });
+  });
+
+  // Post-process toggle
+  ppToggle.addEventListener('click', () => {
+    if (!state) return;
+    state.postprocess_enabled = !state.postprocess_enabled;
+    updatePP();
+    send({ type: 'set_postprocess_enabled', value: state.postprocess_enabled });
+  });
+
+  // WebSocket — clean close on page unload to avoid stale connections
+  window.addEventListener('beforeunload', () => {
+    if (ws) {
+      ws.onclose = null; // prevent reconnect on intentional close
+      ws.close();
+    }
+  });
+
+  function connect() {
+    // Cancel any pending reconnect
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    // Close existing socket if any
+    if (ws) {
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.close();
+      ws = null;
+    }
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+    ws.onopen = () => {
+      statusDot.classList.add('connected');
+      reconnectDelay = 1000;
+    };
+
+    ws.onclose = () => {
+      statusDot.classList.remove('connected');
+      ws = null;
+      reconnectTimer = setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 8000);
+    };
+
+    ws.onerror = () => {
+      // onclose will fire after onerror, which handles reconnect
+    };
+
+    ws.onmessage = (e) => {
+      if (!e.data) return;
+      try {
+        const msg = JSON.parse(e.data);
+        handleMessage(msg);
+      } catch(err) {}
+    };
+  }
+
+  function send(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(obj));
+    }
+  }
+
+  function throttledSend(key, obj) {
+    if (sendThrottle[key]) return;
+    send(obj);
+    sendThrottle[key] = true;
+    setTimeout(() => { sendThrottle[key] = false; }, 33);
+  }
+
+  function handleMessage(msg) {
+    switch(msg.type) {
+      case 'state':
+        state = msg;
+        renderAll();
+        break;
+      case 'audio':
+        updateAudio(msg);
+        break;
+      case 'param_changed':
+        if (state) updateParam(msg);
+        break;
+      case 'layer_changed':
+        if (state) updateLayer(msg);
+        break;
+      case 'active_layer':
+        if (state) { state.active_layer = msg.index; renderLayers(); renderParams(); }
+        break;
+      case 'effect_loaded':
+        if (state) handleEffectLoaded(msg);
+        break;
+      case 'presets':
+        if (state) { state.presets = msg.presets; state.current_preset = msg.current; renderPresets(); }
+        break;
+    }
+  }
+
+  function renderAll() {
+    if (!state) return;
+    renderEffects();
+    renderParams();
+    renderLayers();
+    renderPresets();
+    updatePP();
+  }
+
+  function renderEffects() {
+    effectsGrid.innerHTML = '';
+    if (!state || !state.effects) return;
+    const activeLayer = state.layers[state.active_layer];
+    const activeIdx = activeLayer ? activeLayer.effect_index : null;
+    state.effects.forEach(fx => {
+      const btn = document.createElement('div');
+      btn.className = 'effect-btn' + (fx.index === activeIdx ? ' active' : '');
+      btn.textContent = fx.name;
+      btn.addEventListener('click', () => {
+        send({ type: 'load_effect', index: fx.index });
+      });
+      effectsGrid.appendChild(btn);
+    });
+  }
+
+  function renderParams() {
+    paramsContainer.innerHTML = '';
+    const header = document.getElementById('paramHeader');
+    if (!state || !state.layers) { header.textContent = ''; return; }
+    const layer = state.layers[state.active_layer];
+    const layerLabel = 'Layer ' + (state.active_layer + 1);
+    const effectLabel = layer && layer.effect_name ? layer.effect_name : '(no effect)';
+    header.innerHTML = '<span style="color:var(--accent);font-weight:600;">' + layerLabel + '</span> <span style="color:var(--text2);margin:0 4px;">\u2014</span> <span>' + effectLabel + '</span>';
+    if (!layer || !layer.params || layer.params.length === 0) {
+      paramsContainer.innerHTML = '<div class="empty-msg">No parameters</div>';
+      return;
+    }
+
+    layer.params.forEach(p => {
+      if (p.type === 'float') {
+        const row = document.createElement('div');
+        row.className = 'param-row';
+        const valDisplay = (p.min + (p.max - p.min) * p.value).toFixed(2);
+        row.innerHTML = '<div class="param-label"><span class="param-name">' + p.name + '</span><span class="param-value">' + valDisplay + '</span></div>';
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.className = 'param-slider';
+        slider.min = 0;
+        slider.max = 1000;
+        slider.value = Math.round(p.value * 1000);
+        slider.setAttribute('touch-action', 'none');
+        slider.addEventListener('input', function(e) {
+          const v = parseInt(e.target.value) / 1000;
+          p.value = v;
+          row.querySelector('.param-value').textContent = (p.min + (p.max - p.min) * v).toFixed(2);
+          throttledSend('param_' + p.name, { type: 'set_param', name: p.name, value: v });
+        });
+        row.appendChild(slider);
+        paramsContainer.appendChild(row);
+      } else if (p.type === 'bool') {
+        const toggle = document.createElement('div');
+        toggle.className = 'param-toggle' + (p.value > 0.5 ? ' on' : '');
+        toggle.innerHTML = '<div class="param-toggle-dot"></div><span>' + p.name + '</span>';
+        toggle.addEventListener('click', function() {
+          p.value = p.value > 0.5 ? 0 : 1;
+          toggle.classList.toggle('on', p.value > 0.5);
+          toggle.querySelector('.param-toggle-dot').style.background = p.value > 0.5 ? '#fff' : '#555';
+          send({ type: 'set_param', name: p.name, value: p.value });
+        });
+        paramsContainer.appendChild(toggle);
+      }
+    });
+  }
+
+  function renderLayers() {
+    layersContainer.innerHTML = '';
+    if (!state || !state.layers) return;
+
+    const blendNames = ['Normal','Add','Multiply','Screen','Overlay','Soft Light','Difference'];
+
+    state.layers.forEach(function(layer, i) {
+      const card = document.createElement('div');
+      card.className = 'layer-card' + (i === state.active_layer ? ' active' : '') + (!layer.enabled ? ' disabled' : '');
+
+      // Info area (tap to select)
+      const info = document.createElement('div');
+      info.className = 'layer-info';
+      info.innerHTML = '<div class="layer-name">' + layer.name + '</div><div class="layer-effect">' + (layer.effect_name || '(empty)') + '</div>';
+      info.addEventListener('click', function() {
+        state.active_layer = i;
+        renderLayers();
+        renderParams();
+        renderEffects();
+        send({ type: 'select_layer', index: i });
+      });
+      card.appendChild(info);
+
+      // Controls row
+      const controls = document.createElement('div');
+      controls.className = 'layer-controls';
+
+      // Blend
+      const sel = document.createElement('select');
+      sel.className = 'blend-select';
+      blendNames.forEach(function(name, bi) {
+        const opt = document.createElement('option');
+        opt.value = bi;
+        opt.textContent = name;
+        if (bi === layer.blend_mode) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', function() {
+        send({ type: 'set_layer_blend', layer: i, value: parseInt(sel.value) });
+      });
+      controls.appendChild(sel);
+
+      // Opacity
+      const opWrap = document.createElement('div');
+      opWrap.className = 'layer-opacity';
+      const opSlider = document.createElement('input');
+      opSlider.type = 'range';
+      opSlider.min = 0;
+      opSlider.max = 100;
+      opSlider.value = Math.round(layer.opacity * 100);
+      opSlider.setAttribute('touch-action', 'none');
+      opSlider.addEventListener('input', function(e) {
+        var v = parseInt(e.target.value) / 100;
+        throttledSend('opacity_' + i, { type: 'set_layer_opacity', layer: i, value: v });
+      });
+      opWrap.appendChild(opSlider);
+      controls.appendChild(opWrap);
+
+      // Enable checkbox
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = layer.enabled;
+      cb.className = 'layer-cb';
+      cb.addEventListener('change', function() {
+        send({ type: 'set_layer_enabled', layer: i, value: cb.checked });
+      });
+      controls.appendChild(cb);
+
+      card.appendChild(controls);
+      layersContainer.appendChild(card);
+    });
+  }
+
+  function renderPresets() {
+    presetsContainer.innerHTML = '';
+    if (!state || !state.presets || state.presets.length === 0) {
+      presetsContainer.innerHTML = '<div class="empty-msg">No presets saved</div>';
+      return;
+    }
+    state.presets.forEach(function(p) {
+      const btn = document.createElement('div');
+      btn.className = 'preset-btn' + (p.index === state.current_preset ? ' active' : '');
+      btn.textContent = p.name;
+      btn.addEventListener('click', function() {
+        state.current_preset = p.index;
+        renderPresets();
+        send({ type: 'load_preset', index: p.index });
+      });
+      presetsContainer.appendChild(btn);
+    });
+  }
+
+  function updatePP() {
+    if (!state) return;
+    ppToggle.classList.toggle('on', state.postprocess_enabled);
+    ppToggle.querySelector('.param-toggle-dot').style.background = state.postprocess_enabled ? '#fff' : '#555';
+  }
+
+  function updateAudio(a) {
+    var bands = [a.sub_bass, a.bass, a.low_mid, a.mid, a.upper_mid, a.presence, a.brilliance];
+    for (var i = 0; i < bands.length; i++) {
+      if (bars[i]) bars[i].style.height = (bands[i] * 100) + '%';
+    }
+    if (a.bpm > 1) {
+      bpmDisplay.textContent = Math.round(a.bpm) + ' BPM';
+    }
+    if (a.beat > 0.5) {
+      beatDot.classList.add('beat');
+      clearTimeout(beatTimeout);
+      beatTimeout = setTimeout(function() { beatDot.classList.remove('beat'); }, 100);
+    }
+  }
+
+  function updateParam(msg) {
+    if (!state) return;
+    var layer = state.layers[msg.layer];
+    if (!layer) return;
+    var p = layer.params.find(function(p) { return p.name === msg.name; });
+    if (p) {
+      p.value = msg.value;
+      if (msg.layer === state.active_layer) {
+        var sliders = paramsContainer.querySelectorAll('.param-slider');
+        var rows = paramsContainer.querySelectorAll('.param-row');
+        var floatIdx = 0;
+        layer.params.forEach(function(param) {
+          if (param.type === 'float') {
+            if (param.name === msg.name && sliders[floatIdx]) {
+              if (document.activeElement !== sliders[floatIdx]) {
+                sliders[floatIdx].value = Math.round(msg.value * 1000);
+                var valEl = rows[floatIdx] && rows[floatIdx].querySelector('.param-value');
+                if (valEl) valEl.textContent = (param.min + (param.max - param.min) * msg.value).toFixed(2);
+              }
+            }
+            floatIdx++;
+          }
+        });
+      }
+    }
+  }
+
+  function updateLayer(msg) {
+    if (!state) return;
+    var layer = state.layers[msg.index];
+    if (!layer) return;
+    if (msg.effect_name !== undefined) layer.effect_name = msg.effect_name;
+    if (msg.effect_index !== undefined) layer.effect_index = msg.effect_index;
+    if (msg.blend_mode !== undefined) layer.blend_mode = msg.blend_mode;
+    if (msg.opacity !== undefined) layer.opacity = msg.opacity;
+    if (msg.enabled !== undefined) layer.enabled = msg.enabled;
+    renderLayers();
+    renderEffects();
+  }
+
+  function handleEffectLoaded(msg) {
+    if (!state) return;
+    var layer = state.layers[msg.layer];
+    if (!layer) return;
+    layer.effect_name = msg.effect_name;
+    layer.effect_index = msg.effect_index;
+    layer.params = msg.params;
+    renderEffects();
+    if (msg.layer === state.active_layer) renderParams();
+  }
+
+  connect();
+})();
+</script>
+</body>
+</html>
