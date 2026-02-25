@@ -66,13 +66,71 @@ pub struct ParticleUniforms {
     // Total: 32 fields = 128 bytes (no padding needed)
 }
 
-/// Particle render uniforms: 16 bytes.
+/// Auxiliary particle data: 16 bytes (1 x vec4f).
+/// home.xy = home position (for image decomposition reform), home.z = packed RGBA (bitcast u32→f32),
+/// home.w = sprite_index (for animated sprite sheets).
+/// Stored in a separate storage buffer at compute binding 4.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+pub struct ParticleAux {
+    pub home: [f32; 4],
+}
+
+/// Particle render uniforms: 32 bytes.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct ParticleRenderUniforms {
     pub resolution: [f32; 2],
     pub time: f32,
-    pub _pad: f32,
+    /// 0 = soft circle (default), 1 = sprite texture, 2 = animated sprite
+    pub render_mode: u32,
+    /// Sprite atlas columns, rows, total frames, padding
+    pub sprite_cols: u32,
+    pub sprite_rows: u32,
+    pub sprite_frames: u32,
+    pub _pad: u32,
+}
+
+/// Sprite atlas definition for textured particles.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpriteDef {
+    /// Texture file path relative to assets/images/
+    pub texture: String,
+    #[serde(default = "default_one_u32")]
+    pub cols: u32,
+    #[serde(default = "default_one_u32")]
+    pub rows: u32,
+    #[serde(default)]
+    pub animated: bool,
+    #[serde(default)]
+    pub frames: u32,
+}
+
+/// Image sampling configuration for image-to-particle decomposition.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageSampleDef {
+    /// Sampling mode: "grid", "threshold", or "random"
+    #[serde(default = "default_sample_mode")]
+    pub mode: String,
+    /// Brightness threshold (for "threshold" mode)
+    #[serde(default = "default_threshold")]
+    pub threshold: f32,
+    /// Scale factor for mapping image to screen space
+    #[serde(default = "default_scale")]
+    pub scale: f32,
+}
+
+fn default_sample_mode() -> String {
+    "grid".to_string()
+}
+fn default_threshold() -> f32 {
+    0.1
+}
+fn default_scale() -> f32 {
+    1.0
+}
+fn default_one_u32() -> u32 {
+    1
 }
 
 /// .pfx particle definition (JSON).
@@ -105,6 +163,19 @@ pub struct ParticleDef {
     pub emit_rate: f32,
     #[serde(default)]
     pub burst_on_beat: u32,
+    /// Sprite texture definition (optional)
+    #[serde(default)]
+    pub sprite: Option<SpriteDef>,
+    /// Image sampling for image-to-particle decomposition (optional)
+    #[serde(default)]
+    pub image_sample: Option<ImageSampleDef>,
+    /// Blend mode: "additive" (default) or "alpha"
+    #[serde(default = "default_blend")]
+    pub blend: String,
+}
+
+fn default_blend() -> String {
+    "additive".to_string()
 }
 
 fn default_max_count() -> u32 {

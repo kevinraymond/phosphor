@@ -47,6 +47,8 @@ dirs = "6"
 tungstenite = "0.28"
 # Image loading (particle sprites, media layers)
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
+# GIF decoding (animated GIF frame extraction)
+gif = "0.13"
 # Native file dialogs
 rfd = "0.15"
 # Linear algebra (camera, projection)

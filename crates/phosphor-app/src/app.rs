@@ -9,6 +9,7 @@ use crate::effect::format::PostProcessDef;
 use crate::effect::EffectLoader;
 use crate::gpu::compositor::Compositor;
 use crate::gpu::layer::{BlendMode, EffectLayer, Layer, LayerContent, LayerInfo, LayerStack};
+use crate::media::MediaLayer;
 use crate::gpu::particle::ParticleSystem;
 use crate::gpu::pass_executor::PassExecutor;
 use crate::gpu::placeholder::PlaceholderTexture;
@@ -199,6 +200,7 @@ impl App {
         self.gpu.resize(width, height);
         for layer in &mut self.layer_stack.layers {
             layer.resize(&self.gpu.device, width, height, &self.placeholder);
+            layer.resize_media(&self.gpu.device, &self.gpu.queue, width, height);
         }
         self.compositor.resize(&self.gpu.device, width, height);
         self.post_process.resize(&self.gpu.device, width, height);
@@ -466,6 +468,14 @@ impl App {
             self.web.update_latest_state(&state_json);
         }
 
+        // Advance GIF playback + upload frames for media layers
+        for layer in &mut self.layer_stack.layers {
+            if let LayerContent::Media(ref mut m) = layer.content {
+                m.advance(dt);
+                m.upload_frame(&self.gpu.queue);
+            }
+        }
+
         // Update each layer's uniforms from global template + per-layer params
         for layer in &mut self.layer_stack.layers {
             if let LayerContent::Effect(ref mut e) = layer.content {
@@ -714,8 +724,42 @@ impl App {
             .as_ref()
             .and_then(|pd| self.build_particle_system(pd));
 
+        // If layer is currently Media, convert to Effect first
+        let is_media = self.layer_stack.layers[layer_idx].is_media();
+        if is_media {
+            let uniform_buffer = UniformBuffer::new(&self.gpu.device);
+            let feedback = PingPongTarget::new(
+                &self.gpu.device,
+                self.gpu.surface_config.width,
+                self.gpu.surface_config.height,
+                hdr_format,
+                1.0,
+            );
+            // Temporary pipeline — will be replaced by executor_result below
+            let default_source = include_str!("../../../assets/shaders/default.wgsl");
+            if let Ok(pipeline) = ShaderPipeline::new(&self.gpu.device, hdr_format, default_source) {
+                let pass_executor = PassExecutor::single_pass(
+                    pipeline,
+                    feedback,
+                    &uniform_buffer,
+                    &self.gpu.device,
+                    &self.placeholder,
+                );
+                self.layer_stack.layers[layer_idx].content = LayerContent::Effect(EffectLayer {
+                    pass_executor,
+                    uniform_buffer,
+                    uniforms: ShaderUniforms::zeroed(),
+                    effect_index: None,
+                    shader_sources: vec![],
+                    shader_error: None,
+                });
+            }
+        }
+
         // Need the layer's uniform buffer reference for PassExecutor::new.
-        let LayerContent::Effect(ref eff) = self.layer_stack.layers[layer_idx].content;
+        let LayerContent::Effect(ref eff) = self.layer_stack.layers[layer_idx].content else {
+            return;
+        };
         let uniform_buffer_ref = &eff.uniform_buffer;
         let executor_result = PassExecutor::new(
             &self.gpu.device,
@@ -733,7 +777,9 @@ impl App {
                 executor.particle_system = particle_system;
 
                 let layer = &mut self.layer_stack.layers[layer_idx];
-                let LayerContent::Effect(ref mut e) = layer.content;
+                let LayerContent::Effect(ref mut e) = layer.content else {
+                    return;
+                };
                 e.pass_executor = executor;
                 layer.param_store.load_from_defs(&effect.inputs);
                 e.shader_error = None;
@@ -830,6 +876,71 @@ impl App {
         self.add_layer();
     }
 
+    /// Add a new media layer from a file path.
+    pub fn add_media_layer(&mut self, path: std::path::PathBuf) {
+        let num = self.layer_stack.layers.len();
+        if num >= 8 {
+            log::warn!("Maximum 8 layers reached");
+            return;
+        }
+
+        match crate::media::decoder::load_media(&path) {
+            Ok(source) => {
+                let hdr_format = GpuContext::hdr_format();
+                let media_layer = MediaLayer::new(
+                    &self.gpu.device,
+                    &self.gpu.queue,
+                    hdr_format,
+                    self.gpu.surface_config.width,
+                    self.gpu.surface_config.height,
+                    source,
+                    path.clone(),
+                );
+                let file_name = media_layer.file_name.clone();
+                let name = format!("Layer {}", num + 1);
+                self.layer_stack
+                    .layers
+                    .push(Layer::new_media(name, media_layer));
+                self.layer_stack.active_layer = self.layer_stack.layers.len() - 1;
+                self.sync_active_layer();
+                log::info!("Added media layer: {}", file_name);
+            }
+            Err(e) => {
+                log::error!("Failed to load media '{}': {e}", path.display());
+            }
+        }
+    }
+
+    /// Replace active layer content with media from a file path.
+    pub fn load_media_on_layer(&mut self, layer_idx: usize, path: std::path::PathBuf) {
+        if layer_idx >= self.layer_stack.layers.len() {
+            return;
+        }
+
+        match crate::media::decoder::load_media(&path) {
+            Ok(source) => {
+                let hdr_format = GpuContext::hdr_format();
+                let media_layer = MediaLayer::new(
+                    &self.gpu.device,
+                    &self.gpu.queue,
+                    hdr_format,
+                    self.gpu.surface_config.width,
+                    self.gpu.surface_config.height,
+                    source,
+                    path.clone(),
+                );
+                let file_name = media_layer.file_name.clone();
+                let layer = &mut self.layer_stack.layers[layer_idx];
+                layer.content = LayerContent::Media(media_layer);
+                layer.param_store = ParamStore::new();
+                log::info!("Layer {}: loaded media '{}'", layer_idx, file_name);
+            }
+            Err(e) => {
+                log::error!("Failed to load media '{}': {e}", path.display());
+            }
+        }
+    }
+
     /// Sync effect_loader.current_effect to match active layer.
     pub fn sync_active_layer(&mut self) {
         if let Some(layer) = self.layer_stack.active() {
@@ -848,6 +959,9 @@ impl App {
                     .and_then(|i| self.effect_loader.effects.get(i))
                     .map(|e| e.name.clone())
                     .unwrap_or_default();
+                let media_path = l.as_media().map(|m| m.file_path.to_string_lossy().to_string());
+                let media_speed = l.as_media().map(|m| m.transport.speed);
+                let media_looping = l.as_media().map(|m| m.transport.looping);
                 LayerPreset {
                     effect_name,
                     params: l.param_store.values.clone(),
@@ -857,12 +971,15 @@ impl App {
                     locked: l.locked,
                     pinned: l.pinned,
                     custom_name: l.custom_name.clone(),
+                    media_path,
+                    media_speed,
+                    media_looping,
                 }
             })
             .collect();
 
-        if layer_presets.iter().all(|l| l.effect_name.is_empty()) {
-            log::warn!("No effects loaded, cannot save preset");
+        if layer_presets.iter().all(|l| l.effect_name.is_empty() && l.media_path.is_none()) {
+            log::warn!("No effects or media loaded, cannot save preset");
             return;
         }
 
@@ -904,7 +1021,26 @@ impl App {
                 }
             }
 
-            if !lp.effect_name.is_empty() {
+            if let Some(ref media_path) = lp.media_path {
+                // Load media layer
+                let path = std::path::PathBuf::from(media_path);
+                if path.exists() {
+                    self.load_media_on_layer(i, path);
+                    // Apply transport settings
+                    if let Some(layer) = self.layer_stack.layers.get_mut(i) {
+                        if let Some(ref mut m) = layer.as_media_mut() {
+                            if let Some(speed) = lp.media_speed {
+                                m.transport.speed = speed;
+                            }
+                            if let Some(looping) = lp.media_looping {
+                                m.transport.looping = looping;
+                            }
+                        }
+                    }
+                } else {
+                    log::warn!("Media file '{}' not found for layer {}", media_path, i);
+                }
+            } else if !lp.effect_name.is_empty() {
                 let effect_idx = self
                     .effect_loader
                     .effects

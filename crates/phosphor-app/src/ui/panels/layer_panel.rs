@@ -438,8 +438,11 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                                             d.insert_temp(egui::Id::new("layer_rename_text"), text);
                                         });
                                     } else {
-                                        let effect_display =
-                                            layer.effect_name.as_deref().unwrap_or("(empty)");
+                                        let effect_display = if layer.is_media {
+                                            layer.media_file_name.as_deref().unwrap_or("media")
+                                        } else {
+                                            layer.effect_name.as_deref().unwrap_or("(empty)")
+                                        };
                                         let display = match &layer.custom_name {
                                             Some(cn) => cn.clone(),
                                             None => format!("{} {}", i + 1, effect_display),
@@ -456,6 +459,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                                                     .color(title_color),
                                             )
                                             .selectable(false)
+                                            .truncate()
                                             .sense(egui::Sense::click()),
                                         );
                                         if label.clicked() {
@@ -475,11 +479,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                                                 d.insert_temp(egui::Id::new("layer_rename_focus"), true);
                                             });
                                         }
-                                        if !is_active {
-                                            label.on_hover_text("Click to select, double-click to rename");
-                                        } else {
-                                            label.on_hover_text("Double-click to rename");
-                                        }
+                                        label.on_hover_text(&display);
                                     }
 
                                     // Delete
@@ -660,34 +660,63 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
         }
     }
 
-    // Add Layer button
+    // Add Layer / Add Media buttons
     ui.add_space(4.0);
     let can_add = num_layers < max_layers;
-    let add_btn = ui.add_enabled(
-        can_add,
-        egui::Button::new(
-            RichText::new("+ Add Layer")
-                .size(SMALL_SIZE)
-                .color(if can_add {
-                    DARK_ACCENT
-                } else {
-                    DARK_TEXT_SECONDARY
-                }),
-        )
-        .fill(Color32::TRANSPARENT)
-        .stroke(Stroke::new(1.0, CARD_BORDER))
-        .corner_radius(CornerRadius::same(4))
-        .min_size(Vec2::new(ui.available_width(), MIN_INTERACT_HEIGHT)),
-    );
-    if add_btn.clicked() {
-        ui.ctx()
-            .data_mut(|d| d.insert_temp(egui::Id::new("add_layer"), true));
-    }
-    if can_add {
-        add_btn.on_hover_text("Add a new layer (max 8)");
-    } else {
-        add_btn.on_hover_text("Maximum 8 layers reached");
-    }
+    ui.horizontal(|ui| {
+        let half_width = (ui.available_width() - ui.spacing().item_spacing.x) * 0.5;
+        let add_btn = ui.add_enabled(
+            can_add,
+            egui::Button::new(
+                RichText::new("+ Effect")
+                    .size(SMALL_SIZE)
+                    .color(if can_add {
+                        DARK_ACCENT
+                    } else {
+                        DARK_TEXT_SECONDARY
+                    }),
+            )
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::new(1.0, CARD_BORDER))
+            .corner_radius(CornerRadius::same(4))
+            .min_size(Vec2::new(half_width, MIN_INTERACT_HEIGHT)),
+        );
+        if add_btn.clicked() {
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(egui::Id::new("add_layer"), true));
+        }
+        if can_add {
+            add_btn.on_hover_text("Add an effect layer (max 8)");
+        } else {
+            add_btn.on_hover_text("Maximum 8 layers reached");
+        }
+
+        let media_btn = ui.add_enabled(
+            can_add,
+            egui::Button::new(
+                RichText::new("+ Media")
+                    .size(SMALL_SIZE)
+                    .color(if can_add {
+                        Color32::from_rgb(0x80, 0xC0, 0x80)
+                    } else {
+                        DARK_TEXT_SECONDARY
+                    }),
+            )
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::new(1.0, CARD_BORDER))
+            .corner_radius(CornerRadius::same(4))
+            .min_size(Vec2::new(half_width, MIN_INTERACT_HEIGHT)),
+        );
+        if media_btn.clicked() {
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(egui::Id::new("add_media_layer"), true));
+        }
+        if can_add {
+            media_btn.on_hover_text("Add an image/GIF layer (max 8)");
+        } else {
+            media_btn.on_hover_text("Maximum 8 layers reached");
+        }
+    });
 
     // Clear All button (only when >1 layer)
     if num_layers > 1 {

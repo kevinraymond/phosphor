@@ -1,6 +1,7 @@
 pub mod audio_panel;
 pub mod effect_panel;
 pub mod layer_panel;
+pub mod media_panel;
 pub mod midi_panel;
 pub mod osc_panel;
 pub mod param_panel;
@@ -39,6 +40,7 @@ pub fn draw_panels(
     preset_store: &PresetStore,
     layers: &[LayerInfo],
     active_layer: usize,
+    media_info: Option<media_panel::MediaInfo>,
 ) {
     if !visible {
         return;
@@ -70,7 +72,7 @@ pub fn draw_panels(
     };
 
     egui::SidePanel::left("left_panel")
-        .exact_width(240.0)
+        .exact_width(270.0)
         .resizable(false)
         .frame(panel_frame)
         .show(ctx, |ui| {
@@ -194,22 +196,36 @@ pub fn draw_panels(
         });
 
     egui::SidePanel::right("right_panel")
-        .exact_width(240.0)
+        .exact_width(270.0)
         .resizable(false)
         .frame(panel_frame)
         .show(ctx, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
-                // Parameters section
-                widgets::section(
-                    ui,
-                    "sec_params",
-                    "Parameters",
-                    None,
-                    true,
-                    |ui| {
-                        param_panel::draw_param_panel(ui, params, midi, osc);
-                    },
-                );
+                if let Some(ref info) = media_info {
+                    // Media layer: show media controls instead of params
+                    widgets::section(
+                        ui,
+                        "sec_media",
+                        "Media",
+                        None,
+                        true,
+                        |ui| {
+                            media_panel::draw_media_panel(ui, info);
+                        },
+                    );
+                } else {
+                    // Effect layer: show parameters
+                    widgets::section(
+                        ui,
+                        "sec_params",
+                        "Parameters",
+                        None,
+                        true,
+                        |ui| {
+                            param_panel::draw_param_panel(ui, params, midi, osc);
+                        },
+                    );
+                }
 
                 // Post-Processing section
                 widgets::section(

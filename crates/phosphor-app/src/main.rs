@@ -2,6 +2,7 @@ mod app;
 mod audio;
 mod effect;
 mod gpu;
+mod media;
 mod midi;
 mod osc;
 mod params;
@@ -153,6 +154,24 @@ impl ApplicationHandler for PhosphorApp {
                         .active()
                         .and_then(|l| l.shader_error().map(|s| s.to_string()));
 
+                    // Collect media info if active layer is media (before mutable borrow)
+                    let media_info = app.layer_stack.active().and_then(|l| {
+                        l.as_media().map(|m| {
+                            crate::ui::panels::media_panel::MediaInfo {
+                                file_name: m.file_name.clone(),
+                                media_width: m.media_width,
+                                media_height: m.media_height,
+                                frame_count: m.frame_count(),
+                                is_animated: m.is_animated(),
+                                playing: m.transport.playing,
+                                looping: m.transport.looping,
+                                speed: m.transport.speed,
+                                direction: m.transport.direction,
+                                current_frame: m.current_frame,
+                            }
+                        })
+                    });
+
                     // Get active layer's param_store (mutable for MIDI badges)
                     let active_params = app.layer_stack.active_mut();
                     if let Some(layer) = active_params {
@@ -172,6 +191,7 @@ impl ApplicationHandler for PhosphorApp {
                             &app.preset_store,
                             &layer_infos,
                             active_layer,
+                            media_info,
                         );
                     }
                 }
@@ -216,6 +236,67 @@ impl ApplicationHandler for PhosphorApp {
                 if deselect_preset.is_some() {
                     app.preset_store.current_preset = None;
                     app.preset_store.dirty = false;
+                }
+
+                // Handle media layer signals
+                let add_media: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("add_media_layer"))
+                });
+                if add_media.is_some() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Images", &["png", "jpg", "jpeg", "gif", "bmp", "webp"])
+                        .pick_file()
+                    {
+                        app.add_media_layer(path);
+                        app.preset_store.mark_dirty();
+                    }
+                }
+
+                // Handle media transport signals
+                let play_pause: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("media_play_pause"))
+                });
+                if play_pause.is_some() {
+                    if let Some(layer) = app.layer_stack.active_mut() {
+                        if let Some(m) = layer.as_media_mut() {
+                            m.transport.playing = !m.transport.playing;
+                        }
+                    }
+                }
+                let media_loop: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("media_loop"))
+                });
+                if let Some(looping) = media_loop {
+                    if let Some(layer) = app.layer_stack.active_mut() {
+                        if let Some(m) = layer.as_media_mut() {
+                            m.transport.looping = looping;
+                        }
+                    }
+                }
+                let media_speed: Option<f32> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("media_speed"))
+                });
+                if let Some(speed) = media_speed {
+                    if let Some(layer) = app.layer_stack.active_mut() {
+                        if let Some(m) = layer.as_media_mut() {
+                            m.transport.speed = speed;
+                        }
+                    }
+                }
+                let media_direction: Option<u8> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("media_direction"))
+                });
+                if let Some(dir) = media_direction {
+                    if let Some(layer) = app.layer_stack.active_mut() {
+                        if let Some(m) = layer.as_media_mut() {
+                            m.transport.direction = match dir {
+                                0 => crate::media::types::PlayDirection::Forward,
+                                1 => crate::media::types::PlayDirection::Reverse,
+                                2 => crate::media::types::PlayDirection::PingPong,
+                                _ => crate::media::types::PlayDirection::Forward,
+                            };
+                        }
+                    }
                 }
 
                 // Handle layer UI signals
