@@ -57,11 +57,11 @@ impl App {
         let mut effect_loader = EffectLoader::new();
         effect_loader.scan_effects_directory();
 
-        // Prefer plasma_wave as default, fall back to first effect
+        // Prefer Aurora as default, fall back to first effect
         let default_idx = effect_loader
             .effects
             .iter()
-            .position(|e| e.name == "Plasma Wave")
+            .position(|e| e.name == "Aurora")
             .or_else(|| {
                 if effect_loader.effects.is_empty() {
                     None
