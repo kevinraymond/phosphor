@@ -10,7 +10,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     let t = u.time;
 
     // param(0) = twist_amount, param(1) = speed, param(2) = tunnel_radius, param(3) = segments
-    let twist = (param(0u) - 0.5) * 4.0;
+    let twist = (param(0u) - 0.5) * 10.0;
     let speed = param(1u) * 0.8 + 0.08;
     let tun_scale = param(2u) * 2.0 + 1.0;
     let segments = floor(param(3u) * 8.0 + 4.0); // 4-12 wall panels
@@ -84,6 +84,21 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
 
     // Bass breathe: subtle radius pulse
     col *= 1.0 + u.bass * 0.15;
+
+    // Almond/eye vignette mask — param(4) = pinch_x, param(5) = pinch_y
+    let pinch_x = param(4u);
+    let pinch_y = param(5u);
+    let mx = abs(p.x) / (aspect * 0.5);  // [0, 1] at screen edges
+    let my = abs(p.y) * 2.0;              // [0, 1] at screen edges
+    // Superellipse exponent: 2.0 = circle, lower = pointier
+    let ex = max(2.0 - pinch_x * 1.5, 0.5);
+    let ey = max(2.0 - pinch_y * 1.5, 0.5);
+    let d = pow(mx, ex) + pow(my, ey);
+    // Adaptive radius: covers full screen at pinch=0, tight almond at pinch=1
+    let pinch_max = max(pinch_x, pinch_y);
+    let mask_r = mix(3.0, 0.85, pinch_max);
+    let mask = 1.0 - smoothstep(mask_r - 0.2, mask_r, d);
+    col *= mask;
 
     return vec4f(col, 1.0);
 }
