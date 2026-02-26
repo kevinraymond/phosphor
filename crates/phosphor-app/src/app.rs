@@ -1285,6 +1285,12 @@ impl App {
             self.uniforms.onset,
             self.uniforms.flatness,
             &postprocess,
+            {
+                #[cfg(feature = "ndi")]
+                { self.ndi.config.alpha_from_luma }
+                #[cfg(not(feature = "ndi"))]
+                { false }
+            },
         );
 
         // NDI capture: render composite to capture texture + copy to staging

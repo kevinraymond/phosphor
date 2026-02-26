@@ -217,6 +217,7 @@ impl ApplicationHandler for PhosphorApp {
                             frames_sent: app.ndi.frames_sent(),
                             output_width: app.ndi.capture.as_ref().map_or(0, |c| c.width),
                             output_height: app.ndi.capture.as_ref().map_or(0, |c| c.height),
+                            alpha_from_luma: app.ndi.config.alpha_from_luma,
                         };
                         ctx.data_mut(|d| {
                             d.insert_temp(egui::Id::new("ndi_info"), ndi_info);
@@ -491,6 +492,14 @@ impl ApplicationHandler for PhosphorApp {
                             app.gpu.surface_config.width,
                             app.gpu.surface_config.height,
                         );
+                    }
+
+                    let ndi_alpha_luma: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("ndi_alpha_from_luma"))
+                    });
+                    if let Some(val) = ndi_alpha_luma {
+                        app.ndi.config.alpha_from_luma = val;
+                        app.ndi.config.save();
                     }
 
                     let ndi_restart: Option<bool> = app.egui_overlay.context().data_mut(|d| {
