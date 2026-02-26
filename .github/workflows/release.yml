@@ -76,6 +76,7 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           STAGING="phosphor-${TAG}-${{ matrix.target }}"
+          DMG="${STAGING}.dmg"
           mkdir -p "$STAGING"
           cp "target/${{ matrix.target }}/release/phosphor-app" "$STAGING/phosphor"
           cp -r assets "$STAGING/assets"
@@ -84,18 +85,18 @@ jobs:
           [ -f LICENSE-APACHE ] && cp LICENSE-APACHE "$STAGING/"
           [ -f LICENSE ] && cp LICENSE "$STAGING/"
 
-          # Package as .zip via ditto (preserves macOS metadata)
-          ditto -c -k --keepParent "$STAGING" "${STAGING}.zip"
+          # Create DMG
+          hdiutil create -volname "Phosphor" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
 
-          # Notarize the zip, then staple
-          xcrun notarytool submit "${STAGING}.zip" \
+          # Notarize and staple the DMG
+          xcrun notarytool submit "$DMG" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_ID_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
-          xcrun stapler staple "${STAGING}.zip"
+          xcrun stapler staple "$DMG"
 
-          echo "ASSET=${STAGING}.zip" >> "$GITHUB_ENV"
+          echo "ASSET=${DMG}" >> "$GITHUB_ENV"
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
@@ -176,16 +177,17 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
 
-          # Extract per-arch zips
-          cd artifacts/arm64 && unzip -o *.zip && cd ../..
-          cd artifacts/x86_64 && unzip -o *.zip && cd ../..
-
-          # Find the extracted binaries
-          ARM_BIN=$(find artifacts/arm64 -name phosphor -type f)
-          X86_BIN=$(find artifacts/x86_64 -name phosphor -type f)
+          # Mount per-arch DMGs and extract binaries
+          ARM_MNT=$(mktemp -d)
+          X86_MNT=$(mktemp -d)
+          hdiutil attach artifacts/arm64/*.dmg -mountpoint "$ARM_MNT" -nobrowse -quiet
+          hdiutil attach artifacts/x86_64/*.dmg -mountpoint "$X86_MNT" -nobrowse -quiet
+          ARM_BIN=$(find "$ARM_MNT" -name phosphor -type f)
+          X86_BIN=$(find "$X86_MNT" -name phosphor -type f)
 
           # Create universal binary
           STAGING="phosphor-${TAG}-universal-apple-darwin"
+          DMG="${STAGING}.dmg"
           mkdir -p "$STAGING"
           lipo -create "$ARM_BIN" "$X86_BIN" -output "$STAGING/phosphor"
           chmod +x "$STAGING/phosphor"
@@ -195,20 +197,23 @@ jobs:
           [ -f LICENSE-APACHE ] && cp LICENSE-APACHE "$STAGING/"
           [ -f LICENSE ] && cp LICENSE "$STAGING/"
 
+          hdiutil detach "$ARM_MNT" -quiet
+          hdiutil detach "$X86_MNT" -quiet
+
           # Codesign the universal binary
           codesign --force --options runtime --sign "Developer ID Application" "$STAGING/phosphor" --timestamp
           codesign --verify --verbose "$STAGING/phosphor"
 
-          # Package as .zip, notarize, staple
-          ditto -c -k --keepParent "$STAGING" "${STAGING}.zip"
-          xcrun notarytool submit "${STAGING}.zip" \
+          # Create DMG, notarize, staple
+          hdiutil create -volname "Phosphor" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
+          xcrun notarytool submit "$DMG" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_ID_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
-          xcrun stapler staple "${STAGING}.zip"
+          xcrun stapler staple "$DMG"
 
-          echo "ASSET=${STAGING}.zip" >> "$GITHUB_ENV"
+          echo "ASSET=${DMG}" >> "$GITHUB_ENV"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
