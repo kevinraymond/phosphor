@@ -1,5 +1,8 @@
 # Changelog
 
+<!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
+<!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
+
 ## v0.3.0 — 2026-02-26
 
 ### New Features
