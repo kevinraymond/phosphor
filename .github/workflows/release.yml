@@ -1,0 +1,158 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - name: macOS-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - name: macOS-x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+            archive: tar.gz
+          - name: Windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }} --features video
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          STAGING="phosphor-${TAG}-${{ matrix.target }}"
+          mkdir -p "$STAGING"
+          cp "target/${{ matrix.target }}/release/phosphor-app" "$STAGING/phosphor"
+          cp -r assets "$STAGING/assets"
+          [ -f README.md ] && cp README.md "$STAGING/"
+          [ -f LICENSE-MIT ] && cp LICENSE-MIT "$STAGING/"
+          [ -f LICENSE-APACHE ] && cp LICENSE-APACHE "$STAGING/"
+          [ -f LICENSE ] && cp LICENSE "$STAGING/"
+          tar czf "${STAGING}.tar.gz" "$STAGING"
+          echo "ASSET=${STAGING}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF -replace '^refs/tags/', ''
+          $staging = "phosphor-${tag}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $staging
+          Copy-Item "target/${{ matrix.target }}/release/phosphor-app.exe" "$staging/phosphor.exe"
+          Copy-Item -Recurse "assets" "$staging/assets"
+          if (Test-Path "README.md") { Copy-Item "README.md" "$staging/" }
+          if (Test-Path "LICENSE-MIT") { Copy-Item "LICENSE-MIT" "$staging/" }
+          if (Test-Path "LICENSE-APACHE") { Copy-Item "LICENSE-APACHE" "$staging/" }
+          if (Test-Path "LICENSE") { Copy-Item "LICENSE" "$staging/" }
+          Compress-Archive -Path "$staging" -DestinationPath "${staging}.zip"
+          "ASSET=${staging}.zip" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phosphor-${{ matrix.target }}
+          path: ${{ env.ASSET }}
+
+  universal-macos:
+    name: macOS Universal Binary
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: phosphor-aarch64-apple-darwin
+          path: artifacts/arm64
+
+      - name: Download x86_64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: phosphor-x86_64-apple-darwin
+          path: artifacts/x86_64
+
+      - name: Create universal binary
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+
+          # Extract both archives
+          cd artifacts/arm64 && tar xzf *.tar.gz && cd ../..
+          cd artifacts/x86_64 && tar xzf *.tar.gz && cd ../..
+
+          # Find the extracted binaries
+          ARM_BIN=$(find artifacts/arm64 -name phosphor -type f)
+          X86_BIN=$(find artifacts/x86_64 -name phosphor -type f)
+
+          # Create universal binary
+          STAGING="phosphor-${TAG}-universal-apple-darwin"
+          mkdir -p "$STAGING"
+          lipo -create "$ARM_BIN" "$X86_BIN" -output "$STAGING/phosphor"
+          chmod +x "$STAGING/phosphor"
+          cp -r assets "$STAGING/assets"
+          [ -f README.md ] && cp README.md "$STAGING/"
+          [ -f LICENSE-MIT ] && cp LICENSE-MIT "$STAGING/"
+          [ -f LICENSE-APACHE ] && cp LICENSE-APACHE "$STAGING/"
+          [ -f LICENSE ] && cp LICENSE "$STAGING/"
+          tar czf "${STAGING}.tar.gz" "$STAGING"
+          echo "ASSET=${STAGING}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phosphor-universal-apple-darwin
+          path: ${{ env.ASSET }}
+
+  release:
+    name: Publish Release
+    needs: [build, universal-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/**/*

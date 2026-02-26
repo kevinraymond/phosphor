@@ -1,18 +1,51 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::Result;
 
 use super::format::PfxEffect;
 
-const EFFECTS_DIR: &str = "assets/effects";
-const SHADERS_DIR: &str = "assets/shaders";
+/// Resolve the assets directory once (CWD-relative → exe-relative → macOS bundle).
+pub fn assets_dir() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        // 1. CWD-relative (dev workflow)
+        let cwd = PathBuf::from("assets");
+        if cwd.join("effects").is_dir() {
+            log::info!("Assets: CWD-relative ({})", cwd.display());
+            return cwd;
+        }
 
-/// WGSL standard library files, prepended to all effect shaders.
-const LIB_FILES: &[&str] = &[
-    "assets/shaders/lib/noise.wgsl",
-    "assets/shaders/lib/palette.wgsl",
-    "assets/shaders/lib/sdf.wgsl",
-    "assets/shaders/lib/tonemap.wgsl",
+        // 2. Exe-relative (installed binary)
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                let beside = exe_dir.join("assets");
+                if beside.join("effects").is_dir() {
+                    log::info!("Assets: exe-relative ({})", beside.display());
+                    return beside;
+                }
+
+                // 3. macOS .app bundle: exe is in Foo.app/Contents/MacOS/
+                let bundle = exe_dir.join("../Resources/assets");
+                if bundle.join("effects").is_dir() {
+                    let canonical = bundle.canonicalize().unwrap_or(bundle);
+                    log::info!("Assets: macOS bundle ({})", canonical.display());
+                    return canonical;
+                }
+            }
+        }
+
+        // Fallback — will surface as "Effects directory not found" later
+        log::warn!("Assets directory not found; using CWD-relative fallback");
+        cwd
+    })
+}
+
+const LIB_FILENAMES: &[&str] = &[
+    "shaders/lib/noise.wgsl",
+    "shaders/lib/palette.wgsl",
+    "shaders/lib/sdf.wgsl",
+    "shaders/lib/tonemap.wgsl",
 ];
 
 /// Standard uniform block prepended to all effect shaders.
@@ -70,16 +103,18 @@ pub struct EffectLoader {
 
 impl EffectLoader {
     pub fn new() -> Self {
+        let base = assets_dir();
         // Load library sources
         let mut lib_source = String::new();
-        for path in LIB_FILES {
-            match std::fs::read_to_string(path) {
+        for filename in LIB_FILENAMES {
+            let path = base.join(filename);
+            match std::fs::read_to_string(&path) {
                 Ok(src) => {
                     lib_source.push_str(&src);
                     lib_source.push('\n');
                 }
                 Err(e) => {
-                    log::warn!("Failed to load shader library {path}: {e}");
+                    log::warn!("Failed to load shader library {}: {e}", path.display());
                 }
             }
         }
@@ -93,7 +128,7 @@ impl EffectLoader {
 
     pub fn scan_effects_directory(&mut self) {
         self.effects.clear();
-        let dir = Path::new(EFFECTS_DIR);
+        let dir = assets_dir().join("effects");
         if !dir.exists() {
             log::warn!("Effects directory not found: {}", dir.display());
             return;
@@ -132,7 +167,7 @@ impl EffectLoader {
     }
 
     pub fn resolve_shader_path(&self, shader_rel: &str) -> PathBuf {
-        Path::new(SHADERS_DIR).join(shader_rel)
+        assets_dir().join("shaders").join(shader_rel)
     }
 
     pub fn load_effect_source(&self, shader_rel: &str) -> Result<String> {
