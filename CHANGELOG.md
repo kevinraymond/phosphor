@@ -3,6 +3,13 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## v0.3.2 — 2026-02-26
+
+### Fixes
+- Fix audio not working on Linux with PipeWire (upgrade cpal to 0.17.3 — fixes ALSA start threshold)
+- Add audio health monitoring: detect and warn when device opens but callbacks never fire
+- Add diagnostic logging for first audio callback (visible with `RUST_LOG=phosphor_app=info`)
+
 ## v0.3.1 — 2026-02-26
 
 ### Fixes

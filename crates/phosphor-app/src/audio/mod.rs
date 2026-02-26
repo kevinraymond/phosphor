@@ -7,7 +7,7 @@ pub mod smoother;
 
 pub use features::AudioFeatures;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -29,6 +29,8 @@ pub struct AudioSystem {
     pub last_error: Option<String>,
     shutdown: Arc<AtomicBool>,
     thread_handle: Option<thread::JoinHandle<()>>,
+    callback_count: Arc<AtomicU64>,
+    started_at: Instant,
 }
 
 impl AudioSystem {
@@ -41,6 +43,7 @@ impl AudioSystem {
             crossbeam_channel::bounded(4);
 
         let shutdown = Arc::new(AtomicBool::new(false));
+        let callback_count = Arc::new(AtomicU64::new(0));
         let mut resolved_name = device_name.unwrap_or("Default").to_string();
         let mut active = false;
         let mut last_error = None;
@@ -52,6 +55,10 @@ impl AudioSystem {
                 active = true;
                 let sample_rate = capture.sample_rate as f32;
                 let shutdown_flag = shutdown.clone();
+                let cb_count = capture.callback_count.clone();
+                // Share the callback counter so AudioSystem can monitor health
+                callback_count.store(0, Ordering::Relaxed);
+                let cb_count_for_system = cb_count.clone();
 
                 thread_handle = Some(
                     thread::Builder::new()
@@ -61,6 +68,19 @@ impl AudioSystem {
                         })
                         .expect("Failed to spawn audio thread"),
                 );
+
+                // Use the capture's callback counter directly
+                return Self {
+                    receiver: rx,
+                    latest: None,
+                    device_name: resolved_name,
+                    active,
+                    last_error,
+                    shutdown,
+                    thread_handle,
+                    callback_count: cb_count_for_system,
+                    started_at: Instant::now(),
+                };
             }
             Err(e) => {
                 log::warn!("Audio capture unavailable: {e}");
@@ -76,6 +96,8 @@ impl AudioSystem {
             last_error,
             shutdown,
             thread_handle,
+            callback_count,
+            started_at: Instant::now(),
         }
     }
 
@@ -98,6 +120,8 @@ impl AudioSystem {
         self.last_error = new.last_error;
         self.shutdown = new.shutdown;
         self.thread_handle = new.thread_handle;
+        self.callback_count = new.callback_count;
+        self.started_at = new.started_at;
     }
 
     /// List available input devices.
@@ -110,6 +134,17 @@ impl AudioSystem {
         while let Ok(features) = self.receiver.try_recv() {
             self.latest = Some(features);
         }
+
+        // Health check: detect stalled audio callbacks
+        if self.active && self.last_error.is_none()
+            && self.callback_count.load(Ordering::Relaxed) == 0
+            && self.started_at.elapsed() > Duration::from_secs(3)
+        {
+            let msg = "Device opened but no audio data received — check audio routing";
+            log::warn!("{msg}");
+            self.last_error = Some(msg.to_string());
+        }
+
         self.latest
     }
 }
