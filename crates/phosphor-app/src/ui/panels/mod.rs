@@ -10,6 +10,7 @@ pub mod osc_panel;
 pub mod param_panel;
 pub mod preset_panel;
 pub mod settings_panel;
+pub mod shader_editor;
 pub mod status_bar;
 pub mod web_panel;
 

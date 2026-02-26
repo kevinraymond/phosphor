@@ -101,7 +101,7 @@ impl ApplicationHandler for PhosphorApp {
 
         match event {
             WindowEvent::CloseRequested => {
-                event_loop.exit();
+                app.quit_requested = true;
             }
             WindowEvent::Resized(size) => {
                 app.resize(size.width, size.height);
@@ -117,7 +117,10 @@ impl ApplicationHandler for PhosphorApp {
             } if !egui_consumed || !app.egui_overlay.wants_keyboard() => {
                 match key {
                     KeyCode::Escape => {
-                        event_loop.exit();
+                        // If shader editor is open, it handles Esc internally
+                        if !app.shader_editor.open {
+                            app.quit_requested = true;
+                        }
                     }
                     KeyCode::KeyF => {
                         let window = &app.window;
@@ -218,34 +221,157 @@ impl ApplicationHandler for PhosphorApp {
                         });
                     }
 
+                    // Sync compile errors into shader editor
+                    if app.shader_editor.open {
+                        app.shader_editor.compile_error = app
+                            .layer_stack
+                            .active()
+                            .and_then(|l| l.shader_error().map(|s| s.to_string()));
+                    }
+
                     // Get active layer's param_store (mutable for MIDI badges)
                     let active_params = app.layer_stack.active_mut();
                     if let Some(layer) = active_params {
-                        crate::ui::panels::draw_panels(
-                            &ctx,
-                            app.egui_overlay.visible,
-                            &mut app.audio,
-                            &mut layer.param_store,
-                            &shader_error,
-                            &app.uniforms,
-                            &app.effect_loader,
-                            &mut layer.postprocess,
-                            particle_count,
-                            &mut app.midi,
-                            &mut app.osc,
-                            &mut app.web,
-                            &app.preset_store,
-                            &layer_infos,
-                            active_layer,
-                            media_info,
-                            &app.status_error,
-                            app.settings.theme,
-                        );
+                        if !app.shader_editor.open {
+                            crate::ui::panels::draw_panels(
+                                &ctx,
+                                app.egui_overlay.visible,
+                                &mut app.audio,
+                                &mut layer.param_store,
+                                &shader_error,
+                                &app.uniforms,
+                                &app.effect_loader,
+                                &mut layer.postprocess,
+                                particle_count,
+                                &mut app.midi,
+                                &mut app.osc,
+                                &mut app.web,
+                                &app.preset_store,
+                                &layer_infos,
+                                active_layer,
+                                media_info,
+                                &app.status_error,
+                                app.settings.theme,
+                            );
+                        }
                         // Sync global postprocess enabled from layer
                         app.post_process.enabled = layer.postprocess.enabled;
                     }
+
+                    // Draw shader editor overlay (on top of everything)
+                    crate::ui::panels::shader_editor::draw_shader_editor(
+                        &ctx,
+                        &mut app.shader_editor,
+                        app.settings.theme,
+                    );
+                    crate::ui::panels::shader_editor::draw_new_effect_prompt(
+                        &ctx,
+                        &mut app.shader_editor,
+                    );
+
+                    // Draw quit confirmation dialog
+                    if app.quit_requested {
+                        // Track whether dialog was already showing last frame.
+                        // On the first frame, the Esc that opened it is still in input state,
+                        // so skip Esc-to-cancel until the next frame.
+                        let dialog_id = egui::Id::new("quit_dialog_shown");
+                        let was_shown: bool = ctx.data(|d| d.get_temp(dialog_id).unwrap_or(false));
+                        ctx.data_mut(|d| d.insert_temp(dialog_id, true));
+
+                        egui::Window::new("Quit Phosphor?")
+                            .collapsible(false)
+                            .resizable(false)
+                            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                            .show(&ctx, |ui| {
+                                ui.label("Are you sure you want to quit?");
+                                ui.add_space(8.0);
+                                ui.horizontal(|ui| {
+                                    if ui.button("Quit").clicked() {
+                                        ui.ctx().data_mut(|d| {
+                                            d.insert_temp(egui::Id::new("confirm_quit"), true);
+                                        });
+                                    }
+                                    let esc_cancel = was_shown
+                                        && ui.input(|i| i.key_pressed(egui::Key::Escape));
+                                    if ui.button("Cancel").clicked() || esc_cancel {
+                                        app.quit_requested = false;
+                                    }
+                                });
+                            });
+                    } else {
+                        // Clear the flag when dialog is dismissed
+                        ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("quit_dialog_shown")));
+                    }
                 }
                 app.egui_overlay.end_frame(&app.window);
+
+                // Handle quit confirmation
+                let confirm_quit: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("confirm_quit"))
+                });
+                if confirm_quit.is_some() {
+                    event_loop.exit();
+                }
+
+                // Handle shader editor signals
+                let open_editor: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("open_shader_editor"))
+                });
+                if open_editor.is_some() {
+                    // Resolve active layer's shader path
+                    if let Some(idx) = app
+                        .layer_stack
+                        .active()
+                        .and_then(|l| l.effect_index())
+                    {
+                        if let Some(effect) = app.effect_loader.effects.get(idx).cloned() {
+                            let passes = effect.normalized_passes();
+                            if let Some(pass) = passes.first() {
+                                let path = app.effect_loader.resolve_shader_path(&pass.shader);
+                                if let Ok(content) = std::fs::read_to_string(&path) {
+                                    app.shader_editor.open_file(&effect.name, path, content);
+                                } else {
+                                    log::error!("Could not read shader: {}", path.display());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let save_editor: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("shader_editor_save"))
+                });
+                if save_editor.is_some() {
+                    if let Some(ref path) = app.shader_editor.file_path {
+                        match std::fs::write(path, &app.shader_editor.code) {
+                            Ok(()) => {
+                                app.shader_editor.disk_content = app.shader_editor.code.clone();
+                                log::info!("Saved shader: {}", path.display());
+                            }
+                            Err(e) => {
+                                log::error!("Failed to save shader: {e}");
+                                app.status_error = Some((format!("Save failed: {e}"), std::time::Instant::now()));
+                            }
+                        }
+                    }
+                }
+
+                let new_prompt: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("new_effect_prompt"))
+                });
+                if new_prompt.is_some() {
+                    app.shader_editor.new_effect_prompt = true;
+                }
+
+                let create_effect: Option<String> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("create_new_effect"))
+                });
+                if let Some(name) = create_effect {
+                    if let Err(e) = app.create_new_effect(&name) {
+                        log::error!("Failed to create effect: {e}");
+                        app.status_error = Some((format!("Create failed: {e}"), std::time::Instant::now()));
+                    }
+                }
 
                 // Handle theme change from settings panel
                 let set_theme: Option<crate::ui::theme::ThemeMode> =
