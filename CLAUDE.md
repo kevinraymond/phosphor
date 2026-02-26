@@ -16,6 +16,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 **Web Control Surface: COMPLETE** — tungstenite WebSocket server, embedded HTML touch UI, bidirectional JSON state sync, multi-client
 **Media Layers: COMPLETE** — PNG/JPEG/GIF as compositing layers, GPU blit with letterbox, animated GIF playback, transport controls, preset save/load
 **Advanced Particles: COMPLETE** — sprite atlas textures, dual blend pipelines, image decomposition with spring-reform compute shader
+**Video Playback: COMPLETE** — feature-gated ffmpeg pre-decode to RAM, instant scrub, 60s max
 
 ### What's Built
 
@@ -58,10 +59,10 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Advanced particles: sprite atlas textures (dual render pipelines: additive/alpha), image decomposition (grid/threshold/random sampling), ParticleAux buffer (binding 4, per-particle home positions + packed RGBA)
 
 #### Media Layers
-- Load PNG/JPEG/GIF as compositing layers via `rfd::FileDialog` ("+ Media" button in layer panel)
+- Load PNG/JPEG/GIF/WebP as compositing layers via `rfd::FileDialog` ("+ Media" button in layer panel)
 - `MediaLayer` struct: owns GPU frame texture (Rgba8UnormSrgb), HDR output RenderTarget, blit pipeline
 - Blit shader (`media_blit.wgsl`): letterbox UV transform with aspect-ratio-correct fit mode, transparent black outside
-- Animated GIF playback: forward/reverse/ping-pong direction, speed control (0.1–4.0x), loop toggle
+- Animated GIF/WebP playback: forward/reverse/ping-pong direction, speed control (0.1–4.0x), loop toggle
 - Frame upload via `queue.write_texture()` only on frame change (no per-frame upload for static images)
 - Transport controls UI in right sidebar when active layer is media (replaces Parameters panel)
 - Media layers composite through existing Compositor (all 7 blend modes + opacity work)
@@ -69,6 +70,13 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Loading an effect on a media layer converts it back to Effect (creates fresh UniformBuffer + PassExecutor)
 - Layer panel: truncated names with hover tooltip, media file name displayed, "IMG"/"GIF" type indication
 - Dependencies: `gif = "0.13"` for direct GIF frame decoding
+- **Video playback** (feature-gated `video`): MP4/MOV/AVI/MKV/WebM/M4V/FLV via ffmpeg subprocess
+- Pre-decode all frames to RAM (`decode_all_frames`) → `MediaSource::Animated` with `from_video` flag — instant random access for scrubbing/audio reactivity
+- ffprobe probes metadata (dimensions, fps, duration); ffmpeg decodes raw RGBA to stdout; all subprocess stdin detached (`Stdio::null`) to prevent terminal corruption
+- 60s max duration (`MAX_PREDECODE_SECS`); ~3.7MB/frame at 1280x720
+- Seek slider with real-time scrub (`seek_to_secs()` / `seek_to_frame()`), mm:ss time display
+- Video filter group in file dialog only when `ffmpeg_available()` (cached via `OnceLock`)
+- Future: `ffmpeg-next` crate for long video support without RAM cost
 
 #### Audio Upgrade + Beat Detection
 - Multi-resolution FFT: 4096-pt (sub_bass, bass, kick), 1024-pt (low_mid, mid, upper_mid), 512-pt (presence, brilliance)
@@ -252,6 +260,8 @@ egui Overlay → Surface
 - Loading an effect on a media layer: converts back by creating fresh UniformBuffer + EffectLayer, then proceeds with normal effect load.
 - `gif = "0.13"` as direct dep (decoder.rs uses gif crate API for frame-by-frame compositing with canvas accumulator).
 - UI panels widened to 270px (from 240px). Layer names use egui `Label::truncate()` with full name on hover.
+- Video pre-decode: ffmpeg decodes all frames to `MediaSource::Animated` (same as GIF). Instant random access, no streaming complexity. RAM cost acceptable for VJ clips (≤60s). `from_video` flag on `Animated` variant (cfg-gated) controls UI differences (seek slider vs frame counter).
+- All ffmpeg/ffprobe subprocess spawns use `.stdin(Stdio::null())` to prevent terminal corruption (ffmpeg inherits stdin and can switch to raw mode).
 
 ### Controls
 - `D` — Toggle egui overlay
@@ -265,6 +275,7 @@ egui Overlay → Surface
 ```bash
 cargo run                          # debug build
 cargo run --release                # release build (much faster shaders)
+cargo run --features video         # with video playback (requires ffmpeg on PATH)
 RUST_LOG=phosphor_app=debug cargo run  # verbose logging
 ```
 
@@ -288,5 +299,5 @@ The complete 28-week, 4-phase plan is at `~/ai/audio/phosphor-internal/cross-pla
 9. ~~Media layers~~ ✓ (PNG/JPEG/GIF with letterbox, GIF playback, transport controls)
 10. ~~Advanced particles~~ ✓ (sprite textures, image decomposition, aux buffer)
 11. AI shader assistant (planned: local LLM via llama.cpp/Ollama, naga validation)
-12. Video playback (feature-gated, ffmpeg-next)
+12. ~~Video playback~~ ✓ (feature-gated, ffmpeg pre-decode to RAM; future: ffmpeg-next for long videos)
 13. 3D Gaussian Splatting (deferred: blocked on wgpu 28 / egui-wgpu update)
