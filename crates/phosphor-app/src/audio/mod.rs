@@ -7,6 +7,8 @@ pub mod smoother;
 
 pub use features::AudioFeatures;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -24,26 +26,33 @@ pub struct AudioSystem {
     latest: Option<AudioFeatures>,
     pub device_name: String,
     pub active: bool,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl AudioSystem {
     pub fn new() -> Self {
+        Self::new_with_device(None)
+    }
+
+    pub fn new_with_device(device_name: Option<&str>) -> Self {
         let (tx, rx): (Sender<AudioFeatures>, Receiver<AudioFeatures>) =
             crossbeam_channel::bounded(4);
 
-        let mut device_name = "None".to_string();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let mut resolved_name = "None".to_string();
         let mut active = false;
 
-        match AudioCapture::new() {
+        match AudioCapture::new_with_device(device_name) {
             Ok(capture) => {
-                device_name = capture.device_name.clone();
+                resolved_name = capture.device_name.clone();
                 active = true;
                 let sample_rate = capture.sample_rate as f32;
+                let shutdown_flag = shutdown.clone();
 
                 thread::Builder::new()
                     .name("phosphor-audio".into())
                     .spawn(move || {
-                        audio_thread(capture, sample_rate, tx);
+                        audio_thread(capture, sample_rate, tx, shutdown_flag);
                     })
                     .expect("Failed to spawn audio thread");
             }
@@ -55,9 +64,29 @@ impl AudioSystem {
         Self {
             receiver: rx,
             latest: None,
-            device_name,
+            device_name: resolved_name,
             active,
+            shutdown,
         }
+    }
+
+    /// Switch to a different audio device at runtime.
+    pub fn switch_device(&mut self, device_name: Option<&str>) {
+        // Signal the old audio thread to stop
+        self.shutdown.store(true, Ordering::Release);
+
+        // Create new system
+        let new = Self::new_with_device(device_name);
+        self.receiver = new.receiver;
+        self.latest = None;
+        self.device_name = new.device_name;
+        self.active = new.active;
+        self.shutdown = new.shutdown;
+    }
+
+    /// List available input devices.
+    pub fn list_devices() -> Vec<String> {
+        AudioCapture::list_devices()
     }
 
     /// Drain the channel and return the most recent features.
@@ -69,7 +98,7 @@ impl AudioSystem {
     }
 }
 
-fn audio_thread(capture: AudioCapture, sample_rate: f32, tx: Sender<AudioFeatures>) {
+fn audio_thread(capture: AudioCapture, sample_rate: f32, tx: Sender<AudioFeatures>, shutdown: Arc<AtomicBool>) {
     let mut analyzer = FftAnalyzer::new(sample_rate);
     let mut normalizer = AdaptiveNormalizer::new();
     let mut beat_detector = BeatDetector::new(sample_rate);
@@ -79,6 +108,10 @@ fn audio_thread(capture: AudioCapture, sample_rate: f32, tx: Sender<AudioFeature
     let start_time = Instant::now();
 
     loop {
+        if shutdown.load(Ordering::Acquire) {
+            log::info!("Audio thread shutting down");
+            break;
+        }
         thread::sleep(Duration::from_millis(10));
 
         let available = capture.ring.available();

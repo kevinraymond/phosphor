@@ -17,6 +17,77 @@ const BAND_COLORS: [Color32; 7] = [
     Color32::from_rgb(0xAA, 0x66, 0xFF), // brilliance - purple
 ];
 
+/// Default label shown in the device dropdown.
+const DEFAULT_DEVICE_LABEL: &str = "Default";
+
+fn draw_device_selector(ui: &mut Ui, audio: &AudioSystem) {
+    let tc = theme_colors(ui.ctx());
+
+    // Cache device list in egui temp data, refresh every 2s
+    let list_id = egui::Id::new("audio_device_list");
+    let list_time_id = egui::Id::new("audio_device_list_time");
+
+    let now = ui.input(|i| i.time);
+    let last_scan: f64 = ui.ctx().data(|d| d.get_temp(list_time_id)).unwrap_or(0.0);
+
+    let devices: Vec<String> = if now - last_scan > 2.0 {
+        let devs = AudioSystem::list_devices();
+        ui.ctx().data_mut(|d| {
+            d.insert_temp(list_id, devs.clone());
+            d.insert_temp(list_time_id, now);
+        });
+        devs
+    } else {
+        ui.ctx().data(|d| d.get_temp(list_id)).unwrap_or_default()
+    };
+
+    // Current selection: device name or "Default"
+    let current = &audio.device_name;
+
+    let selected_text = if devices.iter().any(|d| d == current) {
+        truncate_device_name(current, 30)
+    } else {
+        current.clone()
+    };
+
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Input").size(SMALL_SIZE).color(tc.text_secondary));
+
+        egui::ComboBox::from_id_salt("audio_device_combo")
+            .selected_text(RichText::new(&selected_text).size(SMALL_SIZE))
+            .width(ui.available_width() - 4.0)
+            .show_ui(ui, |ui| {
+                // "Default" option — empty string signals default device
+                let is_default = !devices.iter().any(|d| d == current);
+                if ui.selectable_label(is_default, RichText::new(DEFAULT_DEVICE_LABEL).size(SMALL_SIZE)).clicked() {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("switch_audio_device"), String::new());
+                    });
+                }
+                // Each available device
+                for dev in &devices {
+                    let selected = dev == current;
+                    let label = truncate_device_name(dev, 40);
+                    if ui.selectable_label(selected, RichText::new(&label).size(SMALL_SIZE)).clicked() && !selected {
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new("switch_audio_device"), dev.clone());
+                        });
+                    }
+                }
+            });
+    });
+
+    ui.add_space(4.0);
+}
+
+fn truncate_device_name(name: &str, max: usize) -> String {
+    if name.len() <= max {
+        name.to_string()
+    } else {
+        format!("{}...", &name[..max - 3])
+    }
+}
+
 fn draw_vertical_meters(ui: &mut Ui, bands: &[f32; 7]) {
     let tc = theme_colors(ui.ctx());
     let available_width = ui.available_width();
@@ -122,6 +193,9 @@ fn draw_bpm_display(ui: &mut Ui, uniforms: &ShaderUniforms) {
 }
 
 pub fn draw_audio_panel(ui: &mut Ui, audio: &AudioSystem, uniforms: &ShaderUniforms) {
+    // Device selector always shown (helps diagnose issues)
+    draw_device_selector(ui, audio);
+
     let tc = theme_colors(ui.ctx());
     if !audio.active {
         ui.colored_label(tc.error, "No audio input");

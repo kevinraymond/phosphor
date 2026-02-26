@@ -81,10 +81,33 @@ pub struct AudioCapture {
 
 impl AudioCapture {
     pub fn new() -> Result<Self> {
+        Self::new_with_device(None)
+    }
+
+    pub fn new_with_device(device_name: Option<&str>) -> Result<Self> {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| anyhow::anyhow!("No audio input device found"))?;
+        let device = if let Some(name) = device_name {
+            // Try to find device by name
+            let found = host.input_devices().ok().and_then(|mut devices| {
+                devices.find(|d| {
+                    d.description()
+                        .ok()
+                        .map(|desc| desc.name() == name)
+                        .unwrap_or(false)
+                })
+            });
+            match found {
+                Some(d) => d,
+                None => {
+                    log::warn!("Audio device '{name}' not found, falling back to default");
+                    host.default_input_device()
+                        .ok_or_else(|| anyhow::anyhow!("No audio input device found"))?
+                }
+            }
+        } else {
+            host.default_input_device()
+                .ok_or_else(|| anyhow::anyhow!("No audio input device found"))?
+        };
 
         let device_name = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "Unknown".into());
         log::info!("Audio capture device: {device_name}");
