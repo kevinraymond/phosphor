@@ -199,6 +199,7 @@ impl ApplicationHandler for PhosphorApp {
                             &layer_infos,
                             active_layer,
                             media_info,
+                            &app.status_error,
                         );
                     }
                 }

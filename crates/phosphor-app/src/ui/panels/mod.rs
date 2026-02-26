@@ -41,6 +41,7 @@ pub fn draw_panels(
     layers: &[LayerInfo],
     active_layer: usize,
     media_info: Option<media_panel::MediaInfo>,
+    status_error: &Option<(String, std::time::Instant)>,
 ) {
     if !visible {
         return;
@@ -62,6 +63,7 @@ pub fn draw_panels(
             osc.is_recently_active(),
             web.config.enabled,
             web.client_count,
+            status_error,
         );
     });
 
