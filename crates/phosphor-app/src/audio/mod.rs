@@ -26,7 +26,9 @@ pub struct AudioSystem {
     latest: Option<AudioFeatures>,
     pub device_name: String,
     pub active: bool,
+    pub last_error: Option<String>,
     shutdown: Arc<AtomicBool>,
+    thread_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl AudioSystem {
@@ -39,8 +41,10 @@ impl AudioSystem {
             crossbeam_channel::bounded(4);
 
         let shutdown = Arc::new(AtomicBool::new(false));
-        let mut resolved_name = "None".to_string();
+        let mut resolved_name = device_name.unwrap_or("Default").to_string();
         let mut active = false;
+        let mut last_error = None;
+        let mut thread_handle = None;
 
         match AudioCapture::new_with_device(device_name) {
             Ok(capture) => {
@@ -49,15 +53,18 @@ impl AudioSystem {
                 let sample_rate = capture.sample_rate as f32;
                 let shutdown_flag = shutdown.clone();
 
-                thread::Builder::new()
-                    .name("phosphor-audio".into())
-                    .spawn(move || {
-                        audio_thread(capture, sample_rate, tx, shutdown_flag);
-                    })
-                    .expect("Failed to spawn audio thread");
+                thread_handle = Some(
+                    thread::Builder::new()
+                        .name("phosphor-audio".into())
+                        .spawn(move || {
+                            audio_thread(capture, sample_rate, tx, shutdown_flag);
+                        })
+                        .expect("Failed to spawn audio thread"),
+                );
             }
             Err(e) => {
                 log::warn!("Audio capture unavailable: {e}");
+                last_error = Some(format!("{e}"));
             }
         }
 
@@ -66,7 +73,9 @@ impl AudioSystem {
             latest: None,
             device_name: resolved_name,
             active,
+            last_error,
             shutdown,
+            thread_handle,
         }
     }
 
@@ -75,13 +84,20 @@ impl AudioSystem {
         // Signal the old audio thread to stop
         self.shutdown.store(true, Ordering::Release);
 
+        // Wait for the old thread to finish so the device is fully released
+        if let Some(handle) = self.thread_handle.take() {
+            let _ = handle.join();
+        }
+
         // Create new system
         let new = Self::new_with_device(device_name);
         self.receiver = new.receiver;
         self.latest = None;
         self.device_name = new.device_name;
         self.active = new.active;
+        self.last_error = new.last_error;
         self.shutdown = new.shutdown;
+        self.thread_handle = new.thread_handle;
     }
 
     /// List available input devices.

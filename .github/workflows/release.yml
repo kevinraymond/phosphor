@@ -97,7 +97,9 @@ jobs:
           rm -rf "$ICONSET"
 
           # Codesign the bundle
-          codesign --force --deep --options runtime --sign "Developer ID Application" "$APP" --timestamp
+          codesign --force --deep --options runtime \
+            --entitlements packaging/macos/entitlements.plist \
+            --sign "Developer ID Application" "$APP" --timestamp
           codesign --verify --verbose "$APP"
 
           # Create polished DMG with drag-to-Applications
@@ -247,7 +249,9 @@ jobs:
           rm -rf "$ICONSET"
 
           # Codesign the bundle
-          codesign --force --deep --options runtime --sign "Developer ID Application" "$APP" --timestamp
+          codesign --force --deep --options runtime \
+            --entitlements packaging/macos/entitlements.plist \
+            --sign "Developer ID Application" "$APP" --timestamp
           codesign --verify --verbose "$APP"
 
           # Create polished DMG with drag-to-Applications

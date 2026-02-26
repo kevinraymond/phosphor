@@ -198,7 +198,11 @@ pub fn draw_audio_panel(ui: &mut Ui, audio: &AudioSystem, uniforms: &ShaderUnifo
 
     let tc = theme_colors(ui.ctx());
     if !audio.active {
-        ui.colored_label(tc.error, "No audio input");
+        if let Some(err) = &audio.last_error {
+            ui.colored_label(tc.error, format!("Audio error: {err}"));
+        } else {
+            ui.colored_label(tc.error, "No audio input");
+        }
         return;
     }
 
