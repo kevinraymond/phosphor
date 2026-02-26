@@ -736,16 +736,7 @@ impl ApplicationHandler for PhosphorApp {
                 if let Some(mode_u32) = layer_blend {
                     if let Some(layer) = app.layer_stack.active_mut() {
                         if !layer.locked {
-                            layer.blend_mode = match mode_u32 {
-                                0 => BlendMode::Normal,
-                                1 => BlendMode::Add,
-                                2 => BlendMode::Multiply,
-                                3 => BlendMode::Screen,
-                                4 => BlendMode::Overlay,
-                                5 => BlendMode::SoftLight,
-                                6 => BlendMode::Difference,
-                                _ => BlendMode::Normal,
-                            };
+                            layer.blend_mode = BlendMode::from_u32(mode_u32);
                             app.preset_store.mark_dirty();
                         }
                     }
@@ -897,6 +888,9 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp_millis()
         .init();
+
+    // Suppress noisy ALSA/JACK C library messages on Linux (missing JACK server, OSS, dsnoop)
+    crate::audio::capture::suppress_alsa_errors();
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
