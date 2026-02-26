@@ -1,5 +1,7 @@
 # Phosphor
 
+![CI](https://github.com/kevinraymond/phosphor/actions/workflows/ci.yml/badge.svg)
+
 **Real-time audio-reactive shader engine for live VJ performance.**
 
 Phosphor turns your audio input into layered, beat-synced visuals using GPU shaders, particles, and compositing — all driven by WGSL and controlled via MIDI, OSC, or a phone browser. Built with raw wgpu, no game engine required.
@@ -8,12 +10,13 @@ Phosphor turns your audio input into layered, beat-synced visuals using GPU shad
 
 ## Quick Start
 
-**Prerequisites:** Rust 1.85+, an audio input device, a Vulkan-capable GPU.
+**Prerequisites:** Rust 1.90+, an audio input device, a Vulkan-capable GPU. Optional: [ffmpeg](https://ffmpeg.org/) on PATH for video layer support.
 
 ```bash
-git clone https://github.com/your-username/phosphor.git
+git clone https://github.com/kevinraymond/phosphor.git
 cd phosphor
-cargo run --release
+cargo run --release                # standard build
+cargo run --release --features video  # with video layer support (requires ffmpeg)
 ```
 
 On first launch: press **D** to show the UI, pick an effect from the browser, and press **F** for fullscreen. Audio reactivity works immediately from your default input device.
@@ -72,7 +75,7 @@ Open it on a phone or tablet on the same network. Supports multiple simultaneous
 | **Shards** | Animated Voronoi cells with stained-glass fill | |
 | **Pulse** | Beat-synced concentric rings with trails | Feedback |
 | **Iris** | Spinning dot with fading feedback trails | Feedback |
-| **Swarm** | Orbital particle cloud with luminous webs | Feedback, Particles |
+| **Swarm** | Orbital particle cloud with custom compute shader | Feedback, Particles |
 | **Storm** | Volumetric clouds with beat-triggered lightning | Feedback |
 
 All effects are audio-reactive out of the box. Parameters are exposed as sliders in the UI and mappable to MIDI/OSC.
@@ -84,6 +87,7 @@ All effects are audio-reactive out of the box. Parameters are exposed as sliders
 - Per-layer **opacity**, **enable/disable**, **lock** (freezes all settings), **pin** (prevents reorder)
 - **Drag-and-drop** reordering in the layer panel
 - **Media layers**: load PNG/JPEG/GIF/WebP as compositing layers with letterbox fit and animated playback
+- **Video layers** (with `--features video`): MP4/MOV/AVI/MKV/WebM pre-decoded to RAM for instant scrub and seek (requires ffmpeg, 60s max)
 - **Post-processing**: bloom, chromatic aberration, ACES tonemapping, vignette, film grain (audio-reactive)
 
 ## Presets
