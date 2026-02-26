@@ -18,7 +18,7 @@ fn phosphor_hash2(p: vec2f) -> f32 {
 fn phosphor_noise3(p: vec3f) -> f32 {
     let i = floor(p);
     let f = fract(p);
-    let u = f * f * (3.0 - 2.0 * f);
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
 
     return mix(
         mix(
@@ -43,7 +43,7 @@ fn phosphor_noise3(p: vec3f) -> f32 {
 fn phosphor_noise2(p: vec2f) -> f32 {
     let i = floor(p);
     let f = fract(p);
-    let u = f * f * (3.0 - 2.0 * f);
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
 
     let a = phosphor_hash2(i);
     let b = phosphor_hash2(i + vec2f(1.0, 0.0));
