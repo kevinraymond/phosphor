@@ -52,6 +52,49 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
             }
         });
     }
+
+    // Edit / + New buttons
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        let has_effect = loader.current_effect.is_some();
+        if ui
+            .add_enabled(
+                has_effect,
+                egui::Button::new(
+                    RichText::new("Edit Shader")
+                        .size(SMALL_SIZE)
+                        .color(if has_effect { tc.text_primary } else { tc.text_secondary }),
+                )
+                .fill(tc.card_bg)
+                .stroke(Stroke::new(1.0, tc.card_border))
+                .corner_radius(CornerRadius::same(4)),
+            )
+            .on_hover_text("Open shader in editor")
+            .clicked()
+        {
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(egui::Id::new("open_shader_editor"), true));
+        }
+
+        if ui
+            .add(
+                egui::Button::new(
+                    RichText::new("+ New")
+                        .size(SMALL_SIZE)
+                        .color(tc.text_primary),
+                )
+                .fill(tc.card_bg)
+                .stroke(Stroke::new(1.0, tc.card_border))
+                .corner_radius(CornerRadius::same(4)),
+            )
+            .on_hover_text("Create a new effect from template")
+            .clicked()
+        {
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(egui::Id::new("new_effect_prompt"), true));
+        }
+    });
 }
 
 fn truncate_name(name: &str, max_len: usize) -> String {

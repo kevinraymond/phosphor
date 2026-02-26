@@ -20,12 +20,19 @@ impl ShaderPipeline {
 
         // Combine vertex + fragment into one module
         let full_source = format!("{}\n{}", FULLSCREEN_TRIANGLE_VS, fragment_source);
+
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("phosphor-shader"),
             source: wgpu::ShaderSource::Wgsl(full_source.into()),
         });
 
         let pipeline = Self::create_pipeline(device, format, &bind_group_layout, &shader_module);
+
+        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+            return Err(anyhow::anyhow!("{error}"));
+        }
 
         Ok(Self {
             pipeline,
@@ -40,6 +47,11 @@ impl ShaderPipeline {
         fragment_source: &str,
     ) -> Result<(), String> {
         let full_source = format!("{}\n{}", FULLSCREEN_TRIANGLE_VS, fragment_source);
+
+        // Push an error scope to catch shader compilation and pipeline creation errors
+        // instead of letting wgpu panic with the default error handler.
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("phosphor-shader"),
             source: wgpu::ShaderSource::Wgsl(full_source.into()),
@@ -47,6 +59,12 @@ impl ShaderPipeline {
 
         let pipeline =
             Self::create_pipeline(device, format, &self.bind_group_layout, &shader_module);
+
+        // Check if any validation errors occurred during shader/pipeline creation.
+        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+            return Err(format!("{error}"));
+        }
+
         self.pipeline = pipeline;
         Ok(())
     }

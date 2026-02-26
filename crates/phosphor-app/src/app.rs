@@ -27,6 +27,7 @@ use crate::preset::PresetStore;
 use crate::shader::ShaderWatcher;
 use crate::settings::SettingsConfig;
 use crate::ui::EguiOverlay;
+use crate::ui::panels::shader_editor::ShaderEditorState;
 
 pub struct App {
     pub gpu: GpuContext,
@@ -63,6 +64,10 @@ pub struct App {
     // NDI output (feature-gated)
     #[cfg(feature = "ndi")]
     pub ndi: crate::ndi::NdiSystem,
+    // Shader editor
+    pub shader_editor: ShaderEditorState,
+    // Quit confirmation
+    pub quit_requested: bool,
     // Transient status error (displayed in status bar, auto-clears)
     pub status_error: Option<(String, Instant)>,
 }
@@ -265,6 +270,8 @@ impl App {
             placeholder,
             #[cfg(feature = "ndi")]
             ndi,
+            shader_editor: ShaderEditorState::default(),
+            quit_requested: false,
             status_error: None,
         })
     }
@@ -900,6 +907,20 @@ impl App {
                 log::error!("Failed to load effect '{}': {e}", effect.name);
                 if let LayerContent::Effect(ref mut eff) = self.layer_stack.layers[layer_idx].content {
                     eff.shader_error = Some(format!("Load error: {e}"));
+                    // Still track the effect index so "Edit Shader" can find the source file
+                    eff.effect_index = Some(effect_index);
+                }
+                // Update current_effect so the grid selection reflects the broken effect
+                if layer_idx == self.layer_stack.active_layer {
+                    self.effect_loader.current_effect = Some(effect_index);
+                }
+                // Auto-open the editor so the user can fix the shader
+                if let Some(pass) = passes.first() {
+                    let path = self.effect_loader.resolve_shader_path(&pass.shader);
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        self.shader_editor.open_file(&effect.name, path, content);
+                        self.shader_editor.compile_error = Some(format!("{e}"));
+                    }
                 }
             }
         }
@@ -1292,6 +1313,131 @@ impl App {
         }
 
         output.present();
+
+        Ok(())
+    }
+
+    /// Create a new effect from template (.pfx + .wgsl), scan, load, and open in editor.
+    pub fn create_new_effect(&mut self, name: &str) -> Result<()> {
+        use std::io::Write;
+
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("Effect name cannot be empty");
+        }
+
+        // Sanitize to snake_case filename
+        let snake: String = name
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let snake = snake.trim_matches('_').to_string();
+        if snake.is_empty() {
+            anyhow::bail!("Invalid effect name");
+        }
+
+        let effects_dir = assets_dir().join("effects");
+        let shaders_dir = assets_dir().join("shaders");
+        let pfx_path = effects_dir.join(format!("{snake}.pfx"));
+        let wgsl_path = shaders_dir.join(format!("{snake}.wgsl"));
+
+        if pfx_path.exists() {
+            anyhow::bail!("Effect '{}' already exists: {}", name, pfx_path.display());
+        }
+        if wgsl_path.exists() {
+            anyhow::bail!("Shader '{}' already exists: {}", name, wgsl_path.display());
+        }
+
+        // Write template .pfx
+        let pfx_json = serde_json::json!({
+            "name": name,
+            "author": "",
+            "description": "",
+            "shader": format!("{snake}.wgsl"),
+            "inputs": [
+                {
+                    "type": "Float",
+                    "name": "speed",
+                    "default": 0.5,
+                    "min": 0.0,
+                    "max": 1.0
+                },
+                {
+                    "type": "Float",
+                    "name": "intensity",
+                    "default": 0.7,
+                    "min": 0.0,
+                    "max": 1.0
+                }
+            ],
+            "postprocess": {
+                "enabled": true
+            }
+        });
+        let mut f = std::fs::File::create(&pfx_path)?;
+        f.write_all(serde_json::to_string_pretty(&pfx_json)?.as_bytes())?;
+
+        // Write template .wgsl
+        let wgsl_template = format!(
+            r#"// {name} — audio-reactive shader
+// param(0) = speed, param(1) = intensity
+
+@fragment
+fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {{
+    let res = u.resolution;
+    let uv = frag_coord.xy / res;
+    let aspect = res.x / res.y;
+    let p = (uv - 0.5) * vec2f(aspect, 1.0);
+    let t = u.time * (0.2 + param(0u) * 0.8);
+    let intensity = param(1u);
+
+    let r = length(p);
+    let angle = atan2(p.y, p.x);
+
+    // Animated gradient with audio reactivity
+    let wave = sin(r * 8.0 - t * 2.0) * 0.5 + 0.5;
+    let audio_pulse = 1.0 + u.rms * 0.5 + u.bass * 0.3;
+    let glow = (1.0 - r * 1.2) * intensity * audio_pulse;
+
+    let col = vec3f(
+        0.2 + 0.3 * sin(t + angle),
+        0.4 + 0.3 * sin(t * 0.7 + r * 4.0),
+        0.7 + 0.3 * cos(t * 0.5 + angle * 2.0),
+    ) * wave * glow;
+
+    let alpha = clamp(max(col.r, max(col.g, col.b)) * 2.0, 0.0, 1.0);
+    return vec4f(max(col, vec3f(0.0)), alpha);
+}}
+"#
+        );
+        std::fs::write(&wgsl_path, &wgsl_template)?;
+
+        log::info!("Created new effect '{}': {} + {}", name, pfx_path.display(), wgsl_path.display());
+
+        // Rescan effects directory
+        self.effect_loader.scan_effects_directory();
+
+        // Find and load the new effect
+        let idx = self
+            .effect_loader
+            .effects
+            .iter()
+            .position(|e| e.name == name);
+        if let Some(idx) = idx {
+            self.load_effect(idx);
+        }
+
+        // Open in editor
+        if wgsl_path.exists() {
+            let content = std::fs::read_to_string(&wgsl_path)?;
+            self.shader_editor.open_file(name, wgsl_path, content);
+        }
 
         Ok(())
     }

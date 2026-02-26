@@ -182,12 +182,11 @@ impl Layer {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         queue: &wgpu::Queue,
-        viewport: Option<[u32; 2]>,
     ) -> &RenderTarget {
         match &self.content {
             LayerContent::Effect(e) => {
                 e.pass_executor
-                    .execute(encoder, &e.uniform_buffer, queue, &e.uniforms, viewport)
+                    .execute(encoder, &e.uniform_buffer, queue, &e.uniforms)
             }
             LayerContent::Media(m) => m.execute(encoder),
         }

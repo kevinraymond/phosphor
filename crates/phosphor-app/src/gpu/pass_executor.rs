@@ -104,6 +104,7 @@ impl PassExecutor {
     }
 
     /// Execute all passes. Returns a reference to the final pass's write target.
+    /// `viewport`: optional (width, height) to restrict rendering to a sub-region.
     pub fn execute(
         &self,
         encoder: &mut CommandEncoder,
