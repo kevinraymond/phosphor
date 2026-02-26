@@ -4,6 +4,8 @@ pub mod effect_panel;
 pub mod layer_panel;
 pub mod media_panel;
 pub mod midi_panel;
+#[cfg(feature = "ndi")]
+pub mod ndi_panel;
 pub mod osc_panel;
 pub mod param_panel;
 pub mod preset_panel;
@@ -58,6 +60,12 @@ pub fn draw_panels(
         let midi_port = midi.connected_port().unwrap_or("");
         let midi_active = midi.connected_port().is_some();
         let midi_recently_active = midi.is_recently_active();
+        #[cfg(feature = "ndi")]
+        let ndi_running = ctx.data_mut(|d| {
+            d.get_temp::<bool>(egui::Id::new("ndi_running")).unwrap_or(false)
+        });
+        #[cfg(not(feature = "ndi"))]
+        let ndi_running = false;
         status_bar::draw_status_bar(
             ui,
             shader_error,
@@ -70,6 +78,7 @@ pub fn draw_panels(
             osc.is_recently_active(),
             web.config.enabled,
             web.client_count,
+            ndi_running,
             status_error,
         );
     });
@@ -203,6 +212,27 @@ pub fn draw_panels(
                         web_panel::draw_web_panel(ui, web);
                     },
                 );
+
+                // NDI Outputs section (feature-gated, default collapsed)
+                #[cfg(feature = "ndi")]
+                {
+                    let ndi_info: Option<ndi_panel::NdiInfo> = ui.ctx().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("ndi_info"))
+                    });
+                    if let Some(info) = ndi_info {
+                        let ndi_badge = if info.running { "ON" } else { "OFF" };
+                        widgets::section(
+                            ui,
+                            "sec_ndi",
+                            "Outputs",
+                            Some(ndi_badge),
+                            false,
+                            |ui| {
+                                ndi_panel::draw_ndi_panel(ui, &info);
+                            },
+                        );
+                    }
+                }
 
                 // Settings section (default collapsed)
                 widgets::section(

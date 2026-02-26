@@ -60,6 +60,9 @@ pub struct App {
     pub placeholder: PlaceholderTexture,
     // Global uniforms template (time, audio, etc. — params overwritten per-layer)
     pub uniforms: ShaderUniforms,
+    // NDI output (feature-gated)
+    #[cfg(feature = "ndi")]
+    pub ndi: crate::ndi::NdiSystem,
     // Transient status error (displayed in status bar, auto-clears)
     pub status_error: Option<(String, Instant)>,
 }
@@ -227,6 +230,13 @@ impl App {
         preset_store.scan();
         let settings = SettingsConfig::load();
         let egui_overlay = EguiOverlay::new(&gpu.device, gpu.format, &window, settings.theme);
+        #[cfg(feature = "ndi")]
+        let ndi = crate::ndi::NdiSystem::new(
+            &gpu.device,
+            gpu.format,
+            gpu.surface_config.width,
+            gpu.surface_config.height,
+        );
 
         let now = Instant::now();
         Ok(Self {
@@ -253,6 +263,8 @@ impl App {
             compositor,
             post_process,
             placeholder,
+            #[cfg(feature = "ndi")]
+            ndi,
             status_error: None,
         })
     }
@@ -267,6 +279,8 @@ impl App {
         self.post_process.resize(&self.gpu.device, width, height);
         self.egui_overlay
             .resize(width, height, self.window.scale_factor() as f32);
+        #[cfg(feature = "ndi")]
+        self.ndi.resize(&self.gpu.device, width, height);
     }
 
     pub fn update(&mut self) {
@@ -1201,41 +1215,19 @@ impl App {
             .map(|(i, _)| i)
             .collect();
 
-        if enabled_layers.is_empty() {
-            // Nothing to render — just clear and present
-            self.post_process.render(
-                &self.gpu.device,
-                &self.gpu.queue,
-                &mut encoder,
-                &self.compositor.accumulator.write_target(),
-                &surface_view,
-                self.uniforms.time,
-                self.uniforms.rms,
-                self.uniforms.onset,
-                self.uniforms.flatness,
-                &PostProcessDef::default(),
-            );
+        // Compute the HDR source from layer execution + compositing.
+        let (source, postprocess) = if enabled_layers.is_empty() {
+            (
+                self.compositor.accumulator.write_target() as &crate::gpu::render_target::RenderTarget,
+                PostProcessDef::default(),
+            )
         } else if enabled_layers.len() == 1 && self.layer_stack.layers[enabled_layers[0]].opacity >= 1.0 {
             // Single-layer fast path: skip compositing entirely (only when fully opaque)
             let idx = enabled_layers[0];
-            let final_target = self.layer_stack.layers[idx].execute(&mut encoder, &self.gpu.queue);
-            let postprocess = self.current_postprocess();
-
-            self.post_process.render(
-                &self.gpu.device,
-                &self.gpu.queue,
-                &mut encoder,
-                final_target,
-                &surface_view,
-                self.uniforms.time,
-                self.uniforms.rms,
-                self.uniforms.onset,
-                self.uniforms.flatness,
-                &postprocess,
-            );
+            let target = self.layer_stack.layers[idx].execute(&mut encoder, &self.gpu.queue);
+            (target, self.current_postprocess())
         } else {
             // Multi-layer: render each layer, then composite
-            // Collect layer render results
             let mut layer_outputs: Vec<(&crate::gpu::render_target::RenderTarget, BlendMode, f32)> =
                 Vec::new();
             for &idx in &enabled_layers {
@@ -1244,30 +1236,40 @@ impl App {
                 let opacity = self.layer_stack.layers[idx].opacity;
                 layer_outputs.push((target, blend, opacity));
             }
-
             // Reverse so top-of-UI-list renders visually on top
             layer_outputs.reverse();
 
-            // Composite layers
             let composited = self.compositor.composite(
                 &self.gpu.device,
                 &self.gpu.queue,
                 &mut encoder,
                 &layer_outputs,
             );
+            (composited, self.current_postprocess())
+        };
 
-            let postprocess = self.current_postprocess();
-            self.post_process.render(
+        // Post-process → surface
+        self.post_process.render(
+            &self.gpu.device,
+            &self.gpu.queue,
+            &mut encoder,
+            source,
+            &surface_view,
+            self.uniforms.time,
+            self.uniforms.rms,
+            self.uniforms.onset,
+            self.uniforms.flatness,
+            &postprocess,
+        );
+
+        // NDI capture: render composite to capture texture + copy to staging
+        #[cfg(feature = "ndi")]
+        if self.ndi.is_running() {
+            self.ndi.capture_frame(
                 &self.gpu.device,
-                &self.gpu.queue,
                 &mut encoder,
-                composited,
-                &surface_view,
-                self.uniforms.time,
-                self.uniforms.rms,
-                self.uniforms.onset,
-                self.uniforms.flatness,
-                &postprocess,
+                &self.post_process,
+                source,
             );
         }
 
@@ -1282,6 +1284,13 @@ impl App {
             .render(&self.gpu.device, &self.gpu.queue, &mut encoder, &surface_view);
 
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
+
+        // NDI: request async map on staging buffer (must be after queue.submit)
+        #[cfg(feature = "ndi")]
+        if self.ndi.is_running() {
+            self.ndi.post_submit();
+        }
+
         output.present();
 
         Ok(())

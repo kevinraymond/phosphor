@@ -56,7 +56,10 @@ gif = "0.13"
 rfd = "0.15"
 # Linear algebra (camera, projection)
 glam = "0.29"
+# Dynamic library loading (NDI runtime)
+libloading = { version = "0.8", optional = true }
 
 [features]
 default = []
 video = []
+ndi = ["libloading"]

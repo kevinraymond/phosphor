@@ -48,6 +48,7 @@ pub fn draw_status_bar(
     osc_recently_active: bool,
     web_enabled: bool,
     web_client_count: usize,
+    ndi_running: bool,
     status_error: &Option<(String, std::time::Instant)>,
 ) {
     let tc = theme_colors(ui.ctx());
@@ -89,6 +90,13 @@ pub fn draw_status_bar(
             label(ui, "FPS");
 
             ui.add_space(6.0);
+
+            // NDI
+            if ndi_running {
+                dot(ui, true, Color32::from_rgb(0x40, 0xC0, 0x40));
+                label(ui, "NDI");
+                ui.add_space(6.0);
+            }
 
             // Web
             if web_enabled {

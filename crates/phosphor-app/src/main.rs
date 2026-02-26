@@ -4,6 +4,8 @@ mod effect;
 mod gpu;
 mod media;
 mod midi;
+#[cfg(feature = "ndi")]
+mod ndi;
 mod osc;
 mod params;
 mod preset;
@@ -197,6 +199,25 @@ impl ApplicationHandler for PhosphorApp {
                         })
                     });
 
+                    // Store NDI state in egui temp data for UI panels
+                    #[cfg(feature = "ndi")]
+                    {
+                        let ndi_info = crate::ui::panels::ndi_panel::NdiInfo {
+                            enabled: app.ndi.config.enabled,
+                            running: app.ndi.is_running(),
+                            ndi_available: crate::ndi::ffi::ndi_available(),
+                            source_name: app.ndi.config.source_name.clone(),
+                            resolution: app.ndi.config.resolution,
+                            frames_sent: app.ndi.frames_sent(),
+                            output_width: app.ndi.capture.as_ref().map_or(0, |c| c.width),
+                            output_height: app.ndi.capture.as_ref().map_or(0, |c| c.height),
+                        };
+                        ctx.data_mut(|d| {
+                            d.insert_temp(egui::Id::new("ndi_info"), ndi_info);
+                            d.insert_temp(egui::Id::new("ndi_running"), app.ndi.is_running());
+                        });
+                    }
+
                     // Get active layer's param_store (mutable for MIDI badges)
                     let active_params = app.layer_stack.active_mut();
                     if let Some(layer) = active_params {
@@ -235,6 +256,70 @@ impl ApplicationHandler for PhosphorApp {
                     app.egui_overlay.set_theme(theme);
                     app.settings.theme = theme;
                     app.settings.save();
+                }
+
+                // Handle NDI signals from UI
+                #[cfg(feature = "ndi")]
+                {
+                    let ndi_enable: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("ndi_set_enabled"))
+                    });
+                    if let Some(enabled) = ndi_enable {
+                        app.ndi.set_enabled(
+                            enabled,
+                            &app.gpu.device,
+                            app.gpu.format,
+                            app.gpu.surface_config.width,
+                            app.gpu.surface_config.height,
+                        );
+                    }
+
+                    let ndi_source: Option<String> = app.egui_overlay.context().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("ndi_source_name"))
+                    });
+                    if let Some(name) = ndi_source {
+                        app.ndi.config.source_name = name;
+                        app.ndi.config.save();
+                        app.ndi.restart(
+                            &app.gpu.device,
+                            app.gpu.format,
+                            app.gpu.surface_config.width,
+                            app.gpu.surface_config.height,
+                        );
+                    }
+
+                    let ndi_res: Option<u8> = app.egui_overlay.context().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("ndi_resolution_change"))
+                    });
+                    if let Some(res_u8) = ndi_res {
+                        let res = match res_u8 {
+                            0 => crate::ndi::types::OutputResolution::Match,
+                            1 => crate::ndi::types::OutputResolution::Res720p,
+                            2 => crate::ndi::types::OutputResolution::Res1080p,
+                            3 => crate::ndi::types::OutputResolution::Res4K,
+                            _ => crate::ndi::types::OutputResolution::Match,
+                        };
+                        app.ndi.config.resolution = res;
+                        app.ndi.config.save();
+                        app.ndi.restart(
+                            &app.gpu.device,
+                            app.gpu.format,
+                            app.gpu.surface_config.width,
+                            app.gpu.surface_config.height,
+                        );
+                    }
+
+                    let ndi_restart: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("ndi_restart"))
+                    });
+                    if ndi_restart.is_some() {
+                        app.ndi.restart(
+                            &app.gpu.device,
+                            app.gpu.format,
+                            app.gpu.surface_config.width,
+                            app.gpu.surface_config.height,
+                        );
+                    }
                 }
 
                 // Handle effect loading from UI → loads on active layer

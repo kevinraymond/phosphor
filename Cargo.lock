@@ -2762,6 +2762,7 @@ dependencies = [
  "glam",
  "image",
  "image-webp",
+ "libloading",
  "log",
  "midir",
  "notify",
