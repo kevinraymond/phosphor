@@ -1,3 +1,4 @@
+pub mod audio_mappings_panel;
 pub mod audio_panel;
 pub mod effect_panel;
 pub mod layer_panel;
@@ -246,6 +247,27 @@ pub fn draw_panels(
                             param_panel::draw_param_panel(ui, params, midi, osc);
                         },
                     );
+
+                    // Audio Reactivity section (default collapsed)
+                    let active_info = layers.get(active_layer);
+                    let mappings = active_info
+                        .and_then(|info| info.effect_index)
+                        .and_then(|idx| effect_loader.effects.get(idx))
+                        .map(|fx| fx.audio_mappings.as_slice())
+                        .unwrap_or(&[]);
+                    if !mappings.is_empty() {
+                        let mapping_badge = format!("{}", mappings.len());
+                        widgets::section(
+                            ui,
+                            "sec_audio_react",
+                            "Audio Reactivity",
+                            Some(&mapping_badge),
+                            false,
+                            |ui| {
+                                audio_mappings_panel::draw_audio_mappings(ui, mappings);
+                            },
+                        );
+                    }
                 }
 
                 // Post-Processing section

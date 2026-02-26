@@ -62,6 +62,13 @@ impl Default for PostProcessDef {
     }
 }
 
+/// Describes which audio feature drives which visual aspect of an effect.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioMapping {
+    pub feature: String,
+    pub target: String,
+}
+
 /// A .pfx effect definition (JSON format).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PfxEffect {
@@ -84,6 +91,9 @@ pub struct PfxEffect {
     /// GPU particle system definition.
     #[serde(default)]
     pub particles: Option<ParticleDef>,
+    /// Audio feature → visual target mappings (read-only display in UI).
+    #[serde(default)]
+    pub audio_mappings: Vec<AudioMapping>,
 }
 
 impl PfxEffect {
