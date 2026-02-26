@@ -515,6 +515,9 @@ impl App {
         let changes = self.shader_watcher.drain_changes();
         if !changes.is_empty() {
             let lib_changed = changes.iter().any(|p| p.to_string_lossy().contains("/lib/"));
+            if lib_changed {
+                self.effect_loader.reload_library();
+            }
             let hdr_format = GpuContext::hdr_format();
 
             for layer in &mut self.layer_stack.layers {
