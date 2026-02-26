@@ -189,8 +189,8 @@ mod tests {
 
     #[test]
     fn first_float_from_double() {
-        let v = first_float(&[OscType::Double(2.718)]).unwrap();
-        assert!((v - 2.718).abs() < 0.01);
+        let v = first_float(&[OscType::Double(4.567)]).unwrap();
+        assert!((v - 4.567).abs() < 0.01);
     }
 
     #[test]
