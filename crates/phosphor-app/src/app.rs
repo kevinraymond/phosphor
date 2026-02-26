@@ -468,7 +468,7 @@ impl App {
             self.web.update_latest_state(&state_json);
         }
 
-        // Advance GIF playback + upload frames for media layers
+        // Advance media playback + upload frames for media layers
         for layer in &mut self.layer_stack.layers {
             if let LayerContent::Media(ref mut m) = layer.content {
                 m.advance(dt);

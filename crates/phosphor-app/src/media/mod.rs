@@ -1,5 +1,7 @@
 pub mod decoder;
 pub mod types;
+#[cfg(feature = "video")]
+pub mod video;
 
 use std::path::PathBuf;
 
@@ -291,7 +293,7 @@ impl MediaLayer {
         &self.output_target
     }
 
-    /// Advance GIF playback by dt seconds. Sets needs_upload if frame changed.
+    /// Advance media playback by dt seconds. Sets needs_upload if frame changed.
     pub fn advance(&mut self, dt_secs: f32) {
         if !self.transport.playing {
             return;
@@ -431,8 +433,59 @@ impl MediaLayer {
         self.source.is_animated()
     }
 
+    pub fn is_video(&self) -> bool {
+        self.source.is_video()
+    }
+
     pub fn frame_count(&self) -> usize {
         self.source.frame_count()
+    }
+
+    /// Seek to a specific frame index. Instant random access (pre-decoded).
+    pub fn seek_to_frame(&mut self, frame: usize) {
+        let num_frames = self.source.frame_count();
+        if num_frames == 0 {
+            return;
+        }
+        let target = frame.min(num_frames - 1);
+        if target != self.current_frame {
+            self.current_frame = target;
+            self.frame_elapsed_ms = 0.0;
+            self.needs_upload = true;
+        }
+    }
+
+    /// Seek to a time position in seconds. Converts to frame index.
+    pub fn seek_to_secs(&mut self, secs: f64) {
+        if let MediaSource::Animated { delays_ms, .. } = &self.source {
+            // Walk delays to find frame at this time offset
+            let target_ms = secs * 1000.0;
+            let mut accum = 0.0;
+            for (i, &d) in delays_ms.iter().enumerate() {
+                accum += d as f64;
+                if accum > target_ms {
+                    self.seek_to_frame(i);
+                    return;
+                }
+            }
+            // Past the end — seek to last frame
+            self.seek_to_frame(delays_ms.len().saturating_sub(1));
+        }
+    }
+
+    /// Current playback position in seconds (computed from current_frame).
+    pub fn position_secs(&self) -> f64 {
+        if let MediaSource::Animated { delays_ms, .. } = &self.source {
+            let ms: f64 = delays_ms.iter().take(self.current_frame).map(|&d| d as f64).sum();
+            ms / 1000.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Total duration in seconds.
+    pub fn duration_secs(&self) -> f64 {
+        self.transport.duration / 1000.0
     }
 }
 
