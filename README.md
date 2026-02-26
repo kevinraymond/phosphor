@@ -20,7 +20,9 @@ _NOTE: Everything below here is AI-assisted content. I keep involved 100% of the
 
 Phosphor turns your audio input into layered, beat-synced visuals using GPU shaders, particles, and compositing — all driven by WGSL and controlled via MIDI, OSC, or a phone browser.
 
-<!-- TODO: hero image/gif -->
+<p align="center">
+  <img src="assets/phosphor-teaser.gif" alt="Phosphor in action" width="800">
+</p>
 
 ## Quick Start
 
