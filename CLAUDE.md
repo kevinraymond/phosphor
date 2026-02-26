@@ -17,6 +17,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 **Media Layers: COMPLETE** — PNG/JPEG/GIF as compositing layers, GPU blit with letterbox, animated GIF playback, transport controls, preset save/load
 **Advanced Particles: COMPLETE** — sprite atlas textures, dual blend pipelines, image decomposition with spring-reform compute shader
 **Video Playback: COMPLETE** — feature-gated ffmpeg pre-decode to RAM, instant scrub, 60s max
+**NDI Output: COMPLETE** — feature-gated runtime-loaded NDI SDK, GPU capture with double-buffered staging, sender thread, UI panel
 
 ### What's Built
 
@@ -77,6 +78,20 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Seek slider with real-time scrub (`seek_to_secs()` / `seek_to_frame()`), mm:ss time display
 - Video filter group in file dialog only when `ffmpeg_available()` (cached via `OnceLock`)
 - Future: `ffmpeg-next` crate for long video support without RAM cost
+
+#### NDI Output
+- Feature-gated `ndi`: `cargo run --features ndi`
+- Runtime dynamic loading via `libloading` — no build-time NDI SDK dependency
+- `NdiCapture`: GPU capture texture (surface format, RENDER_ATTACHMENT | COPY_SRC) + double-buffered staging buffers with padded row alignment
+- Capture pipeline: `PostProcessChain::render_composite_to()` renders final composite to capture texture (reuses existing bloom results), `copy_texture_to_buffer` → staging, async map → 1-frame latency readback
+- `NdiSender` (FFI wrapper): loads libndi.so/dylib/dll at runtime, initializes NDI SDK, creates sender with `clock_video=true`, sends BGRA frames via `NDIlib_send_send_video_v2`
+- Sender thread: crossbeam bounded(2) channel, `try_send` drops frames if NDI thread is behind (VJ performance priority)
+- `NdiSystem`: config (source name, resolution), start/stop/restart, resize on window change
+- UI: "Outputs" section in left sidebar (enable checkbox, source name, resolution dropdown, frame counter, activity dot), NDI status dot in status bar
+- Config persists to `~/.config/phosphor/ndi.json`
+- `OutputResolution`: Match Window / 720p / 1080p / 4K
+- `ndi_available()` cached runtime check (OnceLock), graceful "NDI not found" message in UI
+- NDI source name default: "Phosphor"
 
 #### Audio Upgrade + Beat Detection
 - Multi-resolution FFT: 4096-pt (sub_bass, bass, kick), 1024-pt (low_mid, mid, upper_mid), 512-pt (presence, brilliance)
@@ -204,10 +219,11 @@ MIDI Thread: midir callback → parse 3-byte MIDI → send MidiMessage via cross
 OSC Thread: UdpSocket recv → rosc decode → send OscInMessage via crossbeam bounded(64)
 Web Accept Thread: TcpListener → HTTP serve or WS upgrade → spawn client thread
 Web Client Thread(s): 50ms read timeout → parse JSON → WsInMessage via crossbeam bounded(64); drain outbound broadcast channel
+NDI Sender Thread: recv NdiFrame via crossbeam bounded(2) → NDIlib_send_send_video_v2 (clock_video paced)
 File Watcher Thread: notify → debounce → send changed paths
 ```
 
-No mutexes in hot path (web uses Arc<Mutex> only for client list + latest state, not per-frame). Five+ threads + cpal callback + midir callback.
+No mutexes in hot path (web uses Arc<Mutex> only for client list + latest state, not per-frame). Six+ threads + cpal callback + midir callback.
 
 ### Render Pipeline
 ```
@@ -227,6 +243,10 @@ PostProcessChain (if enabled):
   Bloom Extract (quarter-res) → Blur H → Blur V → Composite → Surface [sRGB]
 PostProcessChain (if disabled):
   Simple Blit → Surface [sRGB]
+                        ↓
+NDI Capture (if enabled, feature-gated):
+  render_composite_to() → Capture Texture → copy_texture_to_buffer → Staging[N]
+  map_async(Staging[N]) → next frame: read Staging[N-1] → NDI sender thread
                         ↓
 egui Overlay → Surface
 ```
@@ -262,6 +282,11 @@ egui Overlay → Surface
 - UI panels widened to 270px (from 240px). Layer names use egui `Label::truncate()` with full name on hover.
 - Video pre-decode: ffmpeg decodes all frames to `MediaSource::Animated` (same as GIF). Instant random access, no streaming complexity. RAM cost acceptable for VJ clips (≤60s). `from_video` flag on `Animated` variant (cfg-gated) controls UI differences (seek slider vs frame counter).
 - All ffmpeg/ffprobe subprocess spawns use `.stdin(Stdio::null())` to prevent terminal corruption (ffmpeg inherits stdin and can switch to raw mode).
+- NDI output uses runtime dynamic loading (`libloading`) instead of build-time SDK binding. No `grafton-ndi` dep needed — raw FFI with `NDIlib_*` symbols loaded from libndi.so at runtime. `ndi_available()` cached via `OnceLock`.
+- NDI capture reuses existing `PostProcessChain` composite pipeline via `render_composite_to()`. Capture texture uses same format as surface (typically `Bgra8UnormSrgb`) so readback data is BGRA — matches NDI's `NDIlib_FourCC_type_BGRA` natively.
+- NDI staging buffers use `align_to(width*4, COPY_BYTES_PER_ROW_ALIGNMENT)` for wgpu row padding, stripped on readback.
+- NDI frame channel is bounded(2) with `try_send` — drops frames if sender thread is behind (VJ performance > NDI latency).
+- NDI state passes through egui temp data (NdiInfo snapshot struct) to avoid `&mut NdiSystem` in `draw_panels` signature (feature-gated types can't be conditional function params).
 
 ### Controls
 - `D` — Toggle egui overlay
@@ -276,6 +301,8 @@ egui Overlay → Surface
 cargo run                          # debug build
 cargo run --release                # release build (much faster shaders)
 cargo run --features video         # with video playback (requires ffmpeg on PATH)
+cargo run --features ndi           # with NDI output (requires NDI runtime from ndi.video)
+cargo run --features "video,ndi"   # with both
 RUST_LOG=phosphor_app=debug cargo run  # verbose logging
 ```
 
@@ -301,3 +328,5 @@ The complete 28-week, 4-phase plan is at `~/ai/audio/phosphor-internal/cross-pla
 11. AI shader assistant (planned: local LLM via llama.cpp/Ollama, naga validation)
 12. ~~Video playback~~ ✓ (feature-gated, ffmpeg pre-decode to RAM; future: ffmpeg-next for long videos)
 13. 3D Gaussian Splatting (deferred: blocked on wgpu 28 / egui-wgpu update)
+14. ~~NDI output~~ ✓ (feature-gated, runtime-loaded libndi, GPU capture + sender thread)
+15. Spout/Syphon output (deferred: no mature Rust crates)

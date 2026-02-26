@@ -379,6 +379,69 @@ impl PostProcessChain {
             );
         }
     }
+
+    /// Render the final composite (or blit) to a secondary capture target.
+    /// Reuses existing bloom results and uniform buffers — only runs the final pass.
+    pub fn render_composite_to(
+        &self,
+        device: &Device,
+        encoder: &mut CommandEncoder,
+        source: &RenderTarget,
+        capture_view: &TextureView,
+    ) {
+        if !self.enabled {
+            let bg = device.create_bind_group(&BindGroupDescriptor {
+                label: Some("ndi-blit-bg"),
+                layout: &self.blit_bgl,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: BindingResource::TextureView(&source.view),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::Sampler(&source.sampler),
+                    },
+                ],
+            });
+            run_fullscreen_pass(encoder, "ndi-blit", &self.blit_pipeline, &bg, capture_view);
+            return;
+        }
+
+        let bg = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("ndi-composite-bg"),
+            layout: &self.composite_bgl,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&source.view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&source.sampler),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(&self.bloom_blur_v_target.view),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::Sampler(&self.bloom_blur_v_target.sampler),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: self.post_params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+        run_fullscreen_pass(
+            encoder,
+            "ndi-composite",
+            &self.composite_pipeline,
+            &bg,
+            capture_view,
+        );
+    }
 }
 
 // --- Helper functions ---
