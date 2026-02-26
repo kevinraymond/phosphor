@@ -167,11 +167,14 @@ impl ApplicationHandler for PhosphorApp {
                                 media_height: m.media_height,
                                 frame_count: m.frame_count(),
                                 is_animated: m.is_animated(),
+                                is_video: m.is_video(),
                                 playing: m.transport.playing,
                                 looping: m.transport.looping,
                                 speed: m.transport.speed,
                                 direction: m.transport.direction,
                                 current_frame: m.current_frame,
+                                video_position_secs: m.position_secs(),
+                                video_duration_secs: m.duration_secs(),
                             }
                         })
                     });
@@ -252,10 +255,18 @@ impl ApplicationHandler for PhosphorApp {
                     std::thread::Builder::new()
                         .name("file-dialog".into())
                         .spawn(move || {
-                            if let Some(path) = rfd::FileDialog::new()
-                                .add_filter("Images", &["png", "jpg", "jpeg", "gif", "bmp", "webp"])
-                                .pick_file()
+                            let mut dialog = rfd::FileDialog::new()
+                                .add_filter("Images", &["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
+                            #[cfg(feature = "video")]
                             {
+                                if crate::media::video::ffmpeg_available() {
+                                    dialog = dialog.add_filter(
+                                        "Video",
+                                        crate::media::decoder::VIDEO_EXTENSIONS,
+                                    );
+                                }
+                            }
+                            if let Some(path) = dialog.pick_file() {
                                 let _ = tx.send(path);
                             }
                         })
@@ -323,6 +334,18 @@ impl ApplicationHandler for PhosphorApp {
                                 2 => crate::media::types::PlayDirection::PingPong,
                                 _ => crate::media::types::PlayDirection::Forward,
                             };
+                        }
+                    }
+                }
+
+                // Handle media seek signal (video scrubber)
+                let media_seek: Option<f64> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("media_seek"))
+                });
+                if let Some(secs) = media_seek {
+                    if let Some(layer) = app.layer_stack.active_mut() {
+                        if let Some(m) = layer.as_media_mut() {
+                            m.seek_to_secs(secs);
                         }
                     }
                 }

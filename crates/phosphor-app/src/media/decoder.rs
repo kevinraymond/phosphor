@@ -3,13 +3,17 @@ use std::path::Path;
 use super::types::DecodedFrame;
 
 /// Decoded media source: either a static image or animated frames.
+/// Video files are pre-decoded to Animated (same as GIF), enabling instant random access.
 pub enum MediaSource {
     /// Single static image.
     Static(DecodedFrame),
-    /// Animated image (GIF or WebP): pre-decoded frames + frame delays in milliseconds.
+    /// Animated image/video: pre-decoded frames + frame delays in milliseconds.
     Animated {
         frames: Vec<DecodedFrame>,
         delays_ms: Vec<u32>,
+        /// True if this was decoded from a video file (affects UI: show time, hide direction).
+        #[cfg(feature = "video")]
+        from_video: bool,
     },
 }
 
@@ -25,6 +29,14 @@ impl MediaSource {
         matches!(self, MediaSource::Animated { .. })
     }
 
+    pub fn is_video(&self) -> bool {
+        #[cfg(feature = "video")]
+        if let MediaSource::Animated { from_video, .. } = self {
+            return *from_video;
+        }
+        false
+    }
+
     /// Get frame dimensions.
     pub fn dimensions(&self) -> (u32, u32) {
         match self {
@@ -36,6 +48,10 @@ impl MediaSource {
     }
 }
 
+/// Video file extensions.
+#[cfg(feature = "video")]
+pub const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "avi", "mkv", "webm", "m4v", "flv"];
+
 /// Load an image or animation from a file path.
 pub fn load_media(path: &Path) -> Result<MediaSource, String> {
     let ext = path
@@ -44,11 +60,51 @@ pub fn load_media(path: &Path) -> Result<MediaSource, String> {
         .unwrap_or("")
         .to_lowercase();
 
+    #[cfg(feature = "video")]
+    if VIDEO_EXTENSIONS.contains(&ext.as_str()) {
+        return load_video(path);
+    }
+
     match ext.as_str() {
         "gif" => load_gif(path),
         "webp" => load_webp(path),
         _ => load_static_image(path),
     }
+}
+
+/// Load a video file by pre-decoding all frames via ffmpeg.
+#[cfg(feature = "video")]
+fn load_video(path: &Path) -> Result<MediaSource, String> {
+    use super::video::{ffmpeg_available, probe_video, decode_all_frames, MAX_PREDECODE_SECS};
+
+    if !ffmpeg_available() {
+        return Err("ffmpeg/ffprobe not found on PATH".to_string());
+    }
+
+    let meta = probe_video(path)?;
+    log::info!(
+        "Video probe: {}x{}, {:.2} fps, {:.1}s",
+        meta.width,
+        meta.height,
+        meta.fps,
+        meta.duration_secs,
+    );
+
+    if meta.duration_secs > MAX_PREDECODE_SECS {
+        return Err(format!(
+            "Video too long for pre-decode ({:.0}s > {:.0}s max). \
+             Use a shorter clip or trim with ffmpeg.",
+            meta.duration_secs,
+            MAX_PREDECODE_SECS,
+        ));
+    }
+
+    let (frames, delays_ms) = decode_all_frames(path, &meta)?;
+    Ok(MediaSource::Animated {
+        frames,
+        delays_ms,
+        from_video: true,
+    })
 }
 
 /// Load a static image (PNG, JPEG, etc.) via the `image` crate.
@@ -128,7 +184,12 @@ fn load_gif(path: &Path) -> Result<MediaSource, String> {
         frames.len()
     );
 
-    Ok(MediaSource::Animated { frames, delays_ms })
+    Ok(MediaSource::Animated {
+        frames,
+        delays_ms,
+        #[cfg(feature = "video")]
+        from_video: false,
+    })
 }
 
 /// Load a WebP image, detecting animation automatically.
@@ -200,7 +261,12 @@ fn load_webp(path: &Path) -> Result<MediaSource, String> {
         frames.len()
     );
 
-    Ok(MediaSource::Animated { frames, delays_ms })
+    Ok(MediaSource::Animated {
+        frames,
+        delays_ms,
+        #[cfg(feature = "video")]
+        from_video: false,
+    })
 }
 
 /// Convert RGB buffer to RGBA (opaque).
