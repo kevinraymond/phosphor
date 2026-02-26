@@ -5,6 +5,41 @@ use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Stream;
 
+/// Suppress noisy ALSA/JACK stderr messages during device enumeration.
+/// ALSA/JACK C libraries print errors for missing JACK server, OSS devices, etc.
+#[cfg(target_os = "linux")]
+pub fn suppress_alsa_errors() {
+    // Install a no-op ALSA error handler (the actual C type is variadic, but our
+    // handler never reads va_args so a non-variadic extern "C" fn works fine).
+    type AlsaErrorHandler = unsafe extern "C" fn(
+        *const std::ffi::c_char,
+        std::ffi::c_int,
+        *const std::ffi::c_char,
+        std::ffi::c_int,
+        *const std::ffi::c_char,
+    );
+    unsafe extern "C" {
+        fn snd_lib_error_set_handler(handler: Option<AlsaErrorHandler>) -> std::ffi::c_int;
+    }
+    unsafe extern "C" fn null_handler(
+        _file: *const std::ffi::c_char,
+        _line: std::ffi::c_int,
+        _function: *const std::ffi::c_char,
+        _err: std::ffi::c_int,
+        _fmt: *const std::ffi::c_char,
+    ) {
+    }
+    unsafe {
+        snd_lib_error_set_handler(Some(null_handler));
+    }
+    // Suppress JACK "cannot connect to server" messages
+    // Safety: called once at startup before any threads are spawned.
+    unsafe { std::env::set_var("JACK_NO_START_SERVER", "1") };
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn suppress_alsa_errors() {}
+
 /// Ring buffer size (power of 2 for fast modular arithmetic).
 const RING_SIZE: usize = 65536;
 const RING_MASK: u32 = (RING_SIZE - 1) as u32;
