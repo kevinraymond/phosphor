@@ -51,11 +51,14 @@ jobs:
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }} --features video
 
-      - name: Codesign (macOS)
+      - name: Codesign and notarize (macOS)
         if: runner.os == 'macOS'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           # Import certificate into a temporary keychain
           KEYCHAIN="build.keychain"
@@ -72,6 +75,15 @@ jobs:
           BINARY="target/${{ matrix.target }}/release/phosphor-app"
           codesign --force --options runtime --sign "Developer ID Application" "$BINARY" --timestamp
           codesign --verify --verbose "$BINARY"
+
+          # Notarize
+          ditto -c -k "$BINARY" phosphor-notarize.zip
+          xcrun notarytool submit phosphor-notarize.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          rm phosphor-notarize.zip
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
