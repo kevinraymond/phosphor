@@ -1,11 +1,14 @@
 use egui::{Color32, RichText, Ui};
 
+use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 use crate::web::WebSystem;
 
 const WEB_BLUE: Color32 = Color32::from_rgb(0x50, 0x90, 0xE0);
 
 pub fn draw_web_panel(ui: &mut Ui, web: &mut WebSystem) {
+    let tc = theme_colors(ui.ctx());
+
     // Enable + status on one row
     ui.horizontal(|ui| {
         let mut enabled = web.config.enabled;
@@ -21,7 +24,7 @@ pub fn draw_web_panel(ui: &mut Ui, web: &mut WebSystem) {
                 ui.label(
                     RichText::new(format!("{} client{}", web.client_count, if web.client_count == 1 { "" } else { "s" }))
                         .size(SMALL_SIZE)
-                        .color(DARK_TEXT_SECONDARY),
+                        .color(tc.text_secondary),
                 );
             }
             // Activity dot
@@ -63,7 +66,7 @@ pub fn draw_web_panel(ui: &mut Ui, web: &mut WebSystem) {
         // Show localhost
         let url = format!("http://localhost:{port}");
         ui.horizontal(|ui| {
-            ui.label(RichText::new("URL").size(SMALL_SIZE).color(DARK_TEXT_SECONDARY));
+            ui.label(RichText::new("URL").size(SMALL_SIZE).color(tc.text_secondary));
             if ui.link(RichText::new(&url).size(SMALL_SIZE).color(WEB_BLUE)).clicked() {
                 ui.ctx().copy_text(url.clone());
             }
@@ -73,7 +76,7 @@ pub fn draw_web_panel(ui: &mut Ui, web: &mut WebSystem) {
         if let Some(ip) = get_lan_ip() {
             let lan_url = format!("http://{ip}:{port}");
             ui.horizontal(|ui| {
-                ui.label(RichText::new("LAN").size(SMALL_SIZE).color(DARK_TEXT_SECONDARY));
+                ui.label(RichText::new("LAN").size(SMALL_SIZE).color(tc.text_secondary));
                 if ui.link(RichText::new(&lan_url).size(SMALL_SIZE).color(WEB_BLUE)).clicked() {
                     ui.ctx().copy_text(lan_url.clone());
                 }

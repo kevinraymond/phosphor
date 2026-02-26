@@ -25,6 +25,7 @@ use crate::web::WebSystem;
 use crate::preset::store::LayerPreset;
 use crate::preset::PresetStore;
 use crate::shader::ShaderWatcher;
+use crate::settings::SettingsConfig;
 use crate::ui::EguiOverlay;
 
 pub struct App {
@@ -49,6 +50,8 @@ pub struct App {
     pub pending_web_triggers: Vec<TriggerAction>,
     // Presets
     pub preset_store: PresetStore,
+    // Settings
+    pub settings: SettingsConfig,
     // Layers
     pub layer_stack: LayerStack,
     // Compositor + post-processing (separate from layer_stack to avoid borrow conflicts)
@@ -70,11 +73,11 @@ impl App {
         let mut effect_loader = EffectLoader::new();
         effect_loader.scan_effects_directory();
 
-        // Prefer Aurora as default, fall back to first effect
+        // Prefer Phosphor as default, fall back to first effect
         let default_idx = effect_loader
             .effects
             .iter()
-            .position(|e| e.name == "Aurora")
+            .position(|e| e.name == "Phosphor")
             .or_else(|| {
                 if effect_loader.effects.is_empty() {
                     None
@@ -164,7 +167,8 @@ impl App {
         let web = WebSystem::new();
         let mut preset_store = PresetStore::new();
         preset_store.scan();
-        let egui_overlay = EguiOverlay::new(&gpu.device, gpu.format, &window);
+        let settings = SettingsConfig::load();
+        let egui_overlay = EguiOverlay::new(&gpu.device, gpu.format, &window, settings.theme);
 
         let now = Instant::now();
         Ok(Self {
@@ -183,6 +187,7 @@ impl App {
             web,
             pending_web_triggers: Vec::new(),
             preset_store,
+            settings,
             egui_overlay,
             effect_loader,
             window,
