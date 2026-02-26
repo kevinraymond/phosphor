@@ -51,6 +51,28 @@ jobs:
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }} --features video
 
+      - name: Codesign (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          # Import certificate into a temporary keychain
+          KEYCHAIN="build.keychain"
+          KEYCHAIN_PASSWORD="actions"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security import certificate.p12 -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          rm certificate.p12
+
+          # Sign the binary
+          BINARY="target/${{ matrix.target }}/release/phosphor-app"
+          codesign --force --options runtime --sign "Developer ID Application" "$BINARY" --timestamp
+          codesign --verify --verbose "$BINARY"
+
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
@@ -89,7 +111,7 @@ jobs:
           path: ${{ env.ASSET }}
 
   universal-macos:
-    name: macOS Universal Binary
+    name: macOS Universal Binary (sign + notarize)
     needs: build
     runs-on: macos-latest
     steps:
@@ -107,7 +129,26 @@ jobs:
           name: phosphor-x86_64-apple-darwin
           path: artifacts/x86_64
 
-      - name: Create universal binary
+      - name: Import certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN="build.keychain"
+          KEYCHAIN_PASSWORD="actions"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security import certificate.p12 -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          rm certificate.p12
+
+      - name: Create universal binary, sign, and notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
 
@@ -129,6 +170,21 @@ jobs:
           [ -f LICENSE-MIT ] && cp LICENSE-MIT "$STAGING/"
           [ -f LICENSE-APACHE ] && cp LICENSE-APACHE "$STAGING/"
           [ -f LICENSE ] && cp LICENSE "$STAGING/"
+
+          # Codesign the universal binary
+          codesign --force --options runtime --sign "Developer ID Application" "$STAGING/phosphor" --timestamp
+          codesign --verify --verbose "$STAGING/phosphor"
+
+          # Notarize: zip the binary, submit, wait, staple
+          ditto -c -k "$STAGING/phosphor" phosphor-notarize.zip
+          xcrun notarytool submit phosphor-notarize.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          rm phosphor-notarize.zip
+
+          # Package final tarball
           tar czf "${STAGING}.tar.gz" "$STAGING"
           echo "ASSET=${STAGING}.tar.gz" >> "$GITHUB_ENV"
 
