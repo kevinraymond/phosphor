@@ -156,4 +156,42 @@ mod tests {
         assert_eq!(c2.source_name, "Phosphor");
         assert!(!c2.enabled);
     }
+
+    // ---- Additional tests ----
+
+    #[test]
+    fn output_resolution_all_count() {
+        assert_eq!(OutputResolution::ALL.len(), 4);
+    }
+
+    #[test]
+    fn output_resolution_default_is_match() {
+        assert_eq!(OutputResolution::default(), OutputResolution::Match);
+    }
+
+    #[test]
+    fn output_resolution_serde_roundtrip() {
+        for r in OutputResolution::ALL {
+            let json = serde_json::to_string(r).unwrap();
+            let r2: OutputResolution = serde_json::from_str(&json).unwrap();
+            assert_eq!(*r, r2);
+        }
+    }
+
+    #[test]
+    fn output_resolution_exact_display_names() {
+        assert_eq!(OutputResolution::Match.display_name(), "Match Window");
+        assert_eq!(OutputResolution::Res720p.display_name(), "720p");
+        assert_eq!(OutputResolution::Res1080p.display_name(), "1080p");
+        assert_eq!(OutputResolution::Res4K.display_name(), "4K");
+    }
+
+    #[test]
+    fn ndi_config_partial_json_defaults() {
+        let json = r#"{"source_name": "Custom"}"#;
+        let c: NdiConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(c.source_name, "Custom");
+        assert!(!c.enabled); // default false
+        assert_eq!(c.resolution, OutputResolution::Match); // default
+    }
 }

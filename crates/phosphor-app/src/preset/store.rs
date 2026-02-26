@@ -267,4 +267,77 @@ mod tests {
         s.current_preset = Some(0);
         assert_eq!(s.current_name(), Some("Test Preset"));
     }
+
+    // ---- Additional tests ----
+
+    #[test]
+    fn sanitize_name_all_bad_chars() {
+        assert_eq!(PresetStore::sanitize_name("/.\\."), "____");
+    }
+
+    #[test]
+    fn sanitize_name_whitespace_only() {
+        assert_eq!(PresetStore::sanitize_name("   "), "");
+    }
+
+    #[test]
+    fn sanitize_name_exact_64_chars() {
+        let s = "a".repeat(64);
+        assert_eq!(PresetStore::sanitize_name(&s).len(), 64);
+    }
+
+    #[test]
+    fn sanitize_name_65_truncated() {
+        let s = "b".repeat(65);
+        assert_eq!(PresetStore::sanitize_name(&s).len(), 64);
+    }
+
+    #[test]
+    fn layer_preset_minimal_json_defaults() {
+        let json = r#"{"effect_name": "Aurora"}"#;
+        let lp: LayerPreset = serde_json::from_str(json).unwrap();
+        assert_eq!(lp.effect_name, "Aurora");
+        assert!(lp.params.is_empty());
+        assert_eq!(lp.blend_mode, BlendMode::Normal);
+        assert!((lp.opacity - 1.0).abs() < 1e-6);
+        assert!(lp.enabled);
+        assert!(!lp.locked);
+        assert!(!lp.pinned);
+        assert!(lp.custom_name.is_none());
+        assert!(lp.media_path.is_none());
+    }
+
+    #[test]
+    fn preset_serde_roundtrip() {
+        let preset = Preset {
+            layers: vec![LayerPreset {
+                effect_name: "Test".into(),
+                params: HashMap::new(),
+                blend_mode: BlendMode::Add,
+                opacity: 0.5,
+                enabled: true,
+                locked: false,
+                pinned: true,
+                custom_name: Some("My Layer".into()),
+                media_path: None,
+                media_speed: None,
+                media_looping: None,
+            }],
+            active_layer: 0,
+            postprocess: PostProcessDef::default(),
+        };
+        let json = serde_json::to_string(&preset).unwrap();
+        let p2: Preset = serde_json::from_str(&json).unwrap();
+        assert_eq!(p2.layers.len(), 1);
+        assert_eq!(p2.layers[0].effect_name, "Test");
+        assert_eq!(p2.layers[0].blend_mode, BlendMode::Add);
+        assert!((p2.layers[0].opacity - 0.5).abs() < 1e-6);
+        assert!(p2.layers[0].pinned);
+    }
+
+    #[test]
+    fn current_name_none_when_no_preset() {
+        let s = PresetStore::new();
+        assert!(s.current_name().is_none());
+    }
 }

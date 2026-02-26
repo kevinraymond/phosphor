@@ -119,3 +119,48 @@ pub fn theme_colors(ctx: &egui::Context) -> ThemeColors {
     ctx.data(|d| d.get_temp(egui::Id::new(THEME_COLORS_ID)))
         .unwrap_or_else(ThemeColors::dark)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dark_theme_canvas() {
+        let tc = ThemeColors::dark();
+        assert_eq!(tc.canvas, Color32::from_rgb(0x12, 0x12, 0x12));
+    }
+
+    #[test]
+    fn light_theme_canvas() {
+        let tc = ThemeColors::light();
+        assert_eq!(tc.canvas, Color32::from_rgb(0xF5, 0xF5, 0xF5));
+    }
+
+    #[test]
+    fn high_contrast_canvas_is_black() {
+        let tc = ThemeColors::high_contrast();
+        assert_eq!(tc.canvas, Color32::from_rgb(0x00, 0x00, 0x00));
+    }
+
+    #[test]
+    fn deuteranopia_overrides_error_to_orange() {
+        let tc = ThemeColors::deuteranopia();
+        assert_eq!(tc.error, Color32::from_rgb(0xE0, 0x80, 0x20));
+        // base is dark, so canvas should match dark
+        assert_eq!(tc.canvas, ThemeColors::dark().canvas);
+    }
+
+    #[test]
+    fn protanopia_overrides_error_to_gold() {
+        let tc = ThemeColors::protanopia();
+        assert_eq!(tc.error, Color32::from_rgb(0xD0, 0xB0, 0x20));
+        assert_eq!(tc.success, Color32::from_rgb(0x40, 0x90, 0xE0));
+    }
+
+    #[test]
+    fn tritanopia_overrides_accent_to_red() {
+        let tc = ThemeColors::tritanopia();
+        assert_eq!(tc.accent, Color32::from_rgb(0xE0, 0x50, 0x50));
+        assert_eq!(tc.warning, Color32::from_rgb(0x40, 0xC0, 0xC0));
+    }
+}

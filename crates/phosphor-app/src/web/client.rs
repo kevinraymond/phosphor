@@ -306,4 +306,47 @@ mod tests {
     fn parse_invalid_json_returns_none() {
         assert!(parse_client_message("not json").is_none());
     }
+
+    // ---- Additional parse tests ----
+
+    #[test]
+    fn parse_set_layer_opacity_negative_clamped() {
+        let json = r#"{"type":"set_layer_opacity","layer":0,"value":-0.5}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::SetLayerOpacity { value, .. }) => {
+                assert!((value - 0.0).abs() < 1e-6); // clamped to 0.0
+            }
+            other => panic!("expected SetLayerOpacity, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_set_param_missing_value_returns_none() {
+        let json = r#"{"type":"set_param","name":"speed"}"#;
+        assert!(parse_client_message(json).is_none());
+    }
+
+    #[test]
+    fn parse_trigger_unknown_action_returns_none() {
+        let json = r#"{"type":"trigger","action":"unknown_action"}"#;
+        assert!(parse_client_message(json).is_none());
+    }
+
+    #[test]
+    fn parse_set_layer_enabled_float_true() {
+        let json = r#"{"type":"set_layer_enabled","layer":0,"value":0.9}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::SetLayerEnabled { value, .. }) => assert!(value),
+            other => panic!("expected SetLayerEnabled, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_postprocess_enabled_float() {
+        let json = r#"{"type":"set_postprocess_enabled","value":0.8}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::PostProcessEnabled(v)) => assert!(v),
+            other => panic!("expected PostProcessEnabled, got {:?}", other),
+        }
+    }
 }

@@ -141,4 +141,41 @@ mod tests {
             assert_eq!(*mode, m2);
         }
     }
+
+    // ---- Additional tests ----
+
+    #[test]
+    fn theme_mode_exact_display_names() {
+        assert_eq!(ThemeMode::Dark.display_name(), "Dark");
+        assert_eq!(ThemeMode::Light.display_name(), "Light");
+        assert_eq!(ThemeMode::HighContrast.display_name(), "High Contrast");
+        assert_eq!(ThemeMode::Deuteranopia.display_name(), "Deuteranopia");
+        assert_eq!(ThemeMode::Protanopia.display_name(), "Protanopia");
+        assert_eq!(ThemeMode::Tritanopia.display_name(), "Tritanopia");
+    }
+
+    #[test]
+    fn theme_mode_colors_dispatch_all() {
+        // Ensure colors() doesn't panic for any variant
+        for mode in ThemeMode::ALL {
+            let _colors = mode.colors();
+        }
+    }
+
+    #[test]
+    fn theme_mode_cvd_toggle_returns_dark() {
+        assert_eq!(ThemeMode::Deuteranopia.toggle(), ThemeMode::Dark);
+        assert_eq!(ThemeMode::Protanopia.toggle(), ThemeMode::Dark);
+        assert_eq!(ThemeMode::Tritanopia.toggle(), ThemeMode::Dark);
+    }
+
+    #[test]
+    fn theme_mode_all_contains_all_variants() {
+        assert!(ThemeMode::ALL.contains(&ThemeMode::Dark));
+        assert!(ThemeMode::ALL.contains(&ThemeMode::Light));
+        assert!(ThemeMode::ALL.contains(&ThemeMode::HighContrast));
+        assert!(ThemeMode::ALL.contains(&ThemeMode::Deuteranopia));
+        assert!(ThemeMode::ALL.contains(&ThemeMode::Protanopia));
+        assert!(ThemeMode::ALL.contains(&ThemeMode::Tritanopia));
+    }
 }

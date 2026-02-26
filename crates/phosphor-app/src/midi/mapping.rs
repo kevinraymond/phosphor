@@ -264,4 +264,37 @@ mod tests {
         let c2: MidiConfig = serde_json::from_str(&json).unwrap();
         assert!(c2.params.contains_key("test"));
     }
+
+    // ---- Additional tests ----
+
+    #[test]
+    fn scale_inverted_custom_range() {
+        let m = MidiMapping { cc: 1, channel: 0, msg_type: MidiMsgType::Cc, min_val: 10.0, max_val: 20.0, invert: true };
+        assert!(approx_eq(m.scale(0), 20.0, 1e-4)); // inverted: 0 → max
+        assert!(approx_eq(m.scale(127), 10.0, 1e-4)); // inverted: 127 → min
+    }
+
+    #[test]
+    fn scale_zero_range() {
+        let m = MidiMapping { cc: 1, channel: 0, msg_type: MidiMsgType::Cc, min_val: 5.0, max_val: 5.0, invert: false };
+        assert!(approx_eq(m.scale(0), 5.0, 1e-6));
+        assert!(approx_eq(m.scale(127), 5.0, 1e-6));
+    }
+
+    #[test]
+    fn matches_wrong_channel_non_omni() {
+        let m = MidiMapping { cc: 42, channel: 3, msg_type: MidiMsgType::Cc, min_val: 0.0, max_val: 1.0, invert: false };
+        assert!(m.matches(42, 3, MidiMsgType::Cc));
+        assert!(!m.matches(42, 5, MidiMsgType::Cc)); // non-omni, wrong channel
+    }
+
+    #[test]
+    fn midi_config_defaults() {
+        let c = MidiConfig::default();
+        assert_eq!(c.version, 1);
+        assert!(c.enabled);
+        assert!(c.params.is_empty());
+        assert!(c.triggers.is_empty());
+        assert!(c.port_name.is_none());
+    }
 }

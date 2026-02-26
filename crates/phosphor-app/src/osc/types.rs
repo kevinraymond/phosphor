@@ -195,4 +195,37 @@ mod tests {
         assert_eq!(c.find_trigger("/pad/1"), Some(TriggerAction::NextEffect));
         assert_eq!(c.find_trigger("/pad/2"), None);
     }
+
+    // ---- Additional tests ----
+
+    #[test]
+    fn osc_config_partial_json_defaults() {
+        let json = r#"{"rx_port": 8000}"#;
+        let c: OscConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(c.rx_port, 8000);
+        assert_eq!(c.tx_port, 9001); // default
+        assert!(c.enabled); // default true
+        assert!(!c.tx_enabled); // default false
+        assert_eq!(c.tx_rate_hz, 30); // default
+    }
+
+    #[test]
+    fn osc_learn_target_param_equality() {
+        let a = OscLearnTarget::Param("speed".into());
+        let b = OscLearnTarget::Param("speed".into());
+        let c = OscLearnTarget::Param("other".into());
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn osc_learn_target_trigger_equality() {
+        let a = OscLearnTarget::Trigger(TriggerAction::NextEffect);
+        let b = OscLearnTarget::Trigger(TriggerAction::NextEffect);
+        let c = OscLearnTarget::Trigger(TriggerAction::PrevEffect);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        // Param != Trigger
+        assert_ne!(OscLearnTarget::Param("x".into()), OscLearnTarget::Trigger(TriggerAction::NextEffect));
+    }
 }
