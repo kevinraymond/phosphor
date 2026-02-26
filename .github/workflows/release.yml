@@ -45,7 +45,7 @@ jobs:
           key: ${{ matrix.os }}-${{ matrix.target }}
 
       - name: Build release
-        run: cargo build --release --target ${{ matrix.target }} --features video
+        run: cargo build --release --target ${{ matrix.target }} --features "video,ndi"
 
       - name: Package and sign (macOS)
         if: runner.os == 'macOS'
