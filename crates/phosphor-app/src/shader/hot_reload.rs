@@ -1,8 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind, Debouncer};
+
+use crate::effect::loader::assets_dir;
 
 pub struct ShaderWatcher {
     _debouncer: Debouncer<notify::RecommendedWatcher>,
@@ -30,11 +32,11 @@ impl ShaderWatcher {
         )?;
 
         // Watch assets/shaders by default
-        let shader_dir = Path::new("assets/shaders");
+        let shader_dir = assets_dir().join("shaders");
         if shader_dir.exists() {
             debouncer
                 .watcher()
-                .watch(shader_dir, notify::RecursiveMode::Recursive)?;
+                .watch(&shader_dir, notify::RecursiveMode::Recursive)?;
             log::info!("Watching {} for shader changes", shader_dir.display());
         }
 

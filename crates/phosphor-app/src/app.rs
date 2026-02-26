@@ -6,6 +6,7 @@ use winit::window::Window;
 
 use crate::audio::AudioSystem;
 use crate::effect::format::PostProcessDef;
+use crate::effect::loader::assets_dir;
 use crate::effect::EffectLoader;
 use crate::gpu::compositor::Compositor;
 use crate::gpu::layer::{BlendMode, EffectLayer, Layer, LayerContent, LayerInfo, LayerStack};
@@ -92,18 +93,12 @@ impl App {
                 }
                 Err(e) => {
                     log::warn!("Failed to load effect: {e}, using default shader");
-                    let source = std::fs::read_to_string("assets/shaders/default.wgsl")
-                        .unwrap_or_else(|_| {
-                            include_str!("../../../assets/shaders/default.wgsl").to_string()
-                        });
+                    let source = read_default_shader();
                     (source, ParamStore::new(), None)
                 }
             }
         } else {
-            let source = std::fs::read_to_string("assets/shaders/default.wgsl")
-                .unwrap_or_else(|_| {
-                    include_str!("../../../assets/shaders/default.wgsl").to_string()
-                });
+            let source = read_default_shader();
             (source, ParamStore::new(), None)
         };
 
@@ -651,8 +646,7 @@ impl App {
                             scale: 1.0,
                         },
                     );
-                    let image_path =
-                        std::path::Path::new("assets/images").join(&particles.emitter.image);
+                    let image_path = assets_dir().join("images").join(&particles.emitter.image);
                     match crate::gpu::particle::image_source::sample_image(
                         &image_path,
                         &sample_def,
@@ -677,7 +671,7 @@ impl App {
 
                 // Load sprite texture if defined
                 if let Some(ref sprite_def) = particles.sprite {
-                    let sprite_path = std::path::Path::new("assets/images").join(&sprite_def.texture);
+                    let sprite_path = assets_dir().join("images").join(&sprite_def.texture);
                     match crate::gpu::particle::sprite::SpriteAtlas::load_with_def(
                         &self.gpu.device,
                         &self.gpu.queue,
@@ -746,8 +740,8 @@ impl App {
                 1.0,
             );
             // Temporary pipeline — will be replaced by executor_result below
-            let default_source = include_str!("../../../assets/shaders/default.wgsl");
-            if let Ok(pipeline) = ShaderPipeline::new(&self.gpu.device, hdr_format, default_source) {
+            let default_source = read_default_shader();
+            if let Ok(pipeline) = ShaderPipeline::new(&self.gpu.device, hdr_format, &default_source) {
                 let pass_executor = PassExecutor::single_pass(
                     pipeline,
                     feedback,
@@ -834,9 +828,7 @@ impl App {
         let name = format!("Layer {}", num + 1);
         let hdr_format = GpuContext::hdr_format();
 
-        let source = std::fs::read_to_string("assets/shaders/default.wgsl").unwrap_or_else(|_| {
-            include_str!("../../../assets/shaders/default.wgsl").to_string()
-        });
+        let source = read_default_shader();
 
         let uniform_buffer = UniformBuffer::new(&self.gpu.device);
         let feedback = PingPongTarget::new(
@@ -1225,4 +1217,11 @@ impl ShaderUniforms {
     pub fn zeroed() -> Self {
         bytemuck::Zeroable::zeroed()
     }
+}
+
+/// Read default.wgsl from assets dir, falling back to embedded copy.
+fn read_default_shader() -> String {
+    let path = assets_dir().join("shaders/default.wgsl");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| include_str!("../../../assets/shaders/default.wgsl").to_string())
 }

@@ -15,7 +15,8 @@ use super::types::WsInMessage;
 fn get_html_content() -> String {
     #[cfg(debug_assertions)]
     {
-        if let Ok(content) = std::fs::read_to_string("assets/web/control.html") {
+        let path = crate::effect::loader::assets_dir().join("web/control.html");
+        if let Ok(content) = std::fs::read_to_string(&path) {
             return content;
         }
     }
