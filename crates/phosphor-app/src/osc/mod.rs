@@ -396,3 +396,43 @@ fn apply_param(store: &mut ParamStore, defs: &[ParamDef], name: &str, value: f32
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trigger_slug_all_actions() {
+        let expected = [
+            (TriggerAction::NextEffect, "next_effect"),
+            (TriggerAction::PrevEffect, "prev_effect"),
+            (TriggerAction::TogglePostProcess, "toggle_postprocess"),
+            (TriggerAction::ToggleOverlay, "toggle_overlay"),
+            (TriggerAction::NextPreset, "next_preset"),
+            (TriggerAction::PrevPreset, "prev_preset"),
+            (TriggerAction::NextLayer, "next_layer"),
+            (TriggerAction::PrevLayer, "prev_layer"),
+        ];
+        for (action, slug) in expected {
+            assert_eq!(trigger_slug(&action), slug);
+        }
+    }
+
+    #[test]
+    fn msg_address_param() {
+        let msg = OscInMessage::Param { name: "speed".into(), value: 0.5 };
+        assert_eq!(msg_address(&msg), "/phosphor/param/speed");
+    }
+
+    #[test]
+    fn msg_address_layer_param() {
+        let msg = OscInMessage::LayerParam { layer: 2, name: "intensity".into(), value: 0.5 };
+        assert_eq!(msg_address(&msg), "/phosphor/layer/2/param/intensity");
+    }
+
+    #[test]
+    fn msg_address_trigger() {
+        let msg = OscInMessage::Trigger(TriggerAction::NextEffect);
+        assert_eq!(msg_address(&msg), "/phosphor/trigger/next_effect");
+    }
+}

@@ -330,3 +330,59 @@ fn build_params(store: &ParamStore) -> Vec<ParamInfo> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::params::types::ParamDef;
+
+    #[test]
+    fn audio_snapshot_contains_type() {
+        let f = AudioFeatures::default();
+        let json = build_audio_snapshot(&f);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "audio");
+    }
+
+    #[test]
+    fn audio_snapshot_raw_bpm() {
+        let mut f = AudioFeatures::default();
+        f.bpm = 0.4; // normalized, display = 120 BPM
+        let json = build_audio_snapshot(&f);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let bpm = v["bpm"].as_f64().unwrap();
+        assert!((bpm - 120.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn active_layer_changed_message() {
+        let json = build_active_layer_changed(3);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "active_layer");
+        assert_eq!(v["index"], 3);
+    }
+
+    #[test]
+    fn build_params_float_normalized() {
+        let mut store = ParamStore::new();
+        let defs = vec![ParamDef::Float { name: "x".into(), default: 0.5, min: 0.0, max: 1.0 }];
+        store.load_from_defs(&defs);
+        store.set("x", ParamValue::Float(0.75));
+        let params = build_params(&store);
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].param_type, "float");
+        // value = (0.75 - 0.0) / (1.0 - 0.0) = 0.75 normalized
+        assert!((params[0].value - 0.75).abs() < 0.01);
+    }
+
+    #[test]
+    fn build_params_bool() {
+        let mut store = ParamStore::new();
+        let defs = vec![ParamDef::Bool { name: "flag".into(), default: false }];
+        store.load_from_defs(&defs);
+        store.set("flag", ParamValue::Bool(true));
+        let params = build_params(&store);
+        assert_eq!(params[0].param_type, "bool");
+        assert!((params[0].value - 1.0).abs() < 0.01);
+    }
+}

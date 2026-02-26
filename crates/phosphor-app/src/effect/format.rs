@@ -138,3 +138,115 @@ impl PfxEffect {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn approx_eq(a: f32, b: f32, eps: f32) -> bool {
+        (a - b).abs() < eps
+    }
+
+    #[test]
+    fn normalized_passes_from_single_shader() {
+        let effect = PfxEffect {
+            name: "test".into(),
+            author: String::new(),
+            description: String::new(),
+            shader: "test.wgsl".into(),
+            inputs: vec![],
+            passes: vec![],
+            postprocess: None,
+            particles: None,
+            audio_mappings: vec![],
+        };
+        let passes = effect.normalized_passes();
+        assert_eq!(passes.len(), 1);
+        assert_eq!(passes[0].shader, "test.wgsl");
+        assert_eq!(passes[0].name, "main");
+        assert!(passes[0].feedback);
+        assert!(approx_eq(passes[0].scale, 1.0, 1e-6));
+    }
+
+    #[test]
+    fn normalized_passes_empty_when_no_shader() {
+        let effect = PfxEffect {
+            name: "test".into(),
+            author: String::new(),
+            description: String::new(),
+            shader: String::new(),
+            inputs: vec![],
+            passes: vec![],
+            postprocess: None,
+            particles: None,
+            audio_mappings: vec![],
+        };
+        assert!(effect.normalized_passes().is_empty());
+    }
+
+    #[test]
+    fn normalized_passes_from_passes_array() {
+        let pass = PassDef {
+            name: "p1".into(),
+            shader: "a.wgsl".into(),
+            scale: 0.5,
+            inputs: vec![],
+            feedback: false,
+        };
+        let effect = PfxEffect {
+            name: "test".into(),
+            author: String::new(),
+            description: String::new(),
+            shader: "ignored.wgsl".into(),
+            inputs: vec![],
+            passes: vec![pass],
+            postprocess: None,
+            particles: None,
+            audio_mappings: vec![],
+        };
+        let passes = effect.normalized_passes();
+        assert_eq!(passes.len(), 1);
+        assert_eq!(passes[0].shader, "a.wgsl");
+        assert!(!passes[0].feedback);
+    }
+
+    #[test]
+    fn postprocess_def_defaults() {
+        let pp = PostProcessDef::default();
+        assert!(approx_eq(pp.bloom_threshold, 0.8, 1e-6));
+        assert!(approx_eq(pp.bloom_intensity, 0.35, 1e-6));
+        assert!(approx_eq(pp.vignette, 0.3, 1e-6));
+        assert!(approx_eq(pp.ca_intensity, 0.5, 1e-6));
+        assert!(approx_eq(pp.grain_intensity, 0.5, 1e-6));
+        assert!(pp.enabled);
+        assert!(pp.bloom_enabled);
+    }
+
+    #[test]
+    fn pfx_effect_serde_minimal() {
+        let json = r#"{"name":"test","shader":"t.wgsl"}"#;
+        let effect: PfxEffect = serde_json::from_str(json).unwrap();
+        assert_eq!(effect.name, "test");
+        assert_eq!(effect.shader, "t.wgsl");
+        assert!(effect.passes.is_empty());
+        assert!(effect.particles.is_none());
+    }
+
+    #[test]
+    fn pfx_effect_serde_with_passes() {
+        let json = r#"{"name":"multi","shader":"","passes":[{"name":"p1","shader":"a.wgsl"},{"name":"p2","shader":"b.wgsl","feedback":true}]}"#;
+        let effect: PfxEffect = serde_json::from_str(json).unwrap();
+        assert_eq!(effect.passes.len(), 2);
+        assert!(!effect.passes[0].feedback);
+        assert!(effect.passes[1].feedback);
+    }
+
+    #[test]
+    fn pass_def_serde_defaults() {
+        let json = r#"{"name":"test","shader":"t.wgsl"}"#;
+        let pass: PassDef = serde_json::from_str(json).unwrap();
+        assert!(approx_eq(pass.scale, 1.0, 1e-6));
+        assert!(!pass.feedback);
+        assert!(pass.inputs.is_empty());
+    }
+}

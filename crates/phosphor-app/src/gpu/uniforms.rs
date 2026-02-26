@@ -100,3 +100,26 @@ impl UniformBuffer {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shader_uniforms_size_256() {
+        assert_eq!(std::mem::size_of::<ShaderUniforms>(), 256);
+    }
+
+    #[test]
+    fn shader_uniforms_zeroed() {
+        let u: ShaderUniforms = bytemuck::Zeroable::zeroed();
+        assert_eq!(u.time, 0.0);
+        assert_eq!(u.delta_time, 0.0);
+        assert_eq!(u.resolution, [0.0, 0.0]);
+        assert_eq!(u.sub_bass, 0.0);
+        assert_eq!(u.beat, 0.0);
+        assert_eq!(u.feedback_decay, 0.0);
+        assert_eq!(u.frame_index, 0.0);
+        assert_eq!(u.params, [0.0; 16]);
+    }
+}

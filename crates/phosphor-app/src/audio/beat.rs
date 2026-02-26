@@ -1093,3 +1093,267 @@ impl BeatDetector {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn approx_eq(a: f32, b: f32, eps: f32) -> bool { (a - b).abs() < eps }
+    fn approx_eq_f64(a: f64, b: f64, eps: f64) -> bool { (a - b).abs() < eps }
+
+    // ---- CircularBuffer tests ----
+
+    #[test]
+    fn circular_buffer_new_empty() {
+        let buf = CircularBuffer::new(10);
+        assert_eq!(buf.len(), 0);
+        assert!(buf.values().is_empty());
+    }
+
+    #[test]
+    fn circular_buffer_push_under_capacity() {
+        let mut buf = CircularBuffer::new(5);
+        buf.push(1.0);
+        buf.push(2.0);
+        buf.push(3.0);
+        assert_eq!(buf.len(), 3);
+        assert_eq!(buf.values(), vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn circular_buffer_push_wrap_around() {
+        let mut buf = CircularBuffer::new(3);
+        buf.push(1.0);
+        buf.push(2.0);
+        buf.push(3.0);
+        buf.push(4.0); // wraps, oldest (1.0) overwritten
+        assert_eq!(buf.len(), 3);
+        let vals = buf.values();
+        assert_eq!(vals, vec![2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn circular_buffer_median_odd() {
+        let mut buf = CircularBuffer::new(5);
+        for v in [3.0, 1.0, 4.0, 1.0, 5.0] { buf.push(v); }
+        // sorted: [1.0, 1.0, 3.0, 4.0, 5.0], median = 3.0
+        assert!(approx_eq_f64(buf.median(), 3.0, 1e-10));
+    }
+
+    #[test]
+    fn circular_buffer_median_even() {
+        let mut buf = CircularBuffer::new(4);
+        for v in [1.0, 2.0, 3.0, 4.0] { buf.push(v); }
+        // sorted: [1.0, 2.0, 3.0, 4.0], median = (2.0+3.0)/2 = 2.5
+        assert!(approx_eq_f64(buf.median(), 2.5, 1e-10));
+    }
+
+    #[test]
+    fn circular_buffer_median_empty() {
+        let buf = CircularBuffer::new(5);
+        assert_eq!(buf.median(), 0.0);
+    }
+
+    #[test]
+    fn circular_buffer_mad() {
+        let mut buf = CircularBuffer::new(5);
+        for v in [1.0, 2.0, 3.0, 4.0, 5.0] { buf.push(v); }
+        // median=3.0, deviations=[2,1,0,1,2], sorted=[0,1,1,2,2], mad=1.0
+        assert!(approx_eq_f64(buf.mad(), 1.0, 1e-10));
+    }
+
+    #[test]
+    fn circular_buffer_max() {
+        let mut buf = CircularBuffer::new(5);
+        for v in [1.0, 5.0, 3.0] { buf.push(v); }
+        assert!(approx_eq_f64(buf.max(), 5.0, 1e-10));
+    }
+
+    #[test]
+    fn circular_buffer_max_empty() {
+        let buf = CircularBuffer::new(5);
+        assert_eq!(buf.max(), 0.0);
+    }
+
+    #[test]
+    fn circular_buffer_mean() {
+        let mut buf = CircularBuffer::new(5);
+        for v in [2.0, 4.0, 6.0] { buf.push(v); }
+        assert!(approx_eq_f64(buf.mean(), 4.0, 1e-10));
+    }
+
+    // ---- KalmanBpm tests ----
+
+    #[test]
+    fn kalman_first_measurement_returns_raw() {
+        let mut k = KalmanBpm::new();
+        let bpm = k.update(120.0, 0.5);
+        assert!(approx_eq_f64(bpm, 120.0, 1e-6));
+    }
+
+    #[test]
+    fn kalman_stable_input_stays_near() {
+        let mut k = KalmanBpm::new();
+        k.update(120.0, 0.8);
+        for _ in 0..50 {
+            let bpm = k.update(120.0, 0.8);
+            assert!((bpm - 120.0).abs() < 5.0, "got {}", bpm);
+        }
+    }
+
+    #[test]
+    fn kalman_octave_snap() {
+        let mut k = KalmanBpm::new();
+        k.update(120.0, 0.8);
+        for _ in 0..10 {
+            k.update(120.0, 0.8);
+        }
+        // Now feed 240 (octave double) — should snap back to 120
+        let bpm = k.update(240.0, 0.8);
+        assert!((bpm - 120.0).abs() < 10.0, "expected near 120, got {}", bpm);
+    }
+
+    #[test]
+    fn kalman_octave_escape() {
+        let mut k = KalmanBpm::new();
+        k.update(120.0, 0.8);
+        // Feed 240 for 60 frames — should eventually escape snap
+        for _ in 0..60 {
+            k.update(240.0, 0.8);
+        }
+        let bpm = k.update(240.0, 0.8);
+        // After escape, should be near 240
+        assert!((bpm - 240.0).abs() < 30.0, "expected near 240, got {}", bpm);
+    }
+
+    #[test]
+    fn kalman_divergence_reset() {
+        let mut k = KalmanBpm::new();
+        k.update(120.0, 0.8);
+        for _ in 0..5 {
+            k.update(120.0, 0.8);
+        }
+        // Feed completely different BPM — should reset after 15 frames
+        for _ in 0..20 {
+            k.update(80.0, 0.8);
+        }
+        let bpm = k.update(80.0, 0.8);
+        assert!((bpm - 80.0).abs() < 15.0, "expected near 80, got {}", bpm);
+    }
+
+    // ---- OnsetDetector tests ----
+
+    #[test]
+    fn onset_silence_gate() {
+        let mut od = OnsetDetector::new(44100.0, 50, 400);
+        let bass = vec![0.0; 2049]; // 4096-pt fft
+        let mid = vec![0.0; 513];   // 1024-pt fft
+        let high = vec![0.0; 257];  // 512-pt fft
+        let (is_onset, strength, _) = od.process(&bass, &mid, &high, 0.0);
+        assert!(!is_onset);
+        assert!(approx_eq(strength, 0.0, 1e-6));
+    }
+
+    #[test]
+    fn onset_sustained_silence() {
+        let mut od = OnsetDetector::new(44100.0, 50, 400);
+        let bass = vec![0.0; 2049];
+        let mid = vec![0.0; 513];
+        let high = vec![0.0; 257];
+        for _ in 0..40 {
+            od.process(&bass, &mid, &high, 0.0);
+        }
+        assert!(od.is_sustained_silence());
+    }
+
+    #[test]
+    fn onset_bin_range() {
+        let od = OnsetDetector::new(44100.0, 50, 400);
+        let (lo, hi) = od.bin_range(20.0, 80.0, 4096);
+        // bin_width = 44100/4096 ≈ 10.77 Hz
+        // lo = round(20/10.77) = 2, hi = round(80/10.77) = 7
+        assert!(lo >= 1 && lo <= 3, "lo={}", lo);
+        assert!(hi >= 6 && hi <= 8, "hi={}", hi);
+    }
+
+    // ---- BeatScheduler tests ----
+
+    #[test]
+    fn scheduler_zero_confidence_onset_fires() {
+        let mut bs = BeatScheduler::new();
+        bs.update_tempo(0.0, 0.0, 0.0);
+        let (is_beat, _, _) = bs.process(true, 0.8, 1.0, false);
+        assert!(is_beat);
+    }
+
+    #[test]
+    fn scheduler_silence_no_beat() {
+        let mut bs = BeatScheduler::new();
+        bs.update_tempo(120.0, 0.5, 0.8);
+        let (is_beat, phase, _) = bs.process(false, 0.0, 1.0, true);
+        assert!(!is_beat);
+        assert!(approx_eq_f64(phase, 0.0, 1e-6));
+    }
+
+    #[test]
+    fn scheduler_phase_in_range() {
+        let mut bs = BeatScheduler::new();
+        bs.update_tempo(120.0, 0.5, 0.8);
+        // Trigger a beat
+        bs.process(true, 0.8, 1.0, false);
+        // Advance time
+        for i in 1..100 {
+            let t = 1.0 + (i as f64) * 0.01;
+            let (_, phase, _) = bs.process(false, 0.0, t, false);
+            assert!(phase >= 0.0 && phase <= 1.0, "phase={} at t={}", phase, t);
+        }
+    }
+
+    // ---- Integration test ----
+
+    #[test]
+    fn synthetic_kick_bpm_converges() {
+        // Simulate 120 BPM kick drum: onset every 0.5s for 8 seconds
+        let sample_rate = 44100.0;
+        let mut detector = BeatDetector::new(sample_rate);
+
+        let bass_len = 2049;  // 4096/2 + 1
+        let mid_len = 513;    // 1024/2 + 1
+        let high_len = 257;   // 512/2 + 1
+
+        let dt = 0.01; // 100 Hz frame rate
+        let kick_interval = 0.5; // 120 BPM
+        let mut last_kick = -1.0f64;
+
+        let mut last_bpm = 0.0f32;
+
+        for frame in 0..800 {
+            let t = frame as f64 * dt;
+
+            // Generate kick: a spike in bass spectrum every 0.5s
+            let is_kick_frame = (t - last_kick) >= kick_interval - dt * 0.5;
+            let mut bass = vec![0.001f32; bass_len];
+            let mid = vec![0.001f32; mid_len];
+            let high = vec![0.001f32; high_len];
+
+            if is_kick_frame && t >= kick_interval {
+                // Put energy in kick bins (20-120 Hz)
+                for bin in 1..12 {
+                    bass[bin] = 2.0;
+                }
+                last_kick = t;
+            }
+
+            let rms = if is_kick_frame { 0.5 } else { 0.05 };
+            let result = detector.process(&bass, &mid, &high, rms, t);
+            last_bpm = result.bpm;
+        }
+
+        // After 8 seconds, BPM should be in the 100-140 range (centered on 120)
+        // The raw BPM (not normalized) — check that it's non-zero
+        assert!(last_bpm > 0.0, "BPM should be non-zero after 8s, got {}", last_bpm);
+        // BPM from BeatDetector is raw (not normalized), should be near 120
+        assert!(last_bpm > 80.0 && last_bpm < 180.0,
+            "BPM should be near 120, got {}", last_bpm);
+    }
+}

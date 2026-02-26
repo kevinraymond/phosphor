@@ -182,11 +182,12 @@ impl Layer {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         queue: &wgpu::Queue,
+        viewport: Option<[u32; 2]>,
     ) -> &RenderTarget {
         match &self.content {
             LayerContent::Effect(e) => {
                 e.pass_executor
-                    .execute(encoder, &e.uniform_buffer, queue, &e.uniforms)
+                    .execute(encoder, &e.uniform_buffer, queue, &e.uniforms, viewport)
             }
             LayerContent::Media(m) => m.execute(encoder),
         }
@@ -267,9 +268,8 @@ impl LayerStack {
             return; // never remove the last layer
         }
         self.layers.remove(index);
-        if self.active_layer >= self.layers.len() {
-            self.active_layer = self.layers.len() - 1;
-        }
+        self.active_layer =
+            adjusted_active_after_remove(self.active_layer, index, self.layers.len());
     }
 
     /// Move a layer from `from` to `to` position.
@@ -279,14 +279,7 @@ impl LayerStack {
         }
         let layer = self.layers.remove(from);
         self.layers.insert(to, layer);
-        // Track active layer through the move
-        if self.active_layer == from {
-            self.active_layer = to;
-        } else if from < to && self.active_layer > from && self.active_layer <= to {
-            self.active_layer -= 1;
-        } else if from > to && self.active_layer >= to && self.active_layer < from {
-            self.active_layer += 1;
-        }
+        self.active_layer = adjusted_active_after_move(self.active_layer, from, to);
     }
 
     pub fn active(&self) -> Option<&Layer> {
@@ -330,5 +323,127 @@ impl LayerStack {
     /// Number of enabled layers.
     pub fn enabled_count(&self) -> usize {
         self.layers.iter().filter(|l| l.enabled).count()
+    }
+}
+
+/// Compute adjusted active layer index after removing a layer.
+pub(crate) fn adjusted_active_after_remove(
+    active: usize,
+    _removed: usize,
+    new_len: usize,
+) -> usize {
+    if active >= new_len {
+        new_len.saturating_sub(1)
+    } else {
+        active
+    }
+}
+
+/// Compute adjusted active layer index after moving a layer from `from` to `to`.
+pub(crate) fn adjusted_active_after_move(active: usize, from: usize, to: usize) -> usize {
+    if active == from {
+        to
+    } else if from < to && active > from && active <= to {
+        active - 1
+    } else if from > to && active >= to && active < from {
+        active + 1
+    } else {
+        active
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blend_mode_all_count() {
+        assert_eq!(BlendMode::ALL.len(), 7);
+    }
+
+    #[test]
+    fn blend_mode_as_u32() {
+        for (i, mode) in BlendMode::ALL.iter().enumerate() {
+            assert_eq!(mode.as_u32(), i as u32);
+        }
+    }
+
+    #[test]
+    fn blend_mode_display_names_non_empty() {
+        for mode in BlendMode::ALL {
+            assert!(!mode.display_name().is_empty());
+        }
+    }
+
+    #[test]
+    fn blend_mode_default_is_normal() {
+        assert_eq!(BlendMode::default(), BlendMode::Normal);
+    }
+
+    #[test]
+    fn blend_mode_serde_roundtrip() {
+        for mode in BlendMode::ALL {
+            let json = serde_json::to_string(mode).unwrap();
+            let m2: BlendMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(*mode, m2);
+        }
+    }
+
+    // --- adjusted_active_after_remove tests ---
+
+    #[test]
+    fn remove_before_active_keeps_active() {
+        // 4 layers [0,1,2,3], active=2, remove index 0 -> new_len=3, active=2 (still valid)
+        assert_eq!(adjusted_active_after_remove(2, 0, 3), 2);
+    }
+
+    #[test]
+    fn remove_active_layer_at_end_clamps() {
+        // 3 layers [0,1,2], active=2, remove index 2 -> new_len=2, active was 2 >= 2 -> 1
+        assert_eq!(adjusted_active_after_remove(2, 2, 2), 1);
+    }
+
+    #[test]
+    fn remove_after_active_unchanged() {
+        // 4 layers, active=1, remove index 3 -> new_len=3, active=1 (still valid)
+        assert_eq!(adjusted_active_after_remove(1, 3, 3), 1);
+    }
+
+    #[test]
+    fn remove_only_remaining_saturates_to_zero() {
+        // Edge case: new_len=0 (shouldn't happen in practice, but saturating_sub handles it)
+        assert_eq!(adjusted_active_after_remove(0, 0, 0), 0);
+    }
+
+    // --- adjusted_active_after_move tests ---
+
+    #[test]
+    fn move_active_layer_follows() {
+        // active=1, move from=1 to=3 -> active becomes 3
+        assert_eq!(adjusted_active_after_move(1, 1, 3), 3);
+    }
+
+    #[test]
+    fn move_forward_shifts_middle_down() {
+        // active=2, move from=1 to=3 -> active was between from+1..=to -> 2-1=1
+        assert_eq!(adjusted_active_after_move(2, 1, 3), 1);
+    }
+
+    #[test]
+    fn move_backward_shifts_middle_up() {
+        // active=1, move from=3 to=0 -> active in [to..from) = [0..3) -> 1+1=2
+        assert_eq!(adjusted_active_after_move(1, 3, 0), 2);
+    }
+
+    #[test]
+    fn move_unrelated_unchanged() {
+        // active=0, move from=2 to=3 -> active not affected
+        assert_eq!(adjusted_active_after_move(0, 2, 3), 0);
+    }
+
+    #[test]
+    fn move_same_position_unchanged() {
+        // from==to edge (would be caught by caller, but function handles it)
+        assert_eq!(adjusted_active_after_move(2, 1, 1), 2);
     }
 }

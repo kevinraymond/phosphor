@@ -125,3 +125,38 @@ impl WebConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn web_config_defaults() {
+        let c = WebConfig::default();
+        assert!(c.enabled);
+        assert_eq!(c.port, 9002);
+    }
+
+    #[test]
+    fn web_config_serde_roundtrip() {
+        let c = WebConfig::default();
+        let json = serde_json::to_string(&c).unwrap();
+        let c2: WebConfig = serde_json::from_str(&json).unwrap();
+        assert!(c2.enabled);
+        assert_eq!(c2.port, 9002);
+    }
+
+    #[test]
+    fn web_frame_result_empty() {
+        let r = WebFrameResult::empty();
+        assert!(r.triggers.is_empty());
+        assert!(r.layer_params.is_empty());
+        assert!(r.layer_opacity.is_empty());
+        assert!(r.layer_blend.is_empty());
+        assert!(r.layer_enabled.is_empty());
+        assert!(r.postprocess_enabled.is_none());
+        assert!(r.effect_loads.is_empty());
+        assert!(r.select_layer.is_none());
+        assert!(r.preset_loads.is_empty());
+    }
+}

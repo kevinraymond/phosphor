@@ -74,3 +74,45 @@ pub enum LearnTarget {
     Param(String),
     Trigger(TriggerAction),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trigger_action_all_count() {
+        assert_eq!(TriggerAction::ALL.len(), 8);
+    }
+
+    #[test]
+    fn trigger_action_display_names_non_empty() {
+        for action in TriggerAction::ALL {
+            assert!(!action.display_name().is_empty());
+        }
+    }
+
+    #[test]
+    fn trigger_action_short_names_non_empty() {
+        for action in TriggerAction::ALL {
+            assert!(!action.short_name().is_empty());
+        }
+    }
+
+    #[test]
+    fn trigger_action_serde_roundtrip() {
+        for action in TriggerAction::ALL {
+            let json = serde_json::to_string(action).unwrap();
+            let a2: TriggerAction = serde_json::from_str(&json).unwrap();
+            assert_eq!(*action, a2);
+        }
+    }
+
+    #[test]
+    fn midi_msg_type_serde_roundtrip() {
+        for t in [MidiMsgType::Cc, MidiMsgType::Note] {
+            let json = serde_json::to_string(&t).unwrap();
+            let t2: MidiMsgType = serde_json::from_str(&json).unwrap();
+            assert_eq!(t, t2);
+        }
+    }
+}

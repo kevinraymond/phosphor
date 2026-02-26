@@ -206,3 +206,65 @@ impl PresetStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_name_strips_slashes() {
+        assert_eq!(PresetStore::sanitize_name("a/b\\c"), "a_b_c");
+    }
+
+    #[test]
+    fn sanitize_name_strips_dots() {
+        assert_eq!(PresetStore::sanitize_name("my.preset"), "my_preset");
+    }
+
+    #[test]
+    fn sanitize_name_trims_whitespace() {
+        assert_eq!(PresetStore::sanitize_name("  hello  "), "hello");
+    }
+
+    #[test]
+    fn sanitize_name_max_64_chars() {
+        let long = "a".repeat(100);
+        assert_eq!(PresetStore::sanitize_name(&long).len(), 64);
+    }
+
+    #[test]
+    fn preset_store_new_empty() {
+        let s = PresetStore::new();
+        assert!(s.presets.is_empty());
+        assert!(s.current_preset.is_none());
+        assert!(!s.dirty);
+    }
+
+    #[test]
+    fn mark_dirty_without_current_preset() {
+        let mut s = PresetStore::new();
+        s.mark_dirty();
+        assert!(!s.dirty); // no current preset, so dirty stays false
+    }
+
+    #[test]
+    fn mark_dirty_with_current_preset() {
+        let mut s = PresetStore::new();
+        s.current_preset = Some(0);
+        s.mark_dirty();
+        assert!(s.dirty);
+    }
+
+    #[test]
+    fn current_name_returns_correct() {
+        let mut s = PresetStore::new();
+        let preset = Preset {
+            layers: vec![],
+            active_layer: 0,
+            postprocess: PostProcessDef::default(),
+        };
+        s.presets.push(("Test Preset".into(), preset));
+        s.current_preset = Some(0);
+        assert_eq!(s.current_name(), Some("Test Preset"));
+    }
+}
