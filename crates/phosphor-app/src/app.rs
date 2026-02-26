@@ -56,6 +56,8 @@ pub struct App {
     pub placeholder: PlaceholderTexture,
     // Global uniforms template (time, audio, etc. — params overwritten per-layer)
     pub uniforms: ShaderUniforms,
+    // Transient status error (displayed in status bar, auto-clears)
+    pub status_error: Option<(String, Instant)>,
 }
 
 impl App {
@@ -193,6 +195,7 @@ impl App {
             compositor,
             post_process,
             placeholder,
+            status_error: None,
         })
     }
 
@@ -212,6 +215,13 @@ impl App {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
+
+        // Auto-clear status error after 6 seconds
+        if let Some((_, when)) = &self.status_error {
+            if when.elapsed().as_secs_f64() > 6.0 {
+                self.status_error = None;
+            }
+        }
 
         // Update global time uniforms
         self.uniforms.time = now.duration_since(self.start_time).as_secs_f32();
@@ -907,6 +917,7 @@ impl App {
             }
             Err(e) => {
                 log::error!("Failed to load media '{}': {e}", path.display());
+                self.status_error = Some((e, Instant::now()));
             }
         }
     }

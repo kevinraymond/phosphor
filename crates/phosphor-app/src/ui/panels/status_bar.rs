@@ -32,6 +32,9 @@ fn fixed_value(ui: &mut Ui, text: &str, width: f32, color: Color32) {
     ui.painter().galley(text_pos, galley, color);
 }
 
+/// Duration to show status errors before auto-clearing.
+const ERROR_DISPLAY_SECS: f64 = 6.0;
+
 pub fn draw_status_bar(
     ui: &mut Ui,
     shader_error: &Option<String>,
@@ -44,12 +47,21 @@ pub fn draw_status_bar(
     osc_recently_active: bool,
     web_enabled: bool,
     web_client_count: usize,
+    status_error: &Option<(String, std::time::Instant)>,
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
 
+        // Transient status error (higher priority, auto-clears)
+        if let Some((msg, when)) = status_error {
+            let elapsed = when.elapsed().as_secs_f64();
+            if elapsed < ERROR_DISPLAY_SECS {
+                ui.add_space(4.0);
+                ui.colored_label(DARK_ERROR, RichText::new(msg).size(SMALL_SIZE));
+            }
+        }
         // Shader errors
-        if let Some(err) = shader_error {
+        else if let Some(err) = shader_error {
             ui.add_space(4.0);
             ui.colored_label(DARK_ERROR, RichText::new(format!("ERR: {err}")).size(SMALL_SIZE));
         }
