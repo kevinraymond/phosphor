@@ -386,4 +386,77 @@ mod tests {
         assert_eq!(params[0].param_type, "bool");
         assert!((params[0].value - 1.0).abs() < 0.01);
     }
+
+    // ---- Additional tests ----
+
+    #[test]
+    fn build_params_color() {
+        let mut store = ParamStore::new();
+        let defs = vec![ParamDef::Color { name: "tint".into(), default: [1.0, 0.0, 0.0, 1.0] }];
+        store.load_from_defs(&defs);
+        let params = build_params(&store);
+        assert_eq!(params[0].param_type, "color");
+        assert!((params[0].value - 0.0).abs() < 0.01); // color value is always 0.0
+        assert!(params[0].min.is_none());
+        assert!(params[0].max.is_none());
+    }
+
+    #[test]
+    fn build_params_point2d() {
+        let mut store = ParamStore::new();
+        let defs = vec![ParamDef::Point2D { name: "pos".into(), default: [0.5, 0.5], min: [0.0, 0.0], max: [1.0, 1.0] }];
+        store.load_from_defs(&defs);
+        let params = build_params(&store);
+        assert_eq!(params[0].param_type, "point2d");
+        assert!(params[0].min.is_none());
+    }
+
+    #[test]
+    fn build_params_float_zero_range() {
+        let mut store = ParamStore::new();
+        let defs = vec![ParamDef::Float { name: "x".into(), default: 5.0, min: 5.0, max: 5.0 }];
+        store.load_from_defs(&defs);
+        let params = build_params(&store);
+        // zero range → normalized = 0.0
+        assert!((params[0].value - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn build_layer_changed_json_shape() {
+        let info = LayerInfo {
+            name: "Layer 1".into(),
+            custom_name: None,
+            effect_index: Some(0),
+            effect_name: Some("Aurora".into()),
+            blend_mode: BlendMode::Add,
+            opacity: 0.8,
+            enabled: true,
+            locked: false,
+            pinned: false,
+            has_particles: false,
+            shader_error: None,
+            is_media: false,
+            media_file_name: None,
+            media_is_animated: false,
+            media_is_video: false,
+        };
+        let json = build_layer_changed(&info, 2);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "layer_changed");
+        assert_eq!(v["index"], 2);
+        assert_eq!(v["blend_mode"], 1); // Add = 1
+        assert_eq!(v["blend_name"], "Add");
+        assert!((v["opacity"].as_f64().unwrap() - 0.8).abs() < 0.01);
+        assert!(v["enabled"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn build_presets_changed_json_shape() {
+        let store = PresetStore::new();
+        let json = build_presets_changed(&store);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "presets");
+        assert!(v["presets"].as_array().unwrap().is_empty());
+        assert!(v["current"].is_null());
+    }
 }

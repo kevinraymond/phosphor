@@ -275,4 +275,86 @@ mod tests {
             other => panic!("expected Raw, got {:?}", other),
         }
     }
+
+    // ---- Additional parse branch tests ----
+
+    #[test]
+    fn parse_layer_blend() {
+        let msg = OscMessage { addr: "/phosphor/layer/1/blend".into(), args: vec![OscType::Int(3)] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::LayerBlend { layer, value }) => {
+                assert_eq!(layer, 1);
+                assert_eq!(value, 3);
+            }
+            other => panic!("expected LayerBlend, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_layer_enabled_true() {
+        let msg = OscMessage { addr: "/phosphor/layer/0/enabled".into(), args: vec![OscType::Float(0.8)] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::LayerEnabled { layer, value }) => {
+                assert_eq!(layer, 0);
+                assert!(value); // 0.8 > 0.5
+            }
+            other => panic!("expected LayerEnabled, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_layer_enabled_false() {
+        let msg = OscMessage { addr: "/phosphor/layer/0/enabled".into(), args: vec![OscType::Float(0.3)] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::LayerEnabled { layer, value }) => {
+                assert_eq!(layer, 0);
+                assert!(!value); // 0.3 <= 0.5
+            }
+            other => panic!("expected LayerEnabled, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_unknown_trigger_returns_raw() {
+        let msg = OscMessage { addr: "/phosphor/trigger/unknown_action".into(), args: vec![OscType::Float(1.0)] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::Raw { address, .. }) => {
+                assert_eq!(address, "/phosphor/trigger/unknown_action");
+            }
+            other => panic!("expected Raw, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_unknown_layer_subpath_returns_raw() {
+        let msg = OscMessage { addr: "/phosphor/layer/0/unknown".into(), args: vec![OscType::Float(1.0)] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::Raw { address, .. }) => {
+                assert_eq!(address, "/phosphor/layer/0/unknown");
+            }
+            other => panic!("expected Raw, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_nested_param_name() {
+        let msg = OscMessage { addr: "/phosphor/param/group/sub".into(), args: vec![OscType::Float(0.5)] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::Param { name, .. }) => {
+                assert_eq!(name, "group/sub");
+            }
+            other => panic!("expected Param, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_param_missing_float_returns_none() {
+        let msg = OscMessage { addr: "/phosphor/param/speed".into(), args: vec![] };
+        assert!(parse_osc_message(&msg).is_none());
+    }
+
+    #[test]
+    fn first_float_string_returns_none() {
+        assert_eq!(first_float(&[OscType::String("hello".into())]), None);
+    }
 }

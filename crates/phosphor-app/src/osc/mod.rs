@@ -435,4 +435,47 @@ mod tests {
         let msg = OscInMessage::Trigger(TriggerAction::NextEffect);
         assert_eq!(msg_address(&msg), "/phosphor/trigger/next_effect");
     }
+
+    // ---- Additional msg_address tests ----
+
+    #[test]
+    fn msg_address_layer_opacity() {
+        let msg = OscInMessage::LayerOpacity { layer: 3, value: 0.5 };
+        assert_eq!(msg_address(&msg), "/phosphor/layer/3/opacity");
+    }
+
+    #[test]
+    fn msg_address_layer_blend() {
+        let msg = OscInMessage::LayerBlend { layer: 1, value: 2 };
+        assert_eq!(msg_address(&msg), "/phosphor/layer/1/blend");
+    }
+
+    #[test]
+    fn msg_address_layer_enabled() {
+        let msg = OscInMessage::LayerEnabled { layer: 0, value: true };
+        assert_eq!(msg_address(&msg), "/phosphor/layer/0/enabled");
+    }
+
+    #[test]
+    fn msg_address_postprocess_enabled() {
+        let msg = OscInMessage::PostProcessEnabled(true);
+        assert_eq!(msg_address(&msg), "/phosphor/postprocess/enabled");
+    }
+
+    #[test]
+    fn msg_address_raw() {
+        let msg = OscInMessage::Raw { address: "/custom/addr".into(), value: 1.0 };
+        assert_eq!(msg_address(&msg), "/custom/addr");
+    }
+
+    #[test]
+    fn osc_frame_result_empty_fields() {
+        let r = OscFrameResult::empty();
+        assert!(r.triggers.is_empty());
+        assert!(r.layer_params.is_empty());
+        assert!(r.layer_opacity.is_empty());
+        assert!(r.layer_blend.is_empty());
+        assert!(r.layer_enabled.is_empty());
+        assert!(r.postprocess_enabled.is_none());
+    }
 }

@@ -159,4 +159,23 @@ mod tests {
         assert!(r.select_layer.is_none());
         assert!(r.preset_loads.is_empty());
     }
+
+    // ---- Additional tests ----
+
+    #[test]
+    fn web_config_disabled_roundtrip() {
+        let c = WebConfig { enabled: false, port: 8080 };
+        let json = serde_json::to_string(&c).unwrap();
+        let c2: WebConfig = serde_json::from_str(&json).unwrap();
+        assert!(!c2.enabled);
+        assert_eq!(c2.port, 8080);
+    }
+
+    #[test]
+    fn web_config_partial_json_defaults() {
+        let json = r#"{"port": 3000}"#;
+        let c: WebConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(c.port, 3000);
+        assert!(c.enabled); // default true
+    }
 }

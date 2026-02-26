@@ -196,4 +196,12 @@ mod tests {
         ParamValue::Bool(false).write_to(&mut buf, 0);
         assert!(approx_eq(buf[0], 0.0, 1e-6));
     }
+
+    #[test]
+    fn param_value_write_to_point2d() {
+        let mut buf = [0.0f32; 4];
+        ParamValue::Point2D([0.3, 0.7]).write_to(&mut buf, 1);
+        assert!(approx_eq(buf[1], 0.3, 1e-6));
+        assert!(approx_eq(buf[2], 0.7, 1e-6));
+    }
 }

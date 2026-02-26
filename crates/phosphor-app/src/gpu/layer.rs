@@ -445,4 +445,41 @@ mod tests {
         // from==to edge (would be caught by caller, but function handles it)
         assert_eq!(adjusted_active_after_move(2, 1, 1), 2);
     }
+
+    // ---- Additional tests ----
+
+    #[test]
+    fn blend_mode_exact_display_names() {
+        assert_eq!(BlendMode::Normal.display_name(), "Normal");
+        assert_eq!(BlendMode::Add.display_name(), "Add");
+        assert_eq!(BlendMode::Multiply.display_name(), "Multiply");
+        assert_eq!(BlendMode::Screen.display_name(), "Screen");
+        assert_eq!(BlendMode::Overlay.display_name(), "Overlay");
+        assert_eq!(BlendMode::SoftLight.display_name(), "Soft Light");
+        assert_eq!(BlendMode::Difference.display_name(), "Difference");
+    }
+
+    #[test]
+    fn adjusted_active_after_remove_active_equals_removed() {
+        // active=1, removed=1, new_len=2 -> active=1 (still valid)
+        assert_eq!(adjusted_active_after_remove(1, 1, 2), 1);
+    }
+
+    #[test]
+    fn adjusted_active_after_remove_active_equals_removed_at_end() {
+        // active=2, removed=2, new_len=2 -> active=2 >= 2 -> clamp to 1
+        assert_eq!(adjusted_active_after_remove(2, 2, 2), 1);
+    }
+
+    #[test]
+    fn adjusted_active_after_move_boundary_from_zero() {
+        // active=0, move from=0 to=3 -> active follows = 3
+        assert_eq!(adjusted_active_after_move(0, 0, 3), 3);
+    }
+
+    #[test]
+    fn adjusted_active_after_move_boundary_to_zero() {
+        // active=0, move from=2 to=0 -> active in [to..from) = [0..2) -> 0+1=1
+        assert_eq!(adjusted_active_after_move(0, 2, 0), 1);
+    }
 }

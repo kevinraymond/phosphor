@@ -308,6 +308,32 @@ cargo run --features "video,ndi"   # with both
 RUST_LOG=phosphor_app=debug cargo run  # verbose logging
 ```
 
+### Test Coverage
+~241 unit tests covering pure logic, parsing, serde, and data transforms across 16 modules:
+- **Audio**: beat detection pipeline (onset → tempo → scheduler), adaptive normalization, BPM convergence
+- **Params**: ParamDef/ParamValue types, ParamStore CRUD, pack_to_buffer with all types
+- **Effect loader**: `is_builtin`, `prepend_library` (with/without existing uniforms)
+- **GPU layer**: BlendMode serde/display, `adjusted_active_after_remove/move` edge cases
+- **Preset**: sanitize_name, LayerPreset serde defaults, Preset roundtrip, PresetStore API
+- **MIDI**: MidiMapping scale (inverted, custom range, zero range), matches (channel, omni, type), MidiConfig
+- **OSC**: parse all message types (param, layer, trigger, blend, enabled, raw), msg_address, OscConfig/OscLearnTarget
+- **Web**: parse_client_message (all types + edge cases), build_params (all ParamDef types), state builders
+- **Settings/Theme**: ThemeMode serde, display names, toggle, ThemeColors constructors (all 6 themes)
+- **NDI**: OutputResolution serde/display/dimensions, NdiConfig defaults/partial JSON
+
+**Not unit-tested** (requires hardware/runtime):
+- GPU rendering (wgpu Device/Queue, shader compilation, render passes, compositor)
+- UI panels (egui Context, draw calls, layout)
+- I/O threads (cpal audio capture, midir MIDI, UDP sockets, WebSocket server, NDI sender)
+- App orchestration (winit event loop, inter-thread coordination)
+- File I/O in config load/save (tested implicitly via serde roundtrips)
+
+```bash
+cargo test                         # run all tests (~241)
+cargo test --features ndi          # include NDI tests
+cargo tarpaulin --features ndi     # line coverage report
+```
+
 ### Reference Projects (for porting)
 - `~/ai/audio/spectral-senses/` — C++ audio analysis (12 features, EMA smoothing)
 - `~/ai/audio/spectral-senses-old/` — GLSL shader library (SDF, noise, palette, tonemap) + scene shaders

@@ -214,4 +214,32 @@ mod tests {
             assert_eq!(v, 0.0);
         }
     }
+
+    // ---- Additional tests ----
+
+    #[test]
+    fn pack_to_buffer_with_point2d() {
+        let defs = vec![
+            ParamDef::Float { name: "x".into(), default: 1.0, min: 0.0, max: 2.0 },
+            ParamDef::Point2D { name: "pos".into(), default: [0.3, 0.7], min: [0.0, 0.0], max: [1.0, 1.0] },
+        ];
+        let mut s = ParamStore::new();
+        s.load_from_defs(&defs);
+        let buf = s.pack_to_buffer();
+        assert!(approx_eq(buf[0], 1.0, 1e-6)); // x
+        assert!(approx_eq(buf[1], 0.3, 1e-6)); // pos.x
+        assert!(approx_eq(buf[2], 0.7, 1e-6)); // pos.y
+    }
+
+    #[test]
+    fn reset_unknown_name_is_noop() {
+        let mut s = ParamStore::new();
+        s.load_from_defs(&test_defs());
+        s.set("speed", ParamValue::Float(0.9));
+        s.reset("nonexistent"); // should not panic or change anything
+        match s.get("speed") {
+            Some(ParamValue::Float(v)) => assert!(approx_eq(*v, 0.9, 1e-6)), // unchanged
+            _ => panic!("expected Float"),
+        }
+    }
 }

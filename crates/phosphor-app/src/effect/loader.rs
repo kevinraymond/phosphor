@@ -224,6 +224,16 @@ impl EffectLoader {
         effect.author == "Phosphor"
     }
 
+    /// Create an EffectLoader with pre-supplied library source (for tests).
+    #[cfg(test)]
+    pub fn for_test(lib_source: &str) -> Self {
+        Self {
+            effects: Vec::new(),
+            current_effect: None,
+            lib_source: lib_source.to_string(),
+        }
+    }
+
     /// Delete a user effect: removes the .pfx and its .wgsl shader files, then rescans.
     pub fn delete_effect(&mut self, index: usize) -> Result<String> {
         let effect = self.effects.get(index)
@@ -367,5 +377,50 @@ impl EffectLoader {
         log::info!("Created effect copy: {} -> {}", effect.name, new_pfx_path.display());
 
         Ok((new_pfx_path, first_wgsl))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_effect(author: &str) -> PfxEffect {
+        serde_json::from_str(&format!(
+            r#"{{"name":"Test","author":"{}","shader":"test.wgsl"}}"#,
+            author
+        )).unwrap()
+    }
+
+    #[test]
+    fn is_builtin_true_for_phosphor_author() {
+        assert!(EffectLoader::is_builtin(&make_effect("Phosphor")));
+    }
+
+    #[test]
+    fn is_builtin_false_for_user_author() {
+        assert!(!EffectLoader::is_builtin(&make_effect("User")));
+        assert!(!EffectLoader::is_builtin(&make_effect("")));
+    }
+
+    #[test]
+    fn prepend_library_without_uniforms() {
+        let loader = EffectLoader::for_test("// lib code\n");
+        let source = "fn main() {}";
+        let result = loader.prepend_library(source);
+        // Should contain UNIFORM_BLOCK, lib, and source
+        assert!(result.contains("PhosphorUniforms"));
+        assert!(result.contains("// lib code"));
+        assert!(result.contains("fn main() {}"));
+    }
+
+    #[test]
+    fn prepend_library_with_existing_uniforms() {
+        let loader = EffectLoader::for_test("// lib code\n");
+        let source = "struct PhosphorUniforms { time: f32 }\nfn main() {}";
+        let result = loader.prepend_library(source);
+        // Should NOT double-prepend UNIFORM_BLOCK
+        let count = result.matches("PhosphorUniforms").count();
+        assert_eq!(count, 1); // only the one in source
+        assert!(result.contains("// lib code"));
     }
 }
