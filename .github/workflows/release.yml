@@ -21,19 +21,15 @@ jobs:
           - name: Linux
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            archive: tar.gz
           - name: macOS-arm64
             os: macos-latest
             target: aarch64-apple-darwin
-            archive: tar.gz
           - name: macOS-x86_64
             os: macos-latest
             target: x86_64-apple-darwin
-            archive: tar.gz
           - name: Windows
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            archive: zip
     steps:
       - uses: actions/checkout@v4
 
@@ -51,16 +47,12 @@ jobs:
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }} --features video
 
-      - name: Codesign and notarize (macOS)
+      - name: Codesign (macOS)
         if: runner.os == 'macOS'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # Import certificate into a temporary keychain
           KEYCHAIN="build.keychain"
           KEYCHAIN_PASSWORD="actions"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
@@ -71,22 +63,42 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           rm certificate.p12
 
-          # Sign the binary
           BINARY="target/${{ matrix.target }}/release/phosphor-app"
           codesign --force --options runtime --sign "Developer ID Application" "$BINARY" --timestamp
           codesign --verify --verbose "$BINARY"
 
-          # Notarize
-          ditto -c -k "$BINARY" phosphor-notarize.zip
-          xcrun notarytool submit phosphor-notarize.zip \
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          STAGING="phosphor-${TAG}-${{ matrix.target }}"
+          mkdir -p "$STAGING"
+          cp "target/${{ matrix.target }}/release/phosphor-app" "$STAGING/phosphor"
+          cp -r assets "$STAGING/assets"
+          [ -f README.md ] && cp README.md "$STAGING/"
+          [ -f LICENSE-MIT ] && cp LICENSE-MIT "$STAGING/"
+          [ -f LICENSE-APACHE ] && cp LICENSE-APACHE "$STAGING/"
+          [ -f LICENSE ] && cp LICENSE "$STAGING/"
+
+          # Package as .zip via ditto (preserves macOS metadata)
+          ditto -c -k --keepParent "$STAGING" "${STAGING}.zip"
+
+          # Notarize the zip, then staple
+          xcrun notarytool submit "${STAGING}.zip" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_ID_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
-          rm phosphor-notarize.zip
+          xcrun stapler staple "${STAGING}.zip"
 
-      - name: Package (Unix)
-        if: runner.os != 'Windows'
+          echo "ASSET=${STAGING}.zip" >> "$GITHUB_ENV"
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           STAGING="phosphor-${TAG}-${{ matrix.target }}"
@@ -156,7 +168,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           rm certificate.p12
 
-      - name: Create universal binary, sign, and notarize
+      - name: Create universal binary, sign, notarize, and staple
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
@@ -164,9 +176,9 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
 
-          # Extract both archives
-          cd artifacts/arm64 && tar xzf *.tar.gz && cd ../..
-          cd artifacts/x86_64 && tar xzf *.tar.gz && cd ../..
+          # Extract per-arch zips
+          cd artifacts/arm64 && unzip -o *.zip && cd ../..
+          cd artifacts/x86_64 && unzip -o *.zip && cd ../..
 
           # Find the extracted binaries
           ARM_BIN=$(find artifacts/arm64 -name phosphor -type f)
@@ -187,18 +199,16 @@ jobs:
           codesign --force --options runtime --sign "Developer ID Application" "$STAGING/phosphor" --timestamp
           codesign --verify --verbose "$STAGING/phosphor"
 
-          # Notarize: zip the binary, submit, wait, staple
-          ditto -c -k "$STAGING/phosphor" phosphor-notarize.zip
-          xcrun notarytool submit phosphor-notarize.zip \
+          # Package as .zip, notarize, staple
+          ditto -c -k --keepParent "$STAGING" "${STAGING}.zip"
+          xcrun notarytool submit "${STAGING}.zip" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_ID_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
-          rm phosphor-notarize.zip
+          xcrun stapler staple "${STAGING}.zip"
 
-          # Package final tarball
-          tar czf "${STAGING}.tar.gz" "$STAGING"
-          echo "ASSET=${STAGING}.tar.gz" >> "$GITHUB_ENV"
+          echo "ASSET=${STAGING}.zip" >> "$GITHUB_ENV"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
