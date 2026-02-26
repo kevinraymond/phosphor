@@ -4,6 +4,14 @@
 
 **Cross-platform real-time particle and shader engine for live performance. Welcome to the light.**
 
+| | |
+|---|---|
+| **Rendering** | Native GPU app (Vulkan/Metal via wgpu) · Shader hot-reload (edit WGSL live) |
+| **Audio** | BPM detection (FFT autocorrelation + Kalman filter) · 7-band spectral analysis · Beat sync |
+| **Compositing** | 8-layer stack · 7 blend modes · GPU compute particles · Media/video layers (GIF/PNG/MP4) |
+| **Control** | MIDI input with learn + auto-connect · OSC in/out with learn · Web touch surface (phone/tablet) |
+| **Output** | NDI (`--features ndi`, runtime-loaded) · Preset save/load (full layer stack) |
+
 ## Note from Dev
 
 Thanks for checking this project out! I've gone through a couple experimental projects recently - [EASE](https://github.com/kevinraymond/ease) and [EASEy-GLYPH](https://github.com/kevinraymond/easey-glyph) - and with Phosphor I'm trying to put it all together.
