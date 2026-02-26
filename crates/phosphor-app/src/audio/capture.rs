@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -77,6 +77,7 @@ pub struct AudioCapture {
     pub ring: Arc<RingBuffer>,
     pub sample_rate: u32,
     pub device_name: String,
+    pub callback_count: Arc<AtomicU64>,
 }
 
 impl AudioCapture {
@@ -119,10 +120,16 @@ impl AudioCapture {
 
         let ring = Arc::new(RingBuffer::new());
         let ring_clone = ring.clone();
+        let callback_count = Arc::new(AtomicU64::new(0));
+        let callback_count_clone = callback_count.clone();
 
         let stream = device.build_input_stream(
             &config.into(),
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                let count = callback_count_clone.fetch_add(1, Ordering::Relaxed);
+                if count == 0 {
+                    log::info!("Audio callback fired (first data: {} samples)", data.len());
+                }
                 // Downmix to mono
                 if channels == 1 {
                     ring_clone.push(data);
@@ -148,7 +155,12 @@ impl AudioCapture {
             ring,
             sample_rate,
             device_name,
+            callback_count,
         })
+    }
+
+    pub fn callback_count(&self) -> u64 {
+        self.callback_count.load(Ordering::Relaxed)
     }
 
     pub fn list_devices() -> Vec<String> {

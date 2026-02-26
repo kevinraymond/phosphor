@@ -1,6 +1,6 @@
 [package]
 name = "phosphor-app"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
@@ -15,7 +15,7 @@ egui = "0.33"
 egui-wgpu = "0.33"
 egui-winit = "0.33"
 # Audio
-cpal = "0.17"
+cpal = "0.17.3"
 # FFT
 rustfft = "6"
 # File watching
