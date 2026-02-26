@@ -23,7 +23,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
+use winit::window::{Fullscreen, Icon, Window, WindowAttributes, WindowId};
 
 use app::App;
 use gpu::layer::BlendMode;
@@ -50,9 +50,12 @@ impl ApplicationHandler for PhosphorApp {
             return;
         }
 
-        let attrs = WindowAttributes::default()
+        let mut attrs = WindowAttributes::default()
             .with_title("Phosphor")
             .with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
+        if let Some(icon) = load_window_icon() {
+            attrs = attrs.with_window_icon(Some(icon));
+        }
 
         let window = Arc::new(event_loop.create_window(attrs).expect("Failed to create window"));
 
@@ -818,6 +821,13 @@ impl ApplicationHandler for PhosphorApp {
             _ => {}
         }
     }
+}
+
+fn load_window_icon() -> Option<Icon> {
+    let png_bytes = include_bytes!("../../../assets/icon/icon_256x256.png");
+    let img = image::load_from_memory(png_bytes).ok()?.into_rgba8();
+    let (w, h) = img.dimensions();
+    Icon::from_rgba(img.into_raw(), w, h).ok()
 }
 
 fn main() -> Result<()> {
