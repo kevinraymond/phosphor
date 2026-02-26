@@ -91,7 +91,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     if ru.render_mode == 0u {
         // Mode 0: Soft circle glow (original behavior)
         let dist = length(in.quad_uv);
-        let glow = exp(-dist * dist * 3.0);
+        let glow = exp(-dist * dist * 2.0);
         if glow < 0.01 {
             discard;
         }
