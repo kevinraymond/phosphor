@@ -156,6 +156,7 @@ impl AudioCapture {
         host.input_devices()
             .map(|devices| {
                 devices
+                    .filter(|d| d.default_input_config().is_ok())
                     .filter_map(|d| d.description().ok().map(|desc| desc.name().to_string()))
                     .collect()
             })
