@@ -42,3 +42,51 @@ impl EmitterDef {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shape_index_values() {
+        let cases = [
+            ("point", 0),
+            ("ring", 1),
+            ("line", 2),
+            ("screen", 3),
+            ("image", 4),
+            ("unknown", 0),
+        ];
+        for (shape, expected) in cases {
+            let e = EmitterDef {
+                shape: shape.to_string(),
+                ..Default::default()
+            };
+            assert_eq!(e.shape_index(), expected, "shape={shape}");
+        }
+    }
+
+    #[test]
+    fn emitter_def_defaults() {
+        let e = EmitterDef::default();
+        assert_eq!(e.shape, "point");
+        assert_eq!(e.radius, 0.0);
+        assert_eq!(e.position, [0.0, 0.0]);
+        assert!(e.image.is_empty());
+    }
+
+    #[test]
+    fn emitter_def_serde_roundtrip() {
+        let e = EmitterDef {
+            shape: "ring".into(),
+            radius: 0.5,
+            position: [0.1, 0.2],
+            image: "test.png".into(),
+        };
+        let json = serde_json::to_string(&e).unwrap();
+        let e2: EmitterDef = serde_json::from_str(&json).unwrap();
+        assert_eq!(e2.shape, "ring");
+        assert!((e2.radius - 0.5).abs() < 1e-6);
+        assert_eq!(e2.image, "test.png");
+    }
+}

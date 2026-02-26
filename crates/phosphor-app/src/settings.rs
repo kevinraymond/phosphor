@@ -44,3 +44,34 @@ impl SettingsConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_config_defaults() {
+        let c = SettingsConfig::default();
+        assert_eq!(c.version, 1);
+        assert_eq!(c.theme, ThemeMode::Dark);
+        assert!(c.audio_device.is_none());
+    }
+
+    #[test]
+    fn settings_config_serde_roundtrip() {
+        let c = SettingsConfig::default();
+        let json = serde_json::to_string(&c).unwrap();
+        let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(c2.version, 1);
+        assert_eq!(c2.theme, ThemeMode::Dark);
+    }
+
+    #[test]
+    fn settings_config_with_audio_device() {
+        let mut c = SettingsConfig::default();
+        c.audio_device = Some("hw:0".to_string());
+        let json = serde_json::to_string(&c).unwrap();
+        let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(c2.audio_device, Some("hw:0".to_string()));
+    }
+}

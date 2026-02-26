@@ -51,3 +51,46 @@ impl Default for AudioFeatures {
         bytemuck::Zeroable::zeroed()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_is_zeroed() {
+        let f = AudioFeatures::default();
+        let s = f.as_slice();
+        assert_eq!(s.len(), NUM_FEATURES);
+        for &v in s.iter() {
+            assert_eq!(v, 0.0);
+        }
+    }
+
+    #[test]
+    fn as_slice_len() {
+        let f = AudioFeatures::default();
+        assert_eq!(f.as_slice().len(), 20);
+    }
+
+    #[test]
+    fn as_slice_mut_write_through() {
+        let mut f = AudioFeatures::default();
+        f.as_slice_mut()[0] = 0.42;
+        assert!((f.sub_bass - 0.42).abs() < 1e-6);
+    }
+
+    #[test]
+    fn field_order_first_and_last() {
+        let mut f = AudioFeatures::default();
+        f.sub_bass = 0.11;
+        f.beat_strength = 0.99;
+        let s = f.as_slice();
+        assert!((s[0] - 0.11).abs() < 1e-6);
+        assert!((s[19] - 0.99).abs() < 1e-6);
+    }
+
+    #[test]
+    fn size_is_80_bytes() {
+        assert_eq!(std::mem::size_of::<AudioFeatures>(), 80);
+    }
+}

@@ -115,3 +115,45 @@ impl NdiConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn output_resolution_match_passes_through() {
+        assert_eq!(OutputResolution::Match.dimensions(800, 600), (800, 600));
+        assert_eq!(OutputResolution::Match.dimensions(1920, 1080), (1920, 1080));
+    }
+
+    #[test]
+    fn output_resolution_fixed() {
+        assert_eq!(OutputResolution::Res720p.dimensions(800, 600), (1280, 720));
+        assert_eq!(OutputResolution::Res1080p.dimensions(800, 600), (1920, 1080));
+        assert_eq!(OutputResolution::Res4K.dimensions(800, 600), (3840, 2160));
+    }
+
+    #[test]
+    fn output_resolution_display_names() {
+        for r in OutputResolution::ALL {
+            assert!(!r.display_name().is_empty());
+        }
+    }
+
+    #[test]
+    fn ndi_config_defaults() {
+        let c = NdiConfig::default();
+        assert!(!c.enabled);
+        assert_eq!(c.source_name, "Phosphor");
+        assert_eq!(c.resolution, OutputResolution::Match);
+    }
+
+    #[test]
+    fn ndi_config_serde_roundtrip() {
+        let c = NdiConfig::default();
+        let json = serde_json::to_string(&c).unwrap();
+        let c2: NdiConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(c2.source_name, "Phosphor");
+        assert!(!c2.enabled);
+    }
+}

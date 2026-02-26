@@ -162,3 +162,148 @@ fn parse_client_message(text: &str) -> Option<WsInMessage> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_set_param() {
+        let json = r#"{"type":"set_param","name":"speed","value":0.75}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::SetParam { name, value }) => {
+                assert_eq!(name, "speed");
+                assert!((value - 0.75).abs() < 1e-6);
+            }
+            other => panic!("expected SetParam, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_set_layer_param() {
+        let json = r#"{"type":"set_layer_param","layer":1,"name":"intensity","value":0.5}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::SetLayerParam { layer, name, value }) => {
+                assert_eq!(layer, 1);
+                assert_eq!(name, "intensity");
+                assert!((value - 0.5).abs() < 1e-6);
+            }
+            other => panic!("expected SetLayerParam, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_load_effect() {
+        let json = r#"{"type":"load_effect","index":3}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::LoadEffect { index }) => assert_eq!(index, 3),
+            other => panic!("expected LoadEffect, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_select_layer() {
+        let json = r#"{"type":"select_layer","index":2}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::SelectLayer { index }) => assert_eq!(index, 2),
+            other => panic!("expected SelectLayer, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_set_layer_opacity_clamped() {
+        let json = r#"{"type":"set_layer_opacity","layer":0,"value":1.5}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::SetLayerOpacity { layer, value }) => {
+                assert_eq!(layer, 0);
+                assert!((value - 1.0).abs() < 1e-6); // clamped
+            }
+            other => panic!("expected SetLayerOpacity, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_set_layer_blend() {
+        let json = r#"{"type":"set_layer_blend","layer":1,"value":3}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::SetLayerBlend { layer, value }) => {
+                assert_eq!(layer, 1);
+                assert_eq!(value, 3);
+            }
+            other => panic!("expected SetLayerBlend, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_set_layer_enabled_bool() {
+        let json = r#"{"type":"set_layer_enabled","layer":0,"value":true}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::SetLayerEnabled { layer, value }) => {
+                assert_eq!(layer, 0);
+                assert!(value);
+            }
+            other => panic!("expected SetLayerEnabled, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_set_layer_enabled_float() {
+        let json = r#"{"type":"set_layer_enabled","layer":0,"value":0.3}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::SetLayerEnabled { layer, value }) => {
+                assert_eq!(layer, 0);
+                assert!(!value); // 0.3 <= 0.5
+            }
+            other => panic!("expected SetLayerEnabled, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_trigger() {
+        for (action_str, expected) in [
+            ("next_effect", TriggerAction::NextEffect),
+            ("prev_effect", TriggerAction::PrevEffect),
+            ("toggle_postprocess", TriggerAction::TogglePostProcess),
+            ("toggle_overlay", TriggerAction::ToggleOverlay),
+            ("next_preset", TriggerAction::NextPreset),
+            ("prev_preset", TriggerAction::PrevPreset),
+            ("next_layer", TriggerAction::NextLayer),
+            ("prev_layer", TriggerAction::PrevLayer),
+        ] {
+            let json = format!(r#"{{"type":"trigger","action":"{action_str}"}}"#);
+            match parse_client_message(&json) {
+                Some(WsInMessage::Trigger(action)) => assert_eq!(action, expected),
+                other => panic!("expected Trigger({:?}), got {:?}", expected, other),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_load_preset() {
+        let json = r#"{"type":"load_preset","index":5}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::LoadPreset { index }) => assert_eq!(index, 5),
+            other => panic!("expected LoadPreset, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_postprocess_enabled() {
+        let json = r#"{"type":"set_postprocess_enabled","value":true}"#;
+        match parse_client_message(json) {
+            Some(WsInMessage::PostProcessEnabled(v)) => assert!(v),
+            other => panic!("expected PostProcessEnabled, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_unknown_type_returns_none() {
+        let json = r#"{"type":"invalid_type"}"#;
+        assert!(parse_client_message(json).is_none());
+    }
+
+    #[test]
+    fn parse_invalid_json_returns_none() {
+        assert!(parse_client_message("not json").is_none());
+    }
+}

@@ -104,3 +104,41 @@ fn high_contrast_visuals() -> Visuals {
 
     v
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn theme_mode_all_count() {
+        assert_eq!(ThemeMode::ALL.len(), 6);
+    }
+
+    #[test]
+    fn theme_mode_display_names() {
+        for mode in ThemeMode::ALL {
+            assert!(!mode.display_name().is_empty());
+        }
+    }
+
+    #[test]
+    fn theme_mode_toggle() {
+        assert_eq!(ThemeMode::Dark.toggle(), ThemeMode::Light);
+        assert_eq!(ThemeMode::Light.toggle(), ThemeMode::Dark);
+        assert_eq!(ThemeMode::HighContrast.toggle(), ThemeMode::Dark);
+    }
+
+    #[test]
+    fn theme_mode_default() {
+        assert_eq!(ThemeMode::default(), ThemeMode::Dark);
+    }
+
+    #[test]
+    fn theme_mode_serde_roundtrip() {
+        for mode in ThemeMode::ALL {
+            let json = serde_json::to_string(mode).unwrap();
+            let m2: ThemeMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(*mode, m2);
+        }
+    }
+}

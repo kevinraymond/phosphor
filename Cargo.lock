@@ -1099,6 +1099,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_code_editor"
+version = "0.2.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39a1b847b0ff5a3bac4e8604eca605808970bbcdaba76b3101db1051e4206dc6"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "emath"
 version = "0.33.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2757,6 +2766,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
+ "egui_code_editor",
  "env_logger",
  "gif 0.13.3",
  "glam",
@@ -2773,6 +2783,7 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tungstenite",
  "wgpu",

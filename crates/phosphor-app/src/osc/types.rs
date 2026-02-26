@@ -151,3 +151,48 @@ impl OscConfig {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn osc_config_defaults() {
+        let c = OscConfig::default();
+        assert_eq!(c.rx_port, 9000);
+        assert_eq!(c.tx_port, 9001);
+        assert!(!c.tx_enabled);
+        assert!(c.enabled);
+        assert_eq!(c.tx_rate_hz, 30);
+    }
+
+    #[test]
+    fn osc_config_serde_roundtrip() {
+        let c = OscConfig::default();
+        let json = serde_json::to_string(&c).unwrap();
+        let c2: OscConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(c2.rx_port, 9000);
+        assert_eq!(c2.tx_port, 9001);
+    }
+
+    #[test]
+    fn find_param_existing() {
+        let mut c = OscConfig::default();
+        c.params.insert("speed".into(), OscMapping { address: "/custom/speed".into() });
+        assert_eq!(c.find_param("/custom/speed"), Some("speed"));
+    }
+
+    #[test]
+    fn find_param_missing() {
+        let c = OscConfig::default();
+        assert_eq!(c.find_param("/nonexistent"), None);
+    }
+
+    #[test]
+    fn find_trigger() {
+        let mut c = OscConfig::default();
+        c.triggers.insert(TriggerAction::NextEffect, OscMapping { address: "/pad/1".into() });
+        assert_eq!(c.find_trigger("/pad/1"), Some(TriggerAction::NextEffect));
+        assert_eq!(c.find_trigger("/pad/2"), None);
+    }
+}

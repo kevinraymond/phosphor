@@ -196,3 +196,38 @@ fn default_drag() -> f32 {
 fn default_emit_rate() -> f32 {
     100.0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn particle_size_64() {
+        assert_eq!(std::mem::size_of::<Particle>(), 64);
+    }
+
+    #[test]
+    fn particle_uniforms_size_128() {
+        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 128);
+    }
+
+    #[test]
+    fn particle_render_uniforms_size_32() {
+        assert_eq!(std::mem::size_of::<ParticleRenderUniforms>(), 32);
+    }
+
+    #[test]
+    fn particle_def_serde_defaults() {
+        let json = r#"{"emitter":{}}"#;
+        let def: ParticleDef = serde_json::from_str(json).unwrap();
+        assert_eq!(def.max_count, 10000);
+        assert!((def.lifetime - 3.0).abs() < 1e-6);
+        assert!((def.initial_speed - 0.3).abs() < 1e-6);
+        assert!((def.initial_size - 0.02).abs() < 1e-6);
+        assert!((def.drag - 0.98).abs() < 1e-6);
+        assert!((def.emit_rate - 100.0).abs() < 1e-6);
+        assert_eq!(def.blend, "additive");
+        assert!(def.sprite.is_none());
+        assert!(def.image_sample.is_none());
+    }
+}

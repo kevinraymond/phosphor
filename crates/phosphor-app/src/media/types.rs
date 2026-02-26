@@ -38,3 +38,37 @@ impl Default for TransportState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transport_state_defaults() {
+        let t = TransportState::default();
+        assert!(t.playing);
+        assert!(t.looping);
+        assert!((t.speed - 1.0).abs() < 1e-6);
+        assert_eq!(t.direction, PlayDirection::Forward);
+        assert!((t.position - 0.0).abs() < 1e-10);
+        assert!((t.duration - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn play_direction_equality() {
+        assert_eq!(PlayDirection::Forward, PlayDirection::Forward);
+        assert_ne!(PlayDirection::Forward, PlayDirection::Reverse);
+        assert_ne!(PlayDirection::Reverse, PlayDirection::PingPong);
+    }
+
+    #[test]
+    fn decoded_frame_constructable() {
+        let frame = DecodedFrame {
+            data: vec![255, 0, 0, 255],
+            width: 1,
+            height: 1,
+        };
+        assert_eq!(frame.data.len(), 4);
+        assert_eq!(frame.width, 1);
+    }
+}
