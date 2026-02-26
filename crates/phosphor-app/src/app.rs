@@ -222,13 +222,13 @@ impl App {
         );
 
         let shader_watcher = ShaderWatcher::new()?;
-        let audio = AudioSystem::new();
+        let settings = SettingsConfig::load();
+        let audio = AudioSystem::new_with_device(settings.audio_device.as_deref());
         let midi = MidiSystem::new();
         let osc = OscSystem::new();
         let web = WebSystem::new();
         let mut preset_store = PresetStore::new();
         preset_store.scan();
-        let settings = SettingsConfig::load();
         let egui_overlay = EguiOverlay::new(&gpu.device, gpu.format, &window, settings.theme);
         #[cfg(feature = "ndi")]
         let ndi = crate::ndi::NdiSystem::new(

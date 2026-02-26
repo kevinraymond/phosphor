@@ -6,6 +6,8 @@ use crate::ui::theme::ThemeMode;
 pub struct SettingsConfig {
     pub version: u32,
     pub theme: ThemeMode,
+    #[serde(default)]
+    pub audio_device: Option<String>,
 }
 
 impl Default for SettingsConfig {
@@ -13,6 +15,7 @@ impl Default for SettingsConfig {
         Self {
             version: 1,
             theme: ThemeMode::Dark,
+            audio_device: None,
         }
     }
 }

@@ -258,6 +258,17 @@ impl ApplicationHandler for PhosphorApp {
                     app.settings.save();
                 }
 
+                // Handle audio device switch from UI
+                let switch_audio: Option<String> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("switch_audio_device"))
+                });
+                if let Some(device_str) = switch_audio {
+                    let device_name = if device_str.is_empty() { None } else { Some(device_str.as_str()) };
+                    app.audio.switch_device(device_name);
+                    app.settings.audio_device = if device_str.is_empty() { None } else { Some(device_str) };
+                    app.settings.save();
+                }
+
                 // Handle NDI signals from UI
                 #[cfg(feature = "ndi")]
                 {

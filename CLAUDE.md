@@ -18,6 +18,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 **Advanced Particles: COMPLETE** — sprite atlas textures, dual blend pipelines, image decomposition with spring-reform compute shader
 **Video Playback: COMPLETE** — feature-gated ffmpeg pre-decode to RAM, instant scrub, 60s max
 **NDI Output: COMPLETE** — feature-gated runtime-loaded NDI SDK, GPU capture with double-buffered staging, sender thread, UI panel
+**Per-Effect Alpha: COMPLETE** — effects write meaningful alpha, preserved through post-processing, delivered to NDI for downstream compositing
 
 ### What's Built
 
@@ -205,6 +206,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Never multiply `time * audio_varying_value` for position/speed — causes oscillation. Use constant speed, apply audio to other properties.
 - Smooth Worley noise: use log-sum-exp (`-log(sum(exp(-k*d²)))/k`) not `min()` — standard min creates hard gradient discontinuities at cell boundaries. Clamp with `max(0.0, ...)` before `sqrt()` to prevent NaN at cell centers where sum > 1.
 - Beer-Lambert light march: 4-step march toward light direction, `transmittance *= exp(-density * extinction * step)`. Use fewer FBM octaves (LOD) in march steps for performance.
+- **Alpha for compositing**: effects that have empty space should write `alpha < 1.0`. Use `brightness_alpha` pattern: `clamp(max(r, max(g, b)) * 2.0, 0.0, 1.0)`. For feedback effects, track alpha decay alongside RGB: `result_alpha = max(new_alpha, prev.a * decay)`. Full-screen effects (aurora, drift, storm, shards, prism) keep `alpha = 1.0`.
 
 ### Known Issues
 - ~33 compiler warnings (mostly unused items reserved for future phases)
@@ -283,7 +285,7 @@ egui Overlay → Surface
 - Video pre-decode: ffmpeg decodes all frames to `MediaSource::Animated` (same as GIF). Instant random access, no streaming complexity. RAM cost acceptable for VJ clips (≤60s). `from_video` flag on `Animated` variant (cfg-gated) controls UI differences (seek slider vs frame counter).
 - All ffmpeg/ffprobe subprocess spawns use `.stdin(Stdio::null())` to prevent terminal corruption (ffmpeg inherits stdin and can switch to raw mode).
 - NDI output uses runtime dynamic loading (`libloading`) instead of build-time SDK binding. No `grafton-ndi` dep needed — raw FFI with `NDIlib_*` symbols loaded from libndi.so at runtime. `ndi_available()` cached via `OnceLock`.
-- NDI capture reuses existing `PostProcessChain` composite pipeline via `render_composite_to()`. Capture texture uses same format as surface (typically `Bgra8UnormSrgb`) so readback data is BGRA — matches NDI's `NDIlib_FourCC_type_BGRA` natively.
+- NDI capture reuses existing `PostProcessChain` composite pipeline via `render_composite_to()`. Capture texture uses same format as surface (typically `Bgra8UnormSrgb`) so readback data is BGRA — matches NDI's `NDIlib_FourCC_type_BGRA` natively. Alpha is preserved end-to-end: effects → compositor → post-processing → NDI output.
 - NDI staging buffers use `align_to(width*4, COPY_BYTES_PER_ROW_ALIGNMENT)` for wgpu row padding, stripped on readback.
 - NDI frame channel is bounded(2) with `try_send` — drops frames if sender thread is behind (VJ performance > NDI latency).
 - NDI state passes through egui temp data (NdiInfo snapshot struct) to avoid `&mut NdiSystem` in `draw_panels` signature (feature-gated types can't be conditional function params).
