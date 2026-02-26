@@ -239,105 +239,110 @@ impl PostProcessChain {
         queue.write_buffer(&self.blur_h_params_buffer, 0, bytemuck::bytes_of(&blur_h_params));
         queue.write_buffer(&self.blur_v_params_buffer, 0, bytemuck::bytes_of(&blur_v_params));
 
+        let bloom_active = overrides.bloom_enabled;
+
         let post_params = PostParams {
-            bloom_intensity: overrides.bloom_intensity,
-            ca_intensity: onset * 0.015,
-            vignette_strength: overrides.vignette,
-            grain_intensity: flatness * 0.04,
+            bloom_intensity: if bloom_active { overrides.bloom_intensity } else { 0.0 },
+            ca_intensity: if overrides.ca_enabled { onset * overrides.ca_intensity * 0.03 } else { 0.0 },
+            vignette_strength: if overrides.vignette_enabled { overrides.vignette } else { 0.0 },
+            grain_intensity: if overrides.grain_enabled { flatness * overrides.grain_intensity * 0.08 } else { 0.0 },
             time,
             rms,
             _pad: [0.0; 2],
         };
         queue.write_buffer(&self.post_params_buffer, 0, bytemuck::bytes_of(&post_params));
 
-        // --- Pass 1: Bloom Extract (HDR scene → quarter-res bright pixels) ---
-        {
-            let bg = device.create_bind_group(&BindGroupDescriptor {
-                label: Some("bloom-extract-bg"),
-                layout: &self.extract_bgl,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&source.view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::Sampler(&source.sampler),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: self.bloom_params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-            run_fullscreen_pass(
-                encoder,
-                "bloom-extract",
-                &self.extract_pipeline,
-                &bg,
-                &self.bloom_extract_target.view,
-            );
+        // --- Bloom passes (skip all 3 when bloom disabled) ---
+        if bloom_active {
+            // Pass 1: Bloom Extract (HDR scene → quarter-res bright pixels)
+            {
+                let bg = device.create_bind_group(&BindGroupDescriptor {
+                    label: Some("bloom-extract-bg"),
+                    layout: &self.extract_bgl,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: BindingResource::TextureView(&source.view),
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: BindingResource::Sampler(&source.sampler),
+                        },
+                        BindGroupEntry {
+                            binding: 2,
+                            resource: self.bloom_params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+                run_fullscreen_pass(
+                    encoder,
+                    "bloom-extract",
+                    &self.extract_pipeline,
+                    &bg,
+                    &self.bloom_extract_target.view,
+                );
+            }
+
+            // Pass 2: Horizontal blur
+            {
+                let bg = device.create_bind_group(&BindGroupDescriptor {
+                    label: Some("bloom-blur-h-bg"),
+                    layout: &self.blur_bgl,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: BindingResource::TextureView(&self.bloom_extract_target.view),
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: BindingResource::Sampler(&self.bloom_extract_target.sampler),
+                        },
+                        BindGroupEntry {
+                            binding: 2,
+                            resource: self.blur_h_params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+                run_fullscreen_pass(
+                    encoder,
+                    "bloom-blur-h",
+                    &self.blur_pipeline,
+                    &bg,
+                    &self.bloom_blur_h_target.view,
+                );
+            }
+
+            // Pass 3: Vertical blur
+            {
+                let bg = device.create_bind_group(&BindGroupDescriptor {
+                    label: Some("bloom-blur-v-bg"),
+                    layout: &self.blur_bgl,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: BindingResource::TextureView(&self.bloom_blur_h_target.view),
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: BindingResource::Sampler(&self.bloom_blur_h_target.sampler),
+                        },
+                        BindGroupEntry {
+                            binding: 2,
+                            resource: self.blur_v_params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+                run_fullscreen_pass(
+                    encoder,
+                    "bloom-blur-v",
+                    &self.blur_pipeline,
+                    &bg,
+                    &self.bloom_blur_v_target.view,
+                );
+            }
         }
 
-        // --- Pass 2: Horizontal blur ---
-        {
-            let bg = device.create_bind_group(&BindGroupDescriptor {
-                label: Some("bloom-blur-h-bg"),
-                layout: &self.blur_bgl,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&self.bloom_extract_target.view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::Sampler(&self.bloom_extract_target.sampler),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: self.blur_h_params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-            run_fullscreen_pass(
-                encoder,
-                "bloom-blur-h",
-                &self.blur_pipeline,
-                &bg,
-                &self.bloom_blur_h_target.view,
-            );
-        }
-
-        // --- Pass 3: Vertical blur ---
-        {
-            let bg = device.create_bind_group(&BindGroupDescriptor {
-                label: Some("bloom-blur-v-bg"),
-                layout: &self.blur_bgl,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&self.bloom_blur_h_target.view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::Sampler(&self.bloom_blur_h_target.sampler),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: self.blur_v_params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-            run_fullscreen_pass(
-                encoder,
-                "bloom-blur-v",
-                &self.blur_pipeline,
-                &bg,
-                &self.bloom_blur_v_target.view,
-            );
-        }
-
-        // --- Pass 4: Composite (scene + blurred bloom → surface) ---
+        // --- Composite pass (scene + blurred bloom → surface) ---
         {
             let bg = device.create_bind_group(&BindGroupDescriptor {
                 label: Some("post-composite-bg"),
