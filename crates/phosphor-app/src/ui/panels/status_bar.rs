@@ -1,6 +1,7 @@
 use egui::{Color32, RichText, Ui, Vec2};
 
 use crate::gpu::ShaderUniforms;
+use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
 const DIM: Color32 = Color32::from_rgb(0x55, 0x55, 0x55);
@@ -49,6 +50,8 @@ pub fn draw_status_bar(
     web_client_count: usize,
     status_error: &Option<(String, std::time::Instant)>,
 ) {
+    let tc = theme_colors(ui.ctx());
+
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
 
@@ -57,13 +60,13 @@ pub fn draw_status_bar(
             let elapsed = when.elapsed().as_secs_f64();
             if elapsed < ERROR_DISPLAY_SECS {
                 ui.add_space(4.0);
-                ui.colored_label(DARK_ERROR, RichText::new(msg).size(SMALL_SIZE));
+                ui.colored_label(tc.error, RichText::new(msg).size(SMALL_SIZE));
             }
         }
         // Shader errors
         else if let Some(err) = shader_error {
             ui.add_space(4.0);
-            ui.colored_label(DARK_ERROR, RichText::new(format!("ERR: {err}")).size(SMALL_SIZE));
+            ui.colored_label(tc.error, RichText::new(format!("ERR: {err}")).size(SMALL_SIZE));
         }
 
         // Push right-side items
@@ -82,7 +85,7 @@ pub fn draw_status_bar(
             let smoothed = prev + alpha * (fps_raw - prev);
             ui.ctx().data_mut(|d| d.insert_temp(fps_id, smoothed));
             let fps = smoothed as u32;
-            fixed_value(ui, &format!("{fps}"), 24.0, DARK_TEXT_SECONDARY);
+            fixed_value(ui, &format!("{fps}"), 24.0, tc.text_secondary);
             label(ui, "FPS");
 
             ui.add_space(6.0);
@@ -96,14 +99,14 @@ pub fn draw_status_bar(
 
             // OSC
             if osc_enabled {
-                dot(ui, osc_recently_active, DARK_SUCCESS);
+                dot(ui, osc_recently_active, tc.success);
                 label(ui, "OSC");
                 ui.add_space(6.0);
             }
 
             // MIDI
             if midi_active {
-                dot(ui, midi_recently_active, DARK_SUCCESS);
+                dot(ui, midi_recently_active, tc.success);
                 label(ui, "MIDI");
                 ui.add_space(6.0);
             }
@@ -123,10 +126,10 @@ pub fn draw_status_bar(
             let bpm = uniforms.bpm * 300.0;
             if bpm > 1.0 {
                 let beat_on = uniforms.beat > 0.5;
-                let bpm_color = if beat_on { BEAT_COLOR } else { DARK_TEXT_PRIMARY };
+                let bpm_color = if beat_on { tc.beat_color } else { tc.text_primary };
                 // Fixed 3-char width for BPM value (prevents jitter on 2→3 digit changes)
                 fixed_value(ui, &format!("{:.0}", bpm), 24.0, bpm_color);
-                dot(ui, beat_on, BEAT_COLOR);
+                dot(ui, beat_on, tc.beat_color);
                 label(ui, "BPM");
             }
         });

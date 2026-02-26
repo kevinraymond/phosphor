@@ -5,6 +5,7 @@ use crate::midi::MidiSystem;
 use crate::osc::OscSystem;
 use crate::params::{ParamDef, ParamStore, ParamValue};
 use crate::ui::panels::osc_panel;
+use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
 const MIDI_BLUE: Color32 = Color32::from_rgb(0x60, 0xA0, 0xE0);
@@ -68,8 +69,10 @@ fn fmt_val(v: f32) -> String {
 }
 
 pub fn draw_param_panel(ui: &mut Ui, store: &mut ParamStore, midi: &mut MidiSystem, osc: &mut OscSystem) {
+    let tc = theme_colors(ui.ctx());
+
     if store.defs.is_empty() {
-        ui.label(RichText::new("No parameters").size(SMALL_SIZE).color(DARK_TEXT_SECONDARY));
+        ui.label(RichText::new("No parameters").size(SMALL_SIZE).color(tc.text_secondary));
         return;
     }
 
@@ -98,7 +101,7 @@ pub fn draw_param_panel(ui: &mut Ui, store: &mut ParamStore, midi: &mut MidiSyst
                         ui.label(
                             RichText::new(fmt_val(val))
                                 .size(SMALL_SIZE)
-                                .color(DARK_TEXT_SECONDARY),
+                                .color(tc.text_secondary),
                         );
                     });
                 });
@@ -109,7 +112,7 @@ pub fn draw_param_panel(ui: &mut Ui, store: &mut ParamStore, midi: &mut MidiSyst
                     ui.label(
                         RichText::new(fmt_val(*min))
                             .size(MONO_SIZE)
-                            .color(DARK_TEXT_SECONDARY),
+                            .color(tc.text_secondary),
                     );
                     let slider = egui::Slider::new(&mut val, *min..=*max)
                         .clamping(egui::SliderClamping::Always)
@@ -118,7 +121,7 @@ pub fn draw_param_panel(ui: &mut Ui, store: &mut ParamStore, midi: &mut MidiSyst
                     ui.label(
                         RichText::new(fmt_val(*max))
                             .size(MONO_SIZE)
-                            .color(DARK_TEXT_SECONDARY),
+                            .color(tc.text_secondary),
                     );
                 });
 
@@ -180,18 +183,18 @@ pub fn draw_param_panel(ui: &mut Ui, store: &mut ParamStore, midi: &mut MidiSyst
                         ui.label(
                             RichText::new(format!("{}, {}", fmt_val(val[0]), fmt_val(val[1])))
                                 .size(SMALL_SIZE)
-                                .color(DARK_TEXT_SECONDARY),
+                                .color(tc.text_secondary),
                         );
                     });
                 });
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    ui.label(RichText::new("X").size(MONO_SIZE).color(DARK_TEXT_SECONDARY));
+                    ui.label(RichText::new("X").size(MONO_SIZE).color(tc.text_secondary));
                     ui.add(egui::Slider::new(&mut val[0], min[0]..=max[0]).show_value(false));
                 });
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    ui.label(RichText::new("Y").size(MONO_SIZE).color(DARK_TEXT_SECONDARY));
+                    ui.label(RichText::new("Y").size(MONO_SIZE).color(tc.text_secondary));
                     ui.add(egui::Slider::new(&mut val[1], min[1]..=max[1]).show_value(false));
                 });
 

@@ -1,6 +1,7 @@
 use egui::{RichText, Ui};
 
 use crate::media::types::PlayDirection;
+use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
 /// Info about the active media layer, collected before UI borrow.
@@ -21,16 +22,18 @@ pub struct MediaInfo {
 }
 
 pub fn draw_media_panel(ui: &mut Ui, info: &MediaInfo) {
+    let tc = theme_colors(ui.ctx());
+
     // File info
     ui.label(
         RichText::new(&info.file_name)
             .size(BODY_SIZE)
-            .color(DARK_TEXT_PRIMARY),
+            .color(tc.text_primary),
     );
     ui.label(
         RichText::new(format!("{}x{}", info.media_width, info.media_height))
             .size(SMALL_SIZE)
-            .color(DARK_TEXT_SECONDARY),
+            .color(tc.text_secondary),
     );
 
     if info.is_video {
@@ -47,7 +50,7 @@ pub fn draw_media_panel(ui: &mut Ui, info: &MediaInfo) {
                 format_time(info.video_duration_secs),
             ))
             .size(SMALL_SIZE)
-            .color(DARK_TEXT_SECONDARY),
+            .color(tc.text_secondary),
         );
 
         ui.add_space(4.0);
@@ -78,7 +81,7 @@ pub fn draw_media_panel(ui: &mut Ui, info: &MediaInfo) {
                 ui.label(
                     RichText::new("Seek")
                         .size(SMALL_SIZE)
-                        .color(DARK_TEXT_SECONDARY),
+                        .color(tc.text_secondary),
                 );
                 let mut pos = display_pos;
                 let slider = ui.add(
@@ -107,7 +110,7 @@ pub fn draw_media_panel(ui: &mut Ui, info: &MediaInfo) {
             ui.label(
                 RichText::new("Speed")
                     .size(SMALL_SIZE)
-                    .color(DARK_TEXT_SECONDARY),
+                    .color(tc.text_secondary),
             );
             let mut speed = info.speed;
             let slider = ui.add(
@@ -132,7 +135,7 @@ pub fn draw_media_panel(ui: &mut Ui, info: &MediaInfo) {
                 info.frame_count
             ))
             .size(SMALL_SIZE)
-            .color(DARK_TEXT_SECONDARY),
+            .color(tc.text_secondary),
         );
 
         ui.add_space(4.0);
@@ -163,7 +166,7 @@ pub fn draw_media_panel(ui: &mut Ui, info: &MediaInfo) {
             ui.label(
                 RichText::new("Speed")
                     .size(SMALL_SIZE)
-                    .color(DARK_TEXT_SECONDARY),
+                    .color(tc.text_secondary),
             );
             let mut speed = info.speed;
             let slider = ui.add(
@@ -184,7 +187,7 @@ pub fn draw_media_panel(ui: &mut Ui, info: &MediaInfo) {
             ui.label(
                 RichText::new("Direction")
                     .size(SMALL_SIZE)
-                    .color(DARK_TEXT_SECONDARY),
+                    .color(tc.text_secondary),
             );
             let directions: [(PlayDirection, u8, &str); 3] = [
                 (PlayDirection::Forward, 0, "Fwd"),
@@ -208,7 +211,7 @@ pub fn draw_media_panel(ui: &mut Ui, info: &MediaInfo) {
         ui.label(
             RichText::new("Static image")
                 .size(SMALL_SIZE)
-                .color(DARK_TEXT_SECONDARY),
+                .color(tc.text_secondary),
         );
     }
 }

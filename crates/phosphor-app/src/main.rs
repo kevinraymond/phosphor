@@ -7,6 +7,7 @@ mod midi;
 mod osc;
 mod params;
 mod preset;
+mod settings;
 mod shader;
 mod ui;
 mod web;
@@ -52,6 +53,23 @@ impl ApplicationHandler for PhosphorApp {
             .with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
 
         let window = Arc::new(event_loop.create_window(attrs).expect("Failed to create window"));
+
+        // Center window on primary monitor
+        if let Some(monitor) = event_loop
+            .primary_monitor()
+            .or_else(|| event_loop.available_monitors().next())
+        {
+            let monitor_size = monitor.size();
+            let window_size = window.outer_size();
+            let monitor_pos = monitor.position();
+            let x = (monitor_size.width.saturating_sub(window_size.width)) / 2;
+            let y = (monitor_size.height.saturating_sub(window_size.height)) / 2;
+            window.set_outer_position(winit::dpi::PhysicalPosition::new(
+                monitor_pos.x + x as i32,
+                monitor_pos.y + y as i32,
+            ));
+        }
+
         self.window = Some(window.clone());
 
         match App::new(window) {
@@ -200,10 +218,22 @@ impl ApplicationHandler for PhosphorApp {
                             active_layer,
                             media_info,
                             &app.status_error,
+                            app.settings.theme,
                         );
                     }
                 }
                 app.egui_overlay.end_frame(&app.window);
+
+                // Handle theme change from settings panel
+                let set_theme: Option<crate::ui::theme::ThemeMode> =
+                    app.egui_overlay.context().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("set_theme"))
+                    });
+                if let Some(theme) = set_theme {
+                    app.egui_overlay.set_theme(theme);
+                    app.settings.theme = theme;
+                    app.settings.save();
+                }
 
                 // Handle effect loading from UI → loads on active layer
                 let pending: Option<usize> = app.egui_overlay.context().data_mut(|d| {

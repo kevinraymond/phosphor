@@ -2,6 +2,7 @@ use egui::{Color32, Rect, RichText, Ui, Vec2};
 
 use crate::audio::AudioSystem;
 use crate::gpu::ShaderUniforms;
+use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
 const BAND_LABELS: [&str; 7] = ["SB", "BS", "LM", "MD", "UM", "PR", "BR"];
@@ -17,6 +18,7 @@ const BAND_COLORS: [Color32; 7] = [
 ];
 
 fn draw_vertical_meters(ui: &mut Ui, bands: &[f32; 7]) {
+    let tc = theme_colors(ui.ctx());
     let available_width = ui.available_width();
     let total_gaps = (bands.len() - 1) as f32 * METER_GAP;
     let bar_width = ((available_width - total_gaps) / bands.len() as f32).max(8.0);
@@ -28,7 +30,7 @@ fn draw_vertical_meters(ui: &mut Ui, bands: &[f32; 7]) {
     );
 
     // Background
-    ui.painter().rect_filled(rect, 2.0, METER_BG);
+    ui.painter().rect_filled(rect, 2.0, tc.meter_bg);
 
     // Grid lines at 25%, 50%, 75%
     let grid_color = Color32::from_rgb(0x2A, 0x2A, 0x2A);
@@ -64,12 +66,13 @@ fn draw_vertical_meters(ui: &mut Ui, bands: &[f32; 7]) {
             egui::Align2::CENTER_CENTER,
             label,
             egui::FontId::proportional(SMALL_SIZE),
-            DARK_TEXT_SECONDARY,
+            tc.text_secondary,
         );
     }
 }
 
 fn draw_feature_grid(ui: &mut Ui, uniforms: &ShaderUniforms) {
+    let tc = theme_colors(ui.ctx());
     let features: [(&str, f32); 6] = [
         ("RMS", uniforms.rms),
         ("Kick", uniforms.kick),
@@ -84,7 +87,7 @@ fn draw_feature_grid(ui: &mut Ui, uniforms: &ShaderUniforms) {
         .spacing([8.0, 2.0])
         .show(ui, |ui| {
             for (i, (name, value)) in features.iter().enumerate() {
-                ui.label(RichText::new(*name).size(SMALL_SIZE).color(DARK_TEXT_SECONDARY));
+                ui.label(RichText::new(*name).size(SMALL_SIZE).color(tc.text_secondary));
                 ui.label(RichText::new(format!("{:.2}", value)).size(SMALL_SIZE).monospace());
                 if i % 2 == 1 {
                     ui.end_row();
@@ -94,6 +97,7 @@ fn draw_feature_grid(ui: &mut Ui, uniforms: &ShaderUniforms) {
 }
 
 fn draw_bpm_display(ui: &mut Ui, uniforms: &ShaderUniforms) {
+    let tc = theme_colors(ui.ctx());
     let bpm = uniforms.bpm * 300.0;
     if bpm <= 1.0 {
         return;
@@ -102,7 +106,7 @@ fn draw_bpm_display(ui: &mut Ui, uniforms: &ShaderUniforms) {
         // Beat dot
         let (dot_rect, _) = ui.allocate_exact_size(Vec2::new(10.0, 10.0), egui::Sense::hover());
         let color = if uniforms.beat > 0.5 {
-            BEAT_COLOR
+            tc.beat_color
         } else {
             Color32::from_rgb(0x44, 0x44, 0x44)
         };
@@ -112,14 +116,15 @@ fn draw_bpm_display(ui: &mut Ui, uniforms: &ShaderUniforms) {
             RichText::new(format!("{:.0} BPM", bpm))
                 .size(BODY_SIZE)
                 .strong()
-                .color(if uniforms.beat > 0.5 { BEAT_COLOR } else { DARK_TEXT_PRIMARY }),
+                .color(if uniforms.beat > 0.5 { tc.beat_color } else { tc.text_primary }),
         );
     });
 }
 
 pub fn draw_audio_panel(ui: &mut Ui, audio: &AudioSystem, uniforms: &ShaderUniforms) {
+    let tc = theme_colors(ui.ctx());
     if !audio.active {
-        ui.colored_label(DARK_ERROR, "No audio input");
+        ui.colored_label(tc.error, "No audio input");
         return;
     }
 

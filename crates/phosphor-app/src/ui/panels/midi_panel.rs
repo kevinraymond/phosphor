@@ -2,6 +2,7 @@ use egui::{Color32, RichText, Ui};
 
 use crate::midi::types::{LearnTarget, MidiMsgType, TriggerAction};
 use crate::midi::MidiSystem;
+use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
 const MIDI_BLUE: Color32 = Color32::from_rgb(0x60, 0xA0, 0xE0);
@@ -15,6 +16,8 @@ const TRIGGER_PAIRS: &[(TriggerAction, TriggerAction)] = &[
 ];
 
 pub fn draw_midi_panel(ui: &mut Ui, midi: &mut MidiSystem) {
+    let tc = theme_colors(ui.ctx());
+
     // Enable + activity on one row
     ui.horizontal(|ui| {
         let mut enabled = midi.config.enabled;
@@ -33,12 +36,12 @@ pub fn draw_midi_panel(ui: &mut Ui, midi: &mut MidiSystem) {
                         msg.number, msg.value
                     ))
                     .size(SMALL_SIZE)
-                    .color(DARK_TEXT_SECONDARY),
+                    .color(tc.text_secondary),
                 );
             }
             // Activity dot
             let color = if midi.is_recently_active() {
-                DARK_SUCCESS
+                tc.success
             } else if midi.connected_port().is_some() {
                 Color32::from_rgb(0x55, 0x55, 0x55)
             } else {
@@ -94,7 +97,7 @@ pub fn draw_midi_panel(ui: &mut Ui, midi: &mut MidiSystem) {
     ui.label(
         RichText::new("TRIGGERS")
             .size(HEADING_SIZE)
-            .color(DARK_TEXT_SECONDARY)
+            .color(tc.text_secondary)
             .strong(),
     );
 

@@ -3,6 +3,7 @@ use winit::event::WindowEvent;
 use winit::window::Window;
 
 use super::theme::ThemeMode;
+use super::theme::colors::set_theme_colors;
 
 pub struct EguiOverlay {
     pub state: egui_winit::State,
@@ -16,11 +17,15 @@ pub struct EguiOverlay {
 }
 
 impl EguiOverlay {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, window: &Window) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        window: &Window,
+        theme: ThemeMode,
+    ) -> Self {
         let ctx = Context::default();
-        // Force dark theme for VJ aesthetic
-        let theme = ThemeMode::Dark;
         ctx.set_visuals(theme.visuals());
+        set_theme_colors(&ctx, theme.colors());
 
         // Dense VJ typography and spacing
         let mut style = (*ctx.style()).clone();
@@ -81,6 +86,13 @@ impl EguiOverlay {
         }
     }
 
+    pub fn set_theme(&mut self, theme: ThemeMode) {
+        self.theme = theme;
+        let ctx = self.state.egui_ctx();
+        ctx.set_visuals(theme.visuals());
+        set_theme_colors(ctx, theme.colors());
+    }
+
     pub fn handle_event(&mut self, window: &Window, event: &WindowEvent) -> bool {
         self.state.on_window_event(window, event).consumed
     }
@@ -109,6 +121,8 @@ impl EguiOverlay {
     }
 
     pub fn begin_frame(&mut self, window: &Window) {
+        // Refresh theme colors each frame so panels always have them
+        set_theme_colors(self.state.egui_ctx(), self.theme.colors());
         let raw_input = self.state.take_egui_input(window);
         self.state.egui_ctx().begin_pass(raw_input);
     }

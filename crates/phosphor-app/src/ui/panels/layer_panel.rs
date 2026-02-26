@@ -3,6 +3,7 @@ use std::sync::Arc;
 use egui::{Color32, CornerRadius, Rect, RichText, Stroke, StrokeKind, Ui, Vec2};
 
 use crate::gpu::layer::{BlendMode, LayerInfo};
+use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
 // --- Custom icon buttons (painted as vector shapes, no font dependency) ---
@@ -61,7 +62,12 @@ fn drag_handle(ui: &mut Ui, color: Color32) -> egui::Response {
             stroke,
         );
     }
-    response
+    let cursor = if response.dragged() {
+        egui::CursorIcon::Grabbing
+    } else {
+        egui::CursorIcon::Grab
+    };
+    response.on_hover_cursor(cursor)
 }
 
 /// Lock icon — open padlock (unlocked) or closed padlock (locked).
@@ -160,6 +166,7 @@ fn find_drop_slot(pos_y: f32, card_rects: &[Rect]) -> usize {
 
 /// Draw the layer management panel.
 pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) {
+    let tc = theme_colors(ui.ctx());
     let max_layers = 8;
     let num_layers = layers.len();
     let ctx = ui.ctx().clone();
@@ -190,9 +197,9 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                     let base = if is_active {
                         Color32::WHITE
                     } else if !layer.enabled {
-                        DARK_TEXT_SECONDARY
+                        tc.text_secondary
                     } else {
-                        DARK_TEXT_PRIMARY
+                        tc.text_primary
                     };
                     if alpha < 1.0 {
                         Color32::from_rgba_unmultiplied(
@@ -208,7 +215,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
 
                 // Controls color: dimmed when locked
                 let ctrl_color = if layer.locked {
-                    let base = DARK_TEXT_SECONDARY;
+                    let base = tc.text_secondary;
                     if alpha < 1.0 {
                         Color32::from_rgba_unmultiplied(
                             base.r(),
@@ -224,7 +231,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                 };
 
                 let outer_stroke = {
-                    let base_color = if is_active { DARK_ACCENT } else { CARD_BORDER };
+                    let base_color = if is_active { tc.accent } else { tc.card_border };
                     if alpha < 1.0 {
                         Stroke::new(
                             1.0,
@@ -242,17 +249,17 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
 
                 let card_fill = if layer.locked {
                     Color32::from_rgba_unmultiplied(
-                        CARD_BG.r(),
-                        CARD_BG.g(),
-                        CARD_BG.b(),
+                        tc.card_bg.r(),
+                        tc.card_bg.g(),
+                        tc.card_bg.b(),
                         (180.0 * alpha) as u8,
                     )
                 } else {
                     Color32::from_rgba_unmultiplied(
-                        CARD_BG.r(),
-                        CARD_BG.g(),
-                        CARD_BG.b(),
-                        (CARD_BG.a() as f32 * alpha) as u8,
+                        tc.card_bg.r(),
+                        tc.card_bg.g(),
+                        tc.card_bg.b(),
+                        (tc.card_bg.a() as f32 * alpha) as u8,
                     )
                 };
 
@@ -265,7 +272,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                     .show(ui, |ui| {
                         // Header row
                         let header_fill = if is_active {
-                            let c = DARK_ACCENT;
+                            let c = tc.accent;
                             Color32::from_rgba_unmultiplied(
                                 c.r(),
                                 c.g(),
@@ -296,7 +303,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                                     if !layer.pinned {
                                         let handle_color = if is_active {
                                             Color32::from_white_alpha(
-                                                (100.0 * alpha) as u8,
+                                                (180.0 * alpha) as u8,
                                             )
                                         } else {
                                             ctrl_color
@@ -505,7 +512,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                         // Blend mode + opacity shown BELOW the active layer header
                         if is_active && num_layers > 1 {
                             egui::Frame::new()
-                                .fill(DARK_WIDGET_BG)
+                                .fill(tc.widget_bg)
                                 .corner_radius(CornerRadius {
                                     nw: 0,
                                     ne: 0,
@@ -519,7 +526,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                                             ui.label(
                                                 RichText::new("Blend")
                                                     .size(SMALL_SIZE)
-                                                    .color(DARK_TEXT_SECONDARY),
+                                                    .color(tc.text_secondary),
                                             );
                                             let current_mode = layer.blend_mode;
                                             egui::ComboBox::from_id_salt(format!(
@@ -560,12 +567,12 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                                             ui.label(
                                                 RichText::new("Opacity")
                                                     .size(SMALL_SIZE)
-                                                    .color(DARK_TEXT_SECONDARY),
+                                                    .color(tc.text_secondary),
                                             );
                                             let saved_bg =
                                                 ui.visuals().widgets.inactive.bg_fill;
                                             ui.visuals_mut().widgets.inactive.bg_fill =
-                                                METER_BG;
+                                                tc.meter_bg;
                                             let mut opacity = layer.opacity;
                                             let slider = ui.add(
                                                 egui::Slider::new(
@@ -625,11 +632,11 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                 // Line
                 painter.line_segment(
                     [egui::pos2(left, line_y), egui::pos2(right, line_y)],
-                    Stroke::new(2.5, DARK_ACCENT),
+                    Stroke::new(2.5, tc.accent),
                 );
                 // Endpoint dots
-                painter.circle_filled(egui::pos2(left, line_y), 3.0, DARK_ACCENT);
-                painter.circle_filled(egui::pos2(right, line_y), 3.0, DARK_ACCENT);
+                painter.circle_filled(egui::pos2(left, line_y), 3.0, tc.accent);
+                painter.circle_filled(egui::pos2(right, line_y), 3.0, tc.accent);
             }
         }
     }
@@ -671,13 +678,13 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                 RichText::new("+ Effect")
                     .size(SMALL_SIZE)
                     .color(if can_add {
-                        DARK_ACCENT
+                        tc.accent
                     } else {
-                        DARK_TEXT_SECONDARY
+                        tc.text_secondary
                     }),
             )
             .fill(Color32::TRANSPARENT)
-            .stroke(Stroke::new(1.0, CARD_BORDER))
+            .stroke(Stroke::new(1.0, tc.card_border))
             .corner_radius(CornerRadius::same(4))
             .min_size(Vec2::new(half_width, MIN_INTERACT_HEIGHT)),
         );
@@ -699,11 +706,11 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                     .color(if can_add {
                         Color32::from_rgb(0x80, 0xC0, 0x80)
                     } else {
-                        DARK_TEXT_SECONDARY
+                        tc.text_secondary
                     }),
             )
             .fill(Color32::TRANSPARENT)
-            .stroke(Stroke::new(1.0, CARD_BORDER))
+            .stroke(Stroke::new(1.0, tc.card_border))
             .corner_radius(CornerRadius::same(4))
             .min_size(Vec2::new(half_width, MIN_INTERACT_HEIGHT)),
         );
@@ -730,13 +737,13 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
         let (label, color) = if is_armed {
             ("Confirm?", Color32::from_rgb(0xE0, 0x60, 0x40))
         } else {
-            ("Clear All", DARK_TEXT_SECONDARY)
+            ("Clear All", tc.text_secondary)
         };
 
         let clear_btn = ui.add(
             egui::Button::new(RichText::new(label).size(SMALL_SIZE).color(color))
                 .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(1.0, if is_armed { color } else { CARD_BORDER }))
+                .stroke(Stroke::new(1.0, if is_armed { color } else { tc.card_border }))
                 .corner_radius(CornerRadius::same(4))
                 .min_size(Vec2::new(ui.available_width(), MIN_INTERACT_HEIGHT)),
         );

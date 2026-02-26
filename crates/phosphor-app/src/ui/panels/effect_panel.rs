@@ -1,13 +1,16 @@
 use egui::{Color32, CornerRadius, RichText, Stroke, Ui, Vec2};
 
 use crate::effect::EffectLoader;
+use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
 const COLS: usize = 3;
 
 pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
+    let tc = theme_colors(ui.ctx());
+
     if loader.effects.is_empty() {
-        ui.label(RichText::new("No effects found").size(SMALL_SIZE).color(DARK_TEXT_SECONDARY));
+        ui.label(RichText::new("No effects found").size(SMALL_SIZE).color(tc.text_secondary));
         return;
     }
 
@@ -25,9 +28,9 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
                 let is_current = loader.current_effect == Some(i);
 
                 let (fill, text_color, stroke) = if is_current {
-                    (DARK_ACCENT, Color32::WHITE, Stroke::NONE)
+                    (tc.accent, Color32::WHITE, Stroke::NONE)
                 } else {
-                    (CARD_BG, DARK_TEXT_PRIMARY, Stroke::new(1.0, CARD_BORDER))
+                    (tc.card_bg, tc.text_primary, Stroke::new(1.0, tc.card_border))
                 };
 
                 let btn = egui::Button::new(

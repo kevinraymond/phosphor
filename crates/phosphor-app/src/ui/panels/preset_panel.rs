@@ -1,12 +1,15 @@
 use egui::{Color32, CornerRadius, RichText, Stroke, Ui, Vec2};
 
 use crate::preset::PresetStore;
+use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
-const COLS: usize = 3;
-const WARNING_COLOR: Color32 = Color32::from_rgb(0xE0, 0x60, 0x40);
+const COLS: usize = 2;
 
 pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
+    let tc = theme_colors(ui.ctx());
+    let warning_color = Color32::from_rgb(0xE0, 0x60, 0x40);
+
     // Compact save row
     let mut name = ui
         .ctx()
@@ -21,7 +24,7 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
                 ui.label(
                     RichText::new(format!("*{}", current_name))
                         .size(SMALL_SIZE)
-                        .color(WARNING_COLOR),
+                        .color(warning_color),
                 );
                 if ui
                     .button(RichText::new("Update").size(SMALL_SIZE).strong())
@@ -68,7 +71,7 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
         .data_mut(|d| d.insert_temp(egui::Id::new("preset_save_name"), name));
 
     if store.presets.is_empty() {
-        ui.label(RichText::new("No presets").size(SMALL_SIZE).color(DARK_TEXT_SECONDARY));
+        ui.label(RichText::new("No presets").size(SMALL_SIZE).color(tc.text_secondary));
         return;
     }
 
@@ -100,17 +103,17 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
                 let is_armed = pending_delete.map_or(false, |(idx, _)| idx == i);
 
                 let (fill, text_color, stroke) = if is_armed {
-                    (WARNING_COLOR, Color32::WHITE, Stroke::NONE)
+                    (warning_color, Color32::WHITE, Stroke::NONE)
                 } else if is_current {
-                    (DARK_ACCENT, Color32::WHITE, Stroke::NONE)
+                    (tc.accent, Color32::WHITE, Stroke::NONE)
                 } else {
-                    (CARD_BG, DARK_TEXT_PRIMARY, Stroke::new(1.0, CARD_BORDER))
+                    (tc.card_bg, tc.text_primary, Stroke::new(1.0, tc.card_border))
                 };
 
                 let display_name = if is_current && store.dirty {
-                    format!("*{}", truncate_name(pname, 9))
+                    format!("*{}", truncate_name(pname, 17))
                 } else {
-                    truncate_name(pname, 10)
+                    truncate_name(pname, 18)
                 };
                 let btn = egui::Button::new(
                     RichText::new(&display_name).size(SMALL_SIZE).color(text_color),

@@ -3,6 +3,7 @@ use egui::{Color32, RichText, Ui};
 use crate::midi::types::TriggerAction;
 use crate::osc::types::OscLearnTarget;
 use crate::osc::OscSystem;
+use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
 const OSC_GREEN: Color32 = Color32::from_rgb(0x50, 0xC0, 0x70);
@@ -16,6 +17,8 @@ const TRIGGER_PAIRS: &[(TriggerAction, TriggerAction)] = &[
 ];
 
 pub fn draw_osc_panel(ui: &mut Ui, osc: &mut OscSystem) {
+    let tc = theme_colors(ui.ctx());
+
     // Enable + activity on one row
     ui.horizontal(|ui| {
         let mut enabled = osc.config.enabled;
@@ -32,7 +35,7 @@ pub fn draw_osc_panel(ui: &mut Ui, osc: &mut OscSystem) {
                 ui.label(
                     RichText::new(short)
                         .size(SMALL_SIZE)
-                        .color(DARK_TEXT_SECONDARY),
+                        .color(tc.text_secondary),
                 );
             }
             // Activity dot
@@ -145,7 +148,7 @@ pub fn draw_osc_panel(ui: &mut Ui, osc: &mut OscSystem) {
     ui.label(
         RichText::new("TRIGGERS")
             .size(HEADING_SIZE)
-            .color(DARK_TEXT_SECONDARY)
+            .color(tc.text_secondary)
             .strong(),
     );
 

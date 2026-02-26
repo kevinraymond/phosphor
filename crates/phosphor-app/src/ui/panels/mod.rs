@@ -6,6 +6,7 @@ pub mod midi_panel;
 pub mod osc_panel;
 pub mod param_panel;
 pub mod preset_panel;
+pub mod settings_panel;
 pub mod status_bar;
 pub mod web_panel;
 
@@ -19,8 +20,9 @@ use crate::midi::MidiSystem;
 use crate::osc::OscSystem;
 use crate::params::ParamStore;
 use crate::preset::PresetStore;
+use crate::ui::theme::ThemeMode;
+use crate::ui::theme::colors::theme_colors;
 use crate::web::WebSystem;
-use crate::ui::theme::tokens::*;
 use crate::ui::widgets;
 
 /// Draw all UI panels when overlay is visible.
@@ -42,10 +44,13 @@ pub fn draw_panels(
     active_layer: usize,
     media_info: Option<media_panel::MediaInfo>,
     status_error: &Option<(String, std::time::Instant)>,
+    current_theme: ThemeMode,
 ) {
     if !visible {
         return;
     }
+
+    let tc = theme_colors(ctx);
 
     egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
         let midi_port = midi.connected_port().unwrap_or("");
@@ -68,7 +73,7 @@ pub fn draw_panels(
     });
 
     let panel_frame = Frame {
-        fill: DARK_PANEL,
+        fill: tc.panel,
         inner_margin: Margin::same(6),
         ..Default::default()
     };
@@ -194,6 +199,18 @@ pub fn draw_panels(
                     false,
                     |ui| {
                         web_panel::draw_web_panel(ui, web);
+                    },
+                );
+
+                // Settings section (default collapsed)
+                widgets::section(
+                    ui,
+                    "sec_settings",
+                    "Settings",
+                    None,
+                    false,
+                    |ui| {
+                        settings_panel::draw_settings_panel(ui, current_theme);
                     },
                 );
             });
