@@ -85,47 +85,105 @@ impl App {
                     Some(0)
                 }
             });
-        let (shader_source, param_store, effect_index) = if let Some(idx) = default_idx {
-            let effect = &effect_loader.effects[idx];
-            match effect_loader.load_effect_source(&effect.shader) {
-                Ok(source) => {
-                    let mut store = ParamStore::new();
-                    store.load_from_defs(&effect.inputs);
-                    effect_loader.current_effect = Some(idx);
-                    (source, store, Some(idx))
-                }
-                Err(e) => {
-                    log::warn!("Failed to load effect: {e}, using default shader");
-                    let source = read_default_shader();
-                    (source, ParamStore::new(), None)
-                }
-            }
-        } else {
-            let source = read_default_shader();
-            (source, ParamStore::new(), None)
-        };
-
-        let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &shader_source)?;
-
         // Placeholder 1x1 black texture
         let placeholder = PlaceholderTexture::new(&gpu.device, &gpu.queue, hdr_format);
 
-        // Build initial layer with default effect
+        // Build initial layer with default effect (use normalized_passes for multi-pass effects)
         let uniform_buffer = UniformBuffer::new(&gpu.device);
-        let feedback = PingPongTarget::new(
-            &gpu.device,
-            gpu.surface_config.width,
-            gpu.surface_config.height,
-            hdr_format,
-            1.0,
-        );
-        let pass_executor = PassExecutor::single_pass(
-            pipeline,
-            feedback,
-            &uniform_buffer,
-            &gpu.device,
-            &placeholder,
-        );
+        let (pass_executor, shader_sources, param_store, effect_index) = if let Some(idx) = default_idx {
+            let effect = &effect_loader.effects[idx];
+            let passes = effect.normalized_passes();
+            if !passes.is_empty() {
+                match PassExecutor::new(
+                    &gpu.device,
+                    hdr_format,
+                    gpu.surface_config.width,
+                    gpu.surface_config.height,
+                    &passes,
+                    &effect_loader,
+                    &uniform_buffer,
+                    &placeholder,
+                ) {
+                    Ok(executor) => {
+                        let sources: Vec<String> = passes
+                            .iter()
+                            .filter_map(|p| effect_loader.load_effect_source(&p.shader).ok())
+                            .collect();
+                        let mut store = ParamStore::new();
+                        store.load_from_defs(&effect.inputs);
+                        effect_loader.current_effect = Some(idx);
+                        (executor, sources, store, Some(idx))
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to load effect: {e}, using default shader");
+                        let source = read_default_shader();
+                        let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &source)?;
+                        let feedback = PingPongTarget::new(
+                            &gpu.device, gpu.surface_config.width, gpu.surface_config.height,
+                            hdr_format, 1.0,
+                        );
+                        let executor = PassExecutor::single_pass(
+                            pipeline, feedback, &uniform_buffer, &gpu.device, &placeholder,
+                        );
+                        (executor, vec![source], ParamStore::new(), None)
+                    }
+                }
+            } else {
+                log::warn!("Effect '{}' has no passes, using default shader", effect.name);
+                let source = read_default_shader();
+                let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &source)?;
+                let feedback = PingPongTarget::new(
+                    &gpu.device, gpu.surface_config.width, gpu.surface_config.height,
+                    hdr_format, 1.0,
+                );
+                let executor = PassExecutor::single_pass(
+                    pipeline, feedback, &uniform_buffer, &gpu.device, &placeholder,
+                );
+                (executor, vec![source], ParamStore::new(), None)
+            }
+        } else {
+            let source = read_default_shader();
+            let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &source)?;
+            let feedback = PingPongTarget::new(
+                &gpu.device, gpu.surface_config.width, gpu.surface_config.height,
+                hdr_format, 1.0,
+            );
+            let executor = PassExecutor::single_pass(
+                pipeline, feedback, &uniform_buffer, &gpu.device, &placeholder,
+            );
+            (executor, vec![source], ParamStore::new(), None)
+        };
+
+        // Build particle system for initial effect (if it has one)
+        let mut pass_executor = pass_executor;
+        if let Some(idx) = effect_index {
+            if let Some(ref pd) = effect_loader.effects[idx].particles {
+                let compute_source = if pd.compute_shader.is_empty() {
+                    include_str!("../../../assets/shaders/builtin/particle_sim.wgsl").to_string()
+                } else {
+                    effect_loader
+                        .load_compute_source(&pd.compute_shader)
+                        .unwrap_or_else(|e| {
+                            log::warn!("Failed to load compute shader: {e}");
+                            include_str!("../../../assets/shaders/builtin/particle_sim.wgsl")
+                                .to_string()
+                        })
+                };
+                match ParticleSystem::new(
+                    &gpu.device,
+                    &gpu.queue,
+                    hdr_format,
+                    pd,
+                    &compute_source,
+                ) {
+                    Ok(ps) => {
+                        log::info!("Particle system created: {} particles", pd.max_count);
+                        pass_executor.particle_system = Some(ps);
+                    }
+                    Err(e) => log::error!("Failed to create particle system: {e}"),
+                }
+            }
+        }
 
         let initial_layer = Layer::new_effect(
             "Layer 1".to_string(),
@@ -134,7 +192,7 @@ impl App {
                 uniform_buffer,
                 uniforms: ShaderUniforms::zeroed(),
                 effect_index,
-                shader_sources: vec![shader_source],
+                shader_sources,
                 shader_error: None,
             },
             param_store,
@@ -337,6 +395,9 @@ impl App {
             }
             if let Some(pp_enabled) = osc_result.postprocess_enabled {
                 self.post_process.enabled = pp_enabled;
+                if let Some(layer) = self.layer_stack.active_mut() {
+                    layer.postprocess.enabled = pp_enabled;
+                }
             }
         }
 
@@ -403,6 +464,9 @@ impl App {
             }
             if let Some(pp_enabled) = web_result.postprocess_enabled {
                 self.post_process.enabled = pp_enabled;
+                if let Some(layer) = self.layer_stack.active_mut() {
+                    layer.postprocess.enabled = pp_enabled;
+                }
             }
 
             // Handle effect loads from web
@@ -1088,6 +1152,9 @@ impl App {
             .active_layer
             .min(self.layer_stack.layers.len().saturating_sub(1));
         self.sync_active_layer();
+        if let Some(layer) = self.layer_stack.active_mut() {
+            layer.postprocess = preset.postprocess.clone();
+        }
         self.post_process.enabled = preset.postprocess.enabled;
         self.preset_store.current_preset = Some(index);
         self.preset_store.dirty = false;

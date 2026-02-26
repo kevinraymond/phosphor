@@ -33,6 +33,18 @@ pub struct PostProcessDef {
     pub bloom_intensity: f32,
     #[serde(default = "default_vignette")]
     pub vignette: f32,
+    #[serde(default = "default_half")]
+    pub ca_intensity: f32,
+    #[serde(default = "default_half")]
+    pub grain_intensity: f32,
+    #[serde(default = "default_true")]
+    pub bloom_enabled: bool,
+    #[serde(default = "default_true")]
+    pub ca_enabled: bool,
+    #[serde(default = "default_true")]
+    pub vignette_enabled: bool,
+    #[serde(default = "default_true")]
+    pub grain_enabled: bool,
 }
 
 fn default_true() -> bool {
@@ -51,6 +63,10 @@ fn default_vignette() -> f32 {
     0.3
 }
 
+fn default_half() -> f32 {
+    0.5
+}
+
 impl Default for PostProcessDef {
     fn default() -> Self {
         Self {
@@ -58,6 +74,12 @@ impl Default for PostProcessDef {
             bloom_threshold: 0.8,
             bloom_intensity: 0.35,
             vignette: 0.3,
+            ca_intensity: 0.5,
+            grain_intensity: 0.5,
+            bloom_enabled: true,
+            ca_enabled: true,
+            vignette_enabled: true,
+            grain_enabled: true,
         }
     }
 }

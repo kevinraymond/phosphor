@@ -208,7 +208,7 @@ impl ApplicationHandler for PhosphorApp {
                             &shader_error,
                             &app.uniforms,
                             &app.effect_loader,
-                            &mut app.post_process.enabled,
+                            &mut layer.postprocess,
                             particle_count,
                             &mut app.midi,
                             &mut app.osc,
@@ -220,6 +220,8 @@ impl ApplicationHandler for PhosphorApp {
                             &app.status_error,
                             app.settings.theme,
                         );
+                        // Sync global postprocess enabled from layer
+                        app.post_process.enabled = layer.postprocess.enabled;
                     }
                 }
                 app.egui_overlay.end_frame(&app.window);
@@ -540,6 +542,9 @@ impl ApplicationHandler for PhosphorApp {
                         }
                         TriggerAction::TogglePostProcess => {
                             app.post_process.enabled = !app.post_process.enabled;
+                            if let Some(layer) = app.layer_stack.active_mut() {
+                                layer.postprocess.enabled = app.post_process.enabled;
+                            }
                         }
                         TriggerAction::ToggleOverlay => {
                             app.egui_overlay.toggle_visible();
