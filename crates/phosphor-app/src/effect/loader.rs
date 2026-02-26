@@ -129,20 +129,23 @@ impl EffectLoader {
     /// Reload shader library sources from disk (called when lib/*.wgsl changes).
     pub fn reload_library(&mut self) {
         let base = assets_dir();
-        self.lib_source.clear();
+        let mut new_source = String::new();
         for filename in LIB_FILENAMES {
             let path = base.join(filename);
             match std::fs::read_to_string(&path) {
                 Ok(src) => {
-                    self.lib_source.push_str(&src);
-                    self.lib_source.push('\n');
+                    new_source.push_str(&src);
+                    new_source.push('\n');
                 }
                 Err(e) => {
                     log::warn!("Failed to reload shader library {}: {e}", path.display());
                 }
             }
         }
-        log::info!("Reloaded shader library sources");
+        if new_source != self.lib_source {
+            self.lib_source = new_source;
+            log::info!("Reloaded shader library sources");
+        }
     }
 
     pub fn scan_effects_directory(&mut self) {
