@@ -13,7 +13,8 @@ struct PostParams {
     grain_intensity: f32,  // film grain (flatness-driven)
     time: f32,
     rms: f32,
-    _pad: vec2f,
+    alpha_from_luma: f32,
+    _pad: f32,
 }
 @group(0) @binding(4) var<uniform> post: PostParams;
 
@@ -66,6 +67,8 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
     let grain = (hash_grain(uv * 1000.0 + post.time * 100.0) - 0.5) * post.grain_intensity;
     color += vec3f(grain);
 
-    let scene_alpha = textureSample(scene_texture, scene_sampler, uv).a;
-    return vec4f(clamp(color, vec3f(0.0), vec3f(1.0)), scene_alpha);
+    let final_color = clamp(color, vec3f(0.0), vec3f(1.0));
+    let brightness = max(final_color.r, max(final_color.g, final_color.b));
+    let alpha = select(1.0, clamp(brightness * 2.0, 0.0, 1.0), post.alpha_from_luma > 0.5);
+    return vec4f(final_color, alpha);
 }

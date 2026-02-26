@@ -53,6 +53,8 @@ pub struct NdiConfig {
     pub source_name: String,
     #[serde(default)]
     pub resolution: OutputResolution,
+    #[serde(default)]
+    pub alpha_from_luma: bool,
 }
 
 fn default_source_name() -> String {
@@ -65,6 +67,7 @@ impl Default for NdiConfig {
             enabled: false,
             source_name: default_source_name(),
             resolution: OutputResolution::default(),
+            alpha_from_luma: false,
         }
     }
 }
@@ -155,6 +158,16 @@ mod tests {
         let c2: NdiConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(c2.source_name, "Phosphor");
         assert!(!c2.enabled);
+        assert!(!c2.alpha_from_luma);
+    }
+
+    #[test]
+    fn ndi_config_alpha_from_luma_roundtrip() {
+        let mut c = NdiConfig::default();
+        c.alpha_from_luma = true;
+        let json = serde_json::to_string(&c).unwrap();
+        let c2: NdiConfig = serde_json::from_str(&json).unwrap();
+        assert!(c2.alpha_from_luma);
     }
 
     // ---- Additional tests ----

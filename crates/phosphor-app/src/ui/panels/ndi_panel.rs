@@ -17,6 +17,7 @@ pub struct NdiInfo {
     pub frames_sent: u64,
     pub output_width: u32,
     pub output_height: u32,
+    pub alpha_from_luma: bool,
 }
 
 pub fn draw_ndi_panel(ui: &mut Ui, info: &NdiInfo) {
@@ -97,6 +98,22 @@ pub fn draw_ndi_panel(ui: &mut Ui, info: &NdiInfo) {
                     }
                 }
             });
+    });
+
+    // Alpha from luma toggle
+    ui.horizontal(|ui| {
+        let mut alpha_luma = info.alpha_from_luma;
+        if ui
+            .checkbox(
+                &mut alpha_luma,
+                RichText::new("Alpha from brightness").size(SMALL_SIZE),
+            )
+            .changed()
+        {
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(egui::Id::new("ndi_alpha_from_luma"), alpha_luma);
+            });
+        }
     });
 
     // Show output dimensions when running

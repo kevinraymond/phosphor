@@ -44,7 +44,8 @@ struct PostParams {
     grain_intensity: f32,
     time: f32,
     rms: f32,
-    _pad: [f32; 2],
+    alpha_from_luma: f32,
+    _pad: f32,
 }
 
 pub struct PostProcessChain {
@@ -195,6 +196,7 @@ impl PostProcessChain {
         onset: f32,
         flatness: f32,
         overrides: &PostProcessDef,
+        alpha_from_luma: bool,
     ) {
         if !self.enabled {
             // Simple blit fallback
@@ -248,7 +250,8 @@ impl PostProcessChain {
             grain_intensity: if overrides.grain_enabled { flatness * overrides.grain_intensity * 0.08 } else { 0.0 },
             time,
             rms,
-            _pad: [0.0; 2],
+            alpha_from_luma: if alpha_from_luma { 1.0 } else { 0.0 },
+            _pad: 0.0,
         };
         queue.write_buffer(&self.post_params_buffer, 0, bytemuck::bytes_of(&post_params));
 
