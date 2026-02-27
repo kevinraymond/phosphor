@@ -18,5 +18,8 @@
 
 - **GPU**: Vulkan (Linux/Windows) or Metal (macOS)
 - **Audio**: Built-in mic or line-in for audio-reactive visuals
-- **NDI** (optional): [NDI SDK runtime](https://ndi.video) for network video output
+- **NDI®** (optional): [NDI® SDK runtime](https://ndi.video) for network video output
 - **Video playback** (optional): `ffmpeg` on PATH for media layers
+
+---
+NDI® is a registered trademark of Vizrt NDI AB.

@@ -3,10 +3,15 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## v0.3.5 — 2026-02-27
+
+### Fixes
+- Auto-restart audio when PipeWire callbacks stall (up to 3 retries with full pipeline teardown/rebuild)
+
 ## v0.3.4 — 2026-02-27
 
 ### Fixes
-- Auto-retry audio stream on PipeWire when callbacks stall (race condition workaround)
+- Auto-retry audio stream on PipeWire when callbacks stall (synchronous retry — insufficient)
 
 ## v0.3.3 — 2026-02-27
 
@@ -37,7 +42,7 @@
 - In-app WGSL shader editor with live hot-reload
 - Audio input device selector with runtime switching and persistence
 - Built-in/user sections in effects panel with delete and copy-shader
-- NDI luma-to-alpha toggle for downstream compositing
+- NDI® luma-to-alpha toggle for downstream compositing
 - Per-effect shader alpha for NDI compositing transparency
 
 ### Improvements
@@ -57,4 +62,7 @@
 
 Initial public release with multi-layer composition, GPU particles, audio-reactive
 shaders, MIDI/OSC input, web control surface, preset system, media layers, video
-playback, and NDI output.
+playback, and NDI® output.
+
+---
+NDI® is a registered trademark of Vizrt NDI AB.
