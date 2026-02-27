@@ -10,7 +10,7 @@
 | **Audio** | BPM detection (FFT autocorrelation + Kalman filter) · 7-band spectral analysis · Beat sync |
 | **Compositing** | 8-layer stack · 10 blend modes · GPU compute particles · Media/video layers (GIF/PNG/MP4) |
 | **Control** | MIDI input with learn + auto-connect · OSC in/out with learn · Web touch surface (phone/tablet) |
-| **Output** | NDI (`--features ndi`, runtime-loaded) · Preset save/load (full layer stack) |
+| **Output** | NDI® (`--features ndi`, runtime-loaded, [ndi.video](https://ndi.video)) · Preset save/load (full layer stack) |
 
 ## Note from Dev
 

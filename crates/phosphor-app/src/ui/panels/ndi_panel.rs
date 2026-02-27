@@ -25,9 +25,13 @@ pub fn draw_ndi_panel(ui: &mut Ui, info: &NdiInfo) {
 
     if !info.ndi_available {
         ui.label(
-            RichText::new("NDI runtime not found. Install NDI Tools from ndi.video")
+            RichText::new("NDI® runtime not found. Install NDI® Tools:")
                 .size(SMALL_SIZE)
                 .color(tc.text_secondary),
+        );
+        ui.hyperlink_to(
+            RichText::new("ndi.video →").size(SMALL_SIZE),
+            "https://ndi.video",
         );
         return;
     }
@@ -36,7 +40,7 @@ pub fn draw_ndi_panel(ui: &mut Ui, info: &NdiInfo) {
     ui.horizontal(|ui| {
         let mut enabled = info.enabled;
         if ui
-            .checkbox(&mut enabled, RichText::new("Enable NDI").size(SMALL_SIZE))
+            .checkbox(&mut enabled, RichText::new("Enable NDI®").size(SMALL_SIZE))
             .changed()
         {
             ui.ctx().data_mut(|d| {
@@ -124,4 +128,11 @@ pub fn draw_ndi_panel(ui: &mut Ui, info: &NdiInfo) {
                 .color(tc.text_secondary),
         );
     }
+
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new("NDI® is a registered trademark of Vizrt NDI AB.")
+            .size(SMALL_SIZE - 1.0)
+            .color(tc.text_secondary),
+    );
 }
