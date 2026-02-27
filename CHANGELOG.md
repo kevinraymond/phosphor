@@ -3,6 +3,23 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## v0.3.6 — 2026-02-27
+
+### Fixes
+- Fix PulseAudio capture delivering audio only ~2x/sec (set explicit fragsize=4096, was using PA default ~88KB)
+- Runtime-load PulseAudio via dlopen — release binaries no longer crash on systems without libpulse installed
+- Truncate long audio device names in UI to prevent panel width blowout
+
+### Added
+- `--audio-test` CLI flag: standalone audio diagnostic (no GPU, works over SSH)
+- Periodic audio health logging (reads/s, latency stats, throughput) every 5s
+- `PHOSPHOR_AUDIO_DEBUG=1` env var for per-read verbose logging
+- `AudioSystem::Drop` for clean thread shutdown on exit
+
+### Changed
+- Skip cpal device enumeration when PulseAudio is active (eliminates JACK "cannot connect" noise)
+- CI no longer requires `libpulse-dev` build dependency
+
 ## v0.3.5 — 2026-02-27
 
 ### Fixes
