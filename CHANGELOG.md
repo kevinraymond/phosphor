@@ -9,6 +9,10 @@
 - **Async preset loading** — presets with media/video layers decode in a background thread, keeping current content playing; atomic swap on completion with pulsing status bar indicator and preset button highlight
 - Generation-based cancellation for rapid MIDI preset cycling (only final preset applies)
 
+### Fixed
+- **Webcam layer preset ordering** — loading a preset with a webcam layer no longer appends it to the end of the stack; webcam content is now placed in-place at its correct index, preventing extra stray layers and layer count growth on repeated save/load cycles
+- **Webcam decode panic hardening** — backoff (50ms sleep) after corrupted frame decode panics to avoid hammering a broken camera; auto-stop capture thread after 10 consecutive panics with user-visible error log
+
 ## v0.3.10 — 2026-02-27
 
 ### Added

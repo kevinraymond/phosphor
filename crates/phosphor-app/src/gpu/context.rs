@@ -47,12 +47,14 @@ impl GpuContext {
             .copied()
             .unwrap_or(capabilities.formats[0]);
 
+        let present_mode = wgpu::PresentMode::AutoVsync;
+
         let surface_config = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
             format,
             width: size.width.max(1),
             height: size.height.max(1),
-            present_mode: wgpu::PresentMode::AutoVsync,
+            present_mode,
             desired_maximum_frame_latency: 2,
             alpha_mode: capabilities.alpha_modes[0],
             view_formats: vec![],
@@ -60,9 +62,11 @@ impl GpuContext {
         surface.configure(&device, &surface_config);
 
         log::info!(
-            "GPU initialized: {} ({:?})",
+            "GPU initialized: {} ({:?}), present mode: {:?} (available: {:?})",
             adapter.get_info().name,
-            adapter.get_info().backend
+            adapter.get_info().backend,
+            present_mode,
+            capabilities.present_modes,
         );
 
         Ok(Self {
@@ -88,4 +92,5 @@ impl GpuContext {
             self.surface.configure(&self.device, &self.surface_config);
         }
     }
+
 }

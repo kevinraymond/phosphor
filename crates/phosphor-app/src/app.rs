@@ -1312,8 +1312,39 @@ impl App {
 
             #[cfg(feature = "webcam")]
             if is_webcam_layer {
-                // Webcam preset: reconnect to first available camera
-                self.add_webcam_layer(0);
+                // Start webcam capture if not already running
+                if self.webcam_capture.is_none() {
+                    match crate::media::webcam::WebcamCapture::start(0, Some((1280, 720))) {
+                        Ok(capture) => {
+                            self.webcam_capture = Some(capture);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to start webcam for preset layer {i}: {e}");
+                            self.status_error =
+                                Some((format!("Webcam failed: {e}"), Instant::now()));
+                        }
+                    }
+                }
+                if let Some(ref capture) = self.webcam_capture {
+                    let (w, h) = capture.resolution;
+                    let source = crate::media::decoder::MediaSource::Live {
+                        width: w,
+                        height: h,
+                    };
+                    let hdr_format = GpuContext::hdr_format();
+                    let media_layer = MediaLayer::new(
+                        &self.gpu.device,
+                        &self.gpu.queue,
+                        hdr_format,
+                        self.gpu.surface_config.width,
+                        self.gpu.surface_config.height,
+                        source,
+                        std::path::PathBuf::from(&capture.device_name),
+                    );
+                    let layer = &mut self.layer_stack.layers[i];
+                    layer.content = LayerContent::Media(media_layer);
+                    layer.param_store = ParamStore::new();
+                }
             }
 
             if !is_webcam_layer {

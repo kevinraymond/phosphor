@@ -997,6 +997,7 @@ impl ApplicationHandler for PhosphorApp {
                         log::warn!("Surface error: {e}");
                     }
                 }
+
                 app.window.request_redraw();
             }
             _ => {}
