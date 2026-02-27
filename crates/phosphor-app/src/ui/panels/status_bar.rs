@@ -69,6 +69,11 @@ pub fn draw_status_bar(
             ui.add_space(4.0);
             ui.colored_label(tc.error, RichText::new(format!("ERR: {err}")).size(SMALL_SIZE));
         }
+        // Keyboard hints when idle
+        else {
+            ui.add_space(4.0);
+            ui.label(RichText::new("D toggle overlay · F fullscreen").size(SMALL_SIZE).color(tc.text_secondary));
+        }
 
         // Push right-side items
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

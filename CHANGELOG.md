@@ -6,6 +6,8 @@
 ## v0.3.8 — 2026-02-27
 
 ### Added
+- **Three new particle effects** — Veil (flowing silk curtain with displacement field physics), Nova (fireworks with burst emission and gravity), Vortex (black hole with 1/r² orbital mechanics, accretion disk, and polar jets)
+
 - **Webcam input layers** — live camera feed as a compositing layer (`--features webcam`), cross-platform via nokhwa (v4l2/AVFoundation/MediaFoundation)
   - Capture thread with bounded channel, automatic frame drain (latest-only)
   - "+ Webcam" button in layer panel, webcam controls panel (device name, resolution, mirror, disconnect)
