@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use egui::Context;
 use winit::event::WindowEvent;
@@ -20,6 +21,10 @@ pub struct EguiOverlay {
     shapes: Vec<egui::ClippedPrimitive>,
     textures_delta: egui::TexturesDelta,
     screen_descriptor: egui_wgpu::ScreenDescriptor,
+    startup_time: Instant,
+    fade_alpha: f32,
+    auto_shown: bool,
+    user_toggled: bool,
 }
 
 impl EguiOverlay {
@@ -115,6 +120,10 @@ impl EguiOverlay {
             shapes: Vec::new(),
             textures_delta: egui::TexturesDelta::default(),
             screen_descriptor,
+            startup_time: Instant::now(),
+            fade_alpha: 1.0,
+            auto_shown: false,
+            user_toggled: false,
         }
     }
 
@@ -138,7 +147,33 @@ impl EguiOverlay {
     }
 
     pub fn toggle_visible(&mut self) {
+        self.user_toggled = true;
         self.visible = !self.visible;
+        if self.visible {
+            self.fade_alpha = 1.0;
+        }
+    }
+
+    /// Auto-show panels after a 2s startup delay with a 1s fade-in.
+    /// Skipped if the user has already toggled visibility manually.
+    pub fn update_auto_show(&mut self) {
+        if self.user_toggled || self.auto_shown {
+            return;
+        }
+        let elapsed = self.startup_time.elapsed().as_secs_f32();
+        if elapsed < 2.0 {
+            return;
+        }
+        if !self.visible {
+            self.visible = true;
+            self.fade_alpha = 0.0;
+        }
+        // Ramp fade_alpha from 0 to 1 over 1 second (elapsed 2.0–3.0)
+        let fade_t = (elapsed - 2.0).clamp(0.0, 1.0);
+        self.fade_alpha = fade_t;
+        if fade_t >= 1.0 {
+            self.auto_shown = true;
+        }
     }
 
     pub fn context(&self) -> Context {
@@ -168,6 +203,17 @@ impl EguiOverlay {
             .egui_ctx()
             .tessellate(output.shapes, output.pixels_per_point);
         self.textures_delta = output.textures_delta;
+
+        // Apply fade-in alpha to all mesh vertices (zero-cost after fade completes)
+        if self.fade_alpha < 1.0 {
+            for clipped in &mut self.shapes {
+                if let egui::epaint::Primitive::Mesh(mesh) = &mut clipped.primitive {
+                    for v in &mut mesh.vertices {
+                        v.color = v.color.gamma_multiply(self.fade_alpha);
+                    }
+                }
+            }
+        }
     }
 
     pub fn render(

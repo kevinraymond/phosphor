@@ -241,7 +241,7 @@ pub fn draw_panels(
                 widgets::section(
                     ui,
                     "sec_settings",
-                    "Settings",
+                    "Global",
                     None,
                     false,
                     |ui| {

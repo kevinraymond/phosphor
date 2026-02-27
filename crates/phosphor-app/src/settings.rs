@@ -94,4 +94,12 @@ mod tests {
         let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(c2.theme, ThemeMode::HighContrast);
     }
+
+    #[test]
+    fn settings_config_old_cvd_theme_falls_back_to_default() {
+        // Users with old CVD theme names in settings.json should fall back to Dark
+        let json = r#"{"version":1,"theme":"Deuteranopia"}"#;
+        let c: SettingsConfig = serde_json::from_str(json).unwrap_or_default();
+        assert_eq!(c.theme, ThemeMode::Dark);
+    }
 }

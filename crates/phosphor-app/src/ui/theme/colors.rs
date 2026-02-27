@@ -78,32 +78,64 @@ impl ThemeColors {
         }
     }
 
-    /// Deuteranopia (red-green colorblind): error=orange, success=blue, beat=orange-gold
-    pub fn deuteranopia() -> Self {
-        let mut tc = Self::dark();
-        tc.error = Color32::from_rgb(0xE0, 0x80, 0x20); // orange
-        tc.success = Color32::from_rgb(0x40, 0x90, 0xE0); // blue
-        tc.beat_color = Color32::from_rgb(0xE0, 0xA0, 0x30); // orange-gold
-        tc
+    /// Midnight: deep navy with steel blue and ice blue accent
+    pub fn midnight() -> Self {
+        Self {
+            canvas: Color32::from_rgb(0x08, 0x0C, 0x14),
+            panel: Color32::from_rgba_premultiplied(0x0E, 0x12, 0x1C, 0xE6),
+            text_primary: Color32::from_rgb(0xD0, 0xE0, 0xF0),
+            text_secondary: Color32::from_rgb(0x80, 0x98, 0xB0),
+            accent: Color32::from_rgb(0x50, 0x90, 0xD0),
+            error: Color32::from_rgb(0xD0, 0x60, 0x70),
+            warning: Color32::from_rgb(0xC0, 0xA0, 0x50),
+            success: Color32::from_rgb(0x50, 0xB0, 0x80),
+            widget_bg: Color32::from_rgb(0x1A, 0x24, 0x36),
+            card_bg: Color32::from_rgb(0x14, 0x1A, 0x28),
+            card_border: Color32::from_rgb(0x2A, 0x38, 0x50),
+            beat_color: Color32::from_rgb(0x60, 0xB0, 0xFF),
+            meter_bg: Color32::from_rgb(0x0A, 0x10, 0x18),
+            separator: Color32::from_rgb(0x24, 0x34, 0x4A),
+        }
     }
 
-    /// Protanopia (red-blind): error=yellow-gold, success=blue, beat=gold
-    pub fn protanopia() -> Self {
-        let mut tc = Self::dark();
-        tc.error = Color32::from_rgb(0xD0, 0xB0, 0x20); // yellow-gold
-        tc.success = Color32::from_rgb(0x40, 0x90, 0xE0); // blue
-        tc.beat_color = Color32::from_rgb(0xD0, 0xA0, 0x20); // gold
-        tc
+    /// Ember: warm charcoal with amber-tinted widgets and orange accent
+    pub fn ember() -> Self {
+        Self {
+            canvas: Color32::from_rgb(0x10, 0x0C, 0x08),
+            panel: Color32::from_rgba_premultiplied(0x1A, 0x14, 0x10, 0xE6),
+            text_primary: Color32::from_rgb(0xE8, 0xD8, 0xC8),
+            text_secondary: Color32::from_rgb(0xA8, 0x90, 0x78),
+            accent: Color32::from_rgb(0xE0, 0x90, 0x30),
+            error: Color32::from_rgb(0xE0, 0x50, 0x40),
+            warning: Color32::from_rgb(0xD4, 0xA0, 0x40),
+            success: Color32::from_rgb(0x80, 0xC0, 0x50),
+            widget_bg: Color32::from_rgb(0x2C, 0x22, 0x1A),
+            card_bg: Color32::from_rgb(0x24, 0x1C, 0x16),
+            card_border: Color32::from_rgb(0x40, 0x30, 0x20),
+            beat_color: Color32::from_rgb(0xFF, 0x80, 0x30),
+            meter_bg: Color32::from_rgb(0x14, 0x10, 0x0C),
+            separator: Color32::from_rgb(0x3A, 0x2C, 0x20),
+        }
     }
 
-    /// Tritanopia (blue-yellow): accent=red, warning=cyan, success=cyan
-    pub fn tritanopia() -> Self {
-        let mut tc = Self::dark();
-        tc.accent = Color32::from_rgb(0xE0, 0x50, 0x50); // red
-        tc.warning = Color32::from_rgb(0x40, 0xC0, 0xC0); // cyan
-        tc.success = Color32::from_rgb(0x40, 0xC0, 0xC0); // cyan
-        tc.beat_color = Color32::from_rgb(0xFF, 0x70, 0x70); // bright red
-        tc
+    /// Neon: dark purple-black with vivid magenta accent and cyan highlights
+    pub fn neon() -> Self {
+        Self {
+            canvas: Color32::from_rgb(0x06, 0x04, 0x0C),
+            panel: Color32::from_rgba_premultiplied(0x0C, 0x0A, 0x14, 0xE6),
+            text_primary: Color32::from_rgb(0xE0, 0xD0, 0xF0),
+            text_secondary: Color32::from_rgb(0x90, 0x80, 0xB0),
+            accent: Color32::from_rgb(0xFF, 0x50, 0xC0),
+            error: Color32::from_rgb(0xFF, 0x40, 0x60),
+            warning: Color32::from_rgb(0xE0, 0xC0, 0x40),
+            success: Color32::from_rgb(0x40, 0xE0, 0xC0),
+            widget_bg: Color32::from_rgb(0x1A, 0x14, 0x2A),
+            card_bg: Color32::from_rgb(0x14, 0x10, 0x20),
+            card_border: Color32::from_rgb(0x30, 0x20, 0x44),
+            beat_color: Color32::from_rgb(0xFF, 0x50, 0xC0),
+            meter_bg: Color32::from_rgb(0x08, 0x06, 0x10),
+            separator: Color32::from_rgb(0x28, 0x1C, 0x3C),
+        }
     }
 }
 
@@ -143,24 +175,23 @@ mod tests {
     }
 
     #[test]
-    fn deuteranopia_overrides_error_to_orange() {
-        let tc = ThemeColors::deuteranopia();
-        assert_eq!(tc.error, Color32::from_rgb(0xE0, 0x80, 0x20));
-        // base is dark, so canvas should match dark
-        assert_eq!(tc.canvas, ThemeColors::dark().canvas);
+    fn midnight_has_navy_canvas() {
+        let tc = ThemeColors::midnight();
+        assert_eq!(tc.canvas, Color32::from_rgb(0x08, 0x0C, 0x14));
+        assert_eq!(tc.accent, Color32::from_rgb(0x50, 0x90, 0xD0));
     }
 
     #[test]
-    fn protanopia_overrides_error_to_gold() {
-        let tc = ThemeColors::protanopia();
-        assert_eq!(tc.error, Color32::from_rgb(0xD0, 0xB0, 0x20));
-        assert_eq!(tc.success, Color32::from_rgb(0x40, 0x90, 0xE0));
+    fn ember_has_warm_canvas() {
+        let tc = ThemeColors::ember();
+        assert_eq!(tc.canvas, Color32::from_rgb(0x10, 0x0C, 0x08));
+        assert_eq!(tc.accent, Color32::from_rgb(0xE0, 0x90, 0x30));
     }
 
     #[test]
-    fn tritanopia_overrides_accent_to_red() {
-        let tc = ThemeColors::tritanopia();
-        assert_eq!(tc.accent, Color32::from_rgb(0xE0, 0x50, 0x50));
-        assert_eq!(tc.warning, Color32::from_rgb(0x40, 0xC0, 0xC0));
+    fn neon_has_purple_canvas() {
+        let tc = ThemeColors::neon();
+        assert_eq!(tc.canvas, Color32::from_rgb(0x06, 0x04, 0x0C));
+        assert_eq!(tc.accent, Color32::from_rgb(0xFF, 0x50, 0xC0));
     }
 }

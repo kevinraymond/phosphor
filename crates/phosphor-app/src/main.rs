@@ -165,6 +165,9 @@ impl ApplicationHandler for PhosphorApp {
                 let layer_infos = app.layer_infos();
                 let active_layer = app.layer_stack.active_layer;
 
+                // Auto-show panels after startup delay
+                app.egui_overlay.update_auto_show();
+
                 // Prepare egui frame
                 app.egui_overlay.begin_frame(&app.window);
                 {
