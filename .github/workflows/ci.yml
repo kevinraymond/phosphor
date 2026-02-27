@@ -72,7 +72,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.os }}-${{ matrix.target }}
+          key: ${{ matrix.os }}-${{ matrix.target }}-v2
       - name: Build
         run: cargo build --target ${{ matrix.target }}
       - name: Build (video feature)

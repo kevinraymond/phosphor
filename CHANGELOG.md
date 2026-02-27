@@ -3,6 +3,13 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## v0.3.3 — 2026-02-27
+
+### Fixes
+- Rebuild release binaries with clean CI cache (fixes audio callbacks not firing in CI-built binaries)
+- Suppress noisy ALSA/JACK/OSS stderr messages on Linux during device enumeration
+- Overhaul blend modes: replace SoftLight with ColorDodge, HardLight, Exclusion, Subtract
+
 ## v0.3.2 — 2026-02-26
 
 ### Fixes
