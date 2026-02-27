@@ -14,6 +14,7 @@
 ### Changed
 - Rename Settings panel to Global
 - Replace CVD themes (Deuteranopia/Protanopia/Tritanopia) with visually distinct VJ themes (Midnight/Ember/Neon)
+- **Tune Veil effect** — higher particle density (750 emit rate), larger sizes, boosted brightness, softer vignette, fold-boost alpha for richer fabric appearance
 
 ### Fixes
 - Show actual dlopen error messages in NDI diagnostics panel (exposes quarantine, signature, and architecture mismatch issues); upgrade failed-path logging to `warn` level; add macOS troubleshooting tips for quarantine removal and ad-hoc signing

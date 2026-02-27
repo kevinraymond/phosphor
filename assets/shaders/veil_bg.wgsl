@@ -25,7 +25,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     var col = prev.rgb * decay;
 
     // Hard cap — very tight for 6000 additive particles covering the whole screen
-    col = min(col, vec3f(0.35));
+    col = min(col, vec3f(0.2));
 
     // Gentle horizontal gradient tint based on color_shift param
     let color_shift = param(3u);
@@ -34,7 +34,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
 
     // Soft vignette
     let center = uv - 0.5;
-    let vignette = 1.0 - dot(center, center) * 1.2;
+    let vignette = 1.0 - dot(center, center) * 0.6;
     col *= max(vignette, 0.0);
 
     let alpha = clamp(max(col.r, max(col.g, col.b)) * 2.0, 0.0, 1.0);

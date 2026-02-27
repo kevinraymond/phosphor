@@ -115,14 +115,14 @@ fn emit_particle(idx: u32) -> Particle {
     let r_c = abs(hue * 6.0 - 3.0) - 1.0;
     let g_c = 2.0 - abs(hue * 6.0 - 2.0);
     let b_c = 2.0 - abs(hue * 6.0 - 4.0);
-    let brightness = 0.025 + u.rms * 0.015;
+    let brightness = 0.04 + u.rms * 0.02;
 
     // Stagger initial age
     let initial_age = hash(seed_base + 9.0) * u.lifetime * 0.5;
 
     p.pos_life = vec4f(pos, 0.0, 1.0);
     p.vel_size = vec4f(vel, 0.0, u.initial_size * (0.8 + hash(seed_base + 3.0) * 0.4));
-    p.color = vec4f(clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0)) * brightness, 0.12);
+    p.color = vec4f(clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0)) * brightness, 0.08);
     // Store home position in flags.z/w
     p.flags = vec4f(initial_age, u.lifetime, home_x, home_y);
     return p;
@@ -163,7 +163,9 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let home = vec2f(p.flags.z, p.flags.w);
 
     // Compute displaced target via displacement field
-    let displaced_home = home + displacement_field(to_screen(home), u.time);
+    let disp = displacement_field(to_screen(home), u.time);
+    let displaced_home = home + disp;
+    let disp_mag = length(disp);
 
     // Spring force toward displaced home (k=3.0 from attraction_strength)
     let to_home = displaced_home - p.pos_life.xy;
@@ -192,10 +194,13 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let base_size = mix(p.vel_size.w, u.size_end, life_frac * 0.5);
     let size = base_size * (1.0 + u.rms * 0.2);
 
-    // Alpha: fade in and out
+    // Alpha: fade in/out, boosted at fabric folds (high displacement)
+    // Dampen by audio energy so loud parts don't blow out to uniform fill
     let fade_in = smoothstep(0.0, 0.1, life_frac);
     let fade_out = 1.0 - smoothstep(0.7, 1.0, life_frac);
-    let alpha = 0.1 * fade_in * fade_out;
+    let fold_boost = smoothstep(0.02, 0.2, disp_mag);
+    let loudness_dampen = 1.0 / (1.0 + (u.bass + u.mid) * 1.5);
+    let alpha = (0.01 + 0.05 * fold_boost) * fade_in * fade_out * loudness_dampen;
 
     // Gentle color evolution
     var col = p.color.rgb;
