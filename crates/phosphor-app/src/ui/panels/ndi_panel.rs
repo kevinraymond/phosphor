@@ -52,7 +52,7 @@ pub fn draw_ndi_panel(ui: &mut Ui, info: &NdiInfo) {
                     {
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new("Tip: check quarantine with:\n  xattr -d com.apple.quarantine /usr/local/lib/libndi.dylib\n\nIf still failing, try ad-hoc signing:\n  codesign -s - /usr/local/lib/libndi.dylib")
+                            RichText::new("Tip: if you see a \"different Team IDs\" error,\nupdate to the latest release (includes library\nvalidation entitlement fix).\n\nAlso check quarantine with:\n  xattr -d com.apple.quarantine /usr/local/lib/libndi.dylib")
                                 .size(SMALL_SIZE - 1.0)
                                 .color(tc.text_secondary),
                         );
