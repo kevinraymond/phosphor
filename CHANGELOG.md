@@ -3,7 +3,7 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
-## v0.3.7 — 2026-02-26
+## v0.3.8 — 2026-02-27
 
 ### Added
 - **Webcam input layers** — live camera feed as a compositing layer (`--features webcam`), cross-platform via nokhwa (v4l2/AVFoundation/MediaFoundation)
