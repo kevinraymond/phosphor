@@ -3,11 +3,24 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
-## v0.3.8 — 2026-02-27
+## v0.3.9 — 2026-02-27
 
 ### Added
 - **Three new particle effects** — Veil (flowing silk curtain with displacement field physics), Nova (fireworks with burst emission and gravity), Vortex (black hole with 1/r² orbital mechanics, accretion disk, and polar jets)
+- **Keyboard hints in status bar** — "D toggle overlay · F fullscreen" shown when overlay is hidden
+- **Auto-show panels** — overlay panels fade in with 2s delay + 1s alpha fade on first launch, bypassed by manual toggle
+- BPM convergence tests at 90/120/140/170/200/230 BPM with extracted `run_bpm_convergence_test` helper
 
+### Changed
+- Rename Settings panel to Global
+- Replace CVD themes (Deuteranopia/Protanopia/Tritanopia) with visually distinct VJ themes (Midnight/Ember/Neon)
+
+### Fixes
+- Show actual dlopen error messages in NDI diagnostics panel (exposes quarantine, signature, and architecture mismatch issues); upgrade failed-path logging to `warn` level; add macOS troubleshooting tips for quarantine removal and ad-hoc signing
+
+## v0.3.8 — 2026-02-27
+
+### Added
 - **Webcam input layers** — live camera feed as a compositing layer (`--features webcam`), cross-platform via nokhwa (v4l2/AVFoundation/MediaFoundation)
   - Capture thread with bounded channel, automatic frame drain (latest-only)
   - "+ Webcam" button in layer panel, webcam controls panel (device name, resolution, mirror, disconnect)
@@ -21,7 +34,6 @@
 
 ### Fixes
 - Fix NDI runtime discovery on macOS — remove non-existent versioned dylib names, skip `exists()` check (works around NDI 6.0.0 installer permissions bug), add `/opt/homebrew/lib` + `NDI_RUNTIME_DIR_V6`/`V5` env vars, show searched paths in UI when not found
-- Show actual dlopen error messages in NDI diagnostics panel (exposes quarantine, signature, and architecture mismatch issues); upgrade failed-path logging to `warn` level; add macOS troubleshooting tips for quarantine removal and ad-hoc signing
 - **Webcam robustness** — validate camera access before spawning capture thread (user-friendly EBUSY error), catch libjpeg panics on corrupted MJPEG frames (skip frame instead of dying), detect dead capture threads with status bar notification, clean up capture when deleting webcam layers
 
 ## v0.3.6 — 2026-02-27
