@@ -12,6 +12,7 @@
 ### Fixed
 - **Webcam layer preset ordering** — loading a preset with a webcam layer no longer appends it to the end of the stack; webcam content is now placed in-place at its correct index, preventing extra stray layers and layer count growth on repeated save/load cycles
 - **Webcam decode panic hardening** — backoff (50ms sleep) after corrupted frame decode panics to avoid hammering a broken camera; auto-stop capture thread after 10 consecutive panics with user-visible error log
+- Log GPU present mode and available modes on startup for easier driver issue diagnosis
 
 ## v0.3.10 — 2026-02-27
 
