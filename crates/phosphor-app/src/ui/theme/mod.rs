@@ -14,9 +14,9 @@ pub enum ThemeMode {
     Dark,
     Light,
     HighContrast,
-    Deuteranopia,
-    Protanopia,
-    Tritanopia,
+    Midnight,
+    Ember,
+    Neon,
 }
 
 impl ThemeMode {
@@ -24,9 +24,9 @@ impl ThemeMode {
         ThemeMode::Dark,
         ThemeMode::Light,
         ThemeMode::HighContrast,
-        ThemeMode::Deuteranopia,
-        ThemeMode::Protanopia,
-        ThemeMode::Tritanopia,
+        ThemeMode::Midnight,
+        ThemeMode::Ember,
+        ThemeMode::Neon,
     ];
 
     pub fn display_name(&self) -> &'static str {
@@ -34,17 +34,18 @@ impl ThemeMode {
             ThemeMode::Dark => "Dark",
             ThemeMode::Light => "Light",
             ThemeMode::HighContrast => "High Contrast",
-            ThemeMode::Deuteranopia => "Deuteranopia",
-            ThemeMode::Protanopia => "Protanopia",
-            ThemeMode::Tritanopia => "Tritanopia",
+            ThemeMode::Midnight => "Midnight",
+            ThemeMode::Ember => "Ember",
+            ThemeMode::Neon => "Neon",
         }
     }
 
     pub fn visuals(&self) -> Visuals {
         match self {
-            ThemeMode::Dark | ThemeMode::Deuteranopia | ThemeMode::Protanopia | ThemeMode::Tritanopia => {
-                dark::dark_visuals()
-            }
+            ThemeMode::Dark => dark::dark_visuals(),
+            ThemeMode::Midnight => midnight_visuals(),
+            ThemeMode::Ember => ember_visuals(),
+            ThemeMode::Neon => neon_visuals(),
             ThemeMode::Light => light::light_visuals(),
             ThemeMode::HighContrast => high_contrast_visuals(),
         }
@@ -55,9 +56,9 @@ impl ThemeMode {
             ThemeMode::Dark => ThemeColors::dark(),
             ThemeMode::Light => ThemeColors::light(),
             ThemeMode::HighContrast => ThemeColors::high_contrast(),
-            ThemeMode::Deuteranopia => ThemeColors::deuteranopia(),
-            ThemeMode::Protanopia => ThemeColors::protanopia(),
-            ThemeMode::Tritanopia => ThemeColors::tritanopia(),
+            ThemeMode::Midnight => ThemeColors::midnight(),
+            ThemeMode::Ember => ThemeColors::ember(),
+            ThemeMode::Neon => ThemeColors::neon(),
         }
     }
 
@@ -68,6 +69,108 @@ impl ThemeMode {
             _ => ThemeMode::Dark,
         }
     }
+}
+
+fn midnight_visuals() -> Visuals {
+    use egui::{Color32, Stroke};
+
+    let mut v = dark::dark_visuals();
+
+    // Deep navy panels
+    v.panel_fill = Color32::from_rgb(0x0E, 0x12, 0x1C);
+    v.window_fill = Color32::from_rgb(0x0E, 0x12, 0x1C);
+    v.extreme_bg_color = Color32::from_rgb(0x08, 0x0C, 0x14);
+
+    v.widgets.noninteractive.bg_fill = Color32::from_rgb(0x14, 0x1A, 0x28);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xB0, 0xC0, 0xD0));
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x2A, 0x38, 0x50));
+
+    v.widgets.inactive.bg_fill = Color32::from_rgb(0x1A, 0x24, 0x36);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xC0, 0xD0, 0xE0));
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x30, 0x40, 0x58));
+
+    v.widgets.hovered.bg_fill = Color32::from_rgb(0x22, 0x30, 0x48);
+    v.widgets.hovered.fg_stroke = Stroke::new(1.5, Color32::from_rgb(0xD0, 0xE0, 0xF0));
+    v.widgets.hovered.bg_stroke = Stroke::new(1.5, Color32::from_rgb(0x50, 0x90, 0xD0));
+
+    v.widgets.active.bg_fill = Color32::from_rgb(0x28, 0x3A, 0x54);
+    v.widgets.active.fg_stroke = Stroke::new(1.5, Color32::from_rgb(0xE0, 0xF0, 0xFF));
+    v.widgets.active.bg_stroke = Stroke::new(2.0, Color32::from_rgb(0x50, 0x90, 0xD0));
+
+    v.selection.bg_fill = Color32::from_rgb(0x50, 0x90, 0xD0).gamma_multiply(0.4);
+    v.selection.stroke = Stroke::new(1.5, Color32::from_rgb(0x50, 0x90, 0xD0));
+
+    v.window_stroke = Stroke::new(1.0, Color32::from_rgb(0x2A, 0x38, 0x50));
+
+    v
+}
+
+fn ember_visuals() -> Visuals {
+    use egui::{Color32, Stroke};
+
+    let mut v = dark::dark_visuals();
+
+    // Warm charcoal panels
+    v.panel_fill = Color32::from_rgb(0x1A, 0x14, 0x10);
+    v.window_fill = Color32::from_rgb(0x1A, 0x14, 0x10);
+    v.extreme_bg_color = Color32::from_rgb(0x10, 0x0C, 0x08);
+
+    v.widgets.noninteractive.bg_fill = Color32::from_rgb(0x24, 0x1C, 0x16);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xD0, 0xC0, 0xB0));
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x40, 0x30, 0x20));
+
+    v.widgets.inactive.bg_fill = Color32::from_rgb(0x2C, 0x22, 0x1A);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xE0, 0xD0, 0xC0));
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x50, 0x38, 0x28));
+
+    v.widgets.hovered.bg_fill = Color32::from_rgb(0x38, 0x2A, 0x20);
+    v.widgets.hovered.fg_stroke = Stroke::new(1.5, Color32::from_rgb(0xF0, 0xE0, 0xD0));
+    v.widgets.hovered.bg_stroke = Stroke::new(1.5, Color32::from_rgb(0xE0, 0x90, 0x30));
+
+    v.widgets.active.bg_fill = Color32::from_rgb(0x44, 0x30, 0x22);
+    v.widgets.active.fg_stroke = Stroke::new(1.5, Color32::from_rgb(0xFF, 0xF0, 0xE0));
+    v.widgets.active.bg_stroke = Stroke::new(2.0, Color32::from_rgb(0xE0, 0x90, 0x30));
+
+    v.selection.bg_fill = Color32::from_rgb(0xE0, 0x90, 0x30).gamma_multiply(0.4);
+    v.selection.stroke = Stroke::new(1.5, Color32::from_rgb(0xE0, 0x90, 0x30));
+
+    v.window_stroke = Stroke::new(1.0, Color32::from_rgb(0x40, 0x30, 0x20));
+
+    v
+}
+
+fn neon_visuals() -> Visuals {
+    use egui::{Color32, Stroke};
+
+    let mut v = dark::dark_visuals();
+
+    // Very dark purple-black panels
+    v.panel_fill = Color32::from_rgb(0x0C, 0x0A, 0x14);
+    v.window_fill = Color32::from_rgb(0x0C, 0x0A, 0x14);
+    v.extreme_bg_color = Color32::from_rgb(0x06, 0x04, 0x0C);
+
+    v.widgets.noninteractive.bg_fill = Color32::from_rgb(0x14, 0x10, 0x20);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xC0, 0xB0, 0xD0));
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x30, 0x20, 0x44));
+
+    v.widgets.inactive.bg_fill = Color32::from_rgb(0x1A, 0x14, 0x2A);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xD0, 0xC0, 0xE0));
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x3A, 0x28, 0x50));
+
+    v.widgets.hovered.bg_fill = Color32::from_rgb(0x24, 0x1C, 0x38);
+    v.widgets.hovered.fg_stroke = Stroke::new(1.5, Color32::from_rgb(0xE0, 0xD0, 0xF0));
+    v.widgets.hovered.bg_stroke = Stroke::new(1.5, Color32::from_rgb(0xFF, 0x50, 0xC0));
+
+    v.widgets.active.bg_fill = Color32::from_rgb(0x2C, 0x22, 0x44);
+    v.widgets.active.fg_stroke = Stroke::new(1.5, Color32::from_rgb(0xF0, 0xE0, 0xFF));
+    v.widgets.active.bg_stroke = Stroke::new(2.0, Color32::from_rgb(0xFF, 0x50, 0xC0));
+
+    v.selection.bg_fill = Color32::from_rgb(0xFF, 0x50, 0xC0).gamma_multiply(0.35);
+    v.selection.stroke = Stroke::new(1.5, Color32::from_rgb(0xFF, 0x50, 0xC0));
+
+    v.window_stroke = Stroke::new(1.0, Color32::from_rgb(0x30, 0x20, 0x44));
+
+    v
 }
 
 fn high_contrast_visuals() -> Visuals {
@@ -149,9 +252,9 @@ mod tests {
         assert_eq!(ThemeMode::Dark.display_name(), "Dark");
         assert_eq!(ThemeMode::Light.display_name(), "Light");
         assert_eq!(ThemeMode::HighContrast.display_name(), "High Contrast");
-        assert_eq!(ThemeMode::Deuteranopia.display_name(), "Deuteranopia");
-        assert_eq!(ThemeMode::Protanopia.display_name(), "Protanopia");
-        assert_eq!(ThemeMode::Tritanopia.display_name(), "Tritanopia");
+        assert_eq!(ThemeMode::Midnight.display_name(), "Midnight");
+        assert_eq!(ThemeMode::Ember.display_name(), "Ember");
+        assert_eq!(ThemeMode::Neon.display_name(), "Neon");
     }
 
     #[test]
@@ -163,10 +266,18 @@ mod tests {
     }
 
     #[test]
-    fn theme_mode_cvd_toggle_returns_dark() {
-        assert_eq!(ThemeMode::Deuteranopia.toggle(), ThemeMode::Dark);
-        assert_eq!(ThemeMode::Protanopia.toggle(), ThemeMode::Dark);
-        assert_eq!(ThemeMode::Tritanopia.toggle(), ThemeMode::Dark);
+    fn theme_mode_visuals_dispatch_all() {
+        // Ensure visuals() doesn't panic for any variant
+        for mode in ThemeMode::ALL {
+            let _visuals = mode.visuals();
+        }
+    }
+
+    #[test]
+    fn theme_mode_vj_toggle_returns_dark() {
+        assert_eq!(ThemeMode::Midnight.toggle(), ThemeMode::Dark);
+        assert_eq!(ThemeMode::Ember.toggle(), ThemeMode::Dark);
+        assert_eq!(ThemeMode::Neon.toggle(), ThemeMode::Dark);
     }
 
     #[test]
@@ -174,8 +285,8 @@ mod tests {
         assert!(ThemeMode::ALL.contains(&ThemeMode::Dark));
         assert!(ThemeMode::ALL.contains(&ThemeMode::Light));
         assert!(ThemeMode::ALL.contains(&ThemeMode::HighContrast));
-        assert!(ThemeMode::ALL.contains(&ThemeMode::Deuteranopia));
-        assert!(ThemeMode::ALL.contains(&ThemeMode::Protanopia));
-        assert!(ThemeMode::ALL.contains(&ThemeMode::Tritanopia));
+        assert!(ThemeMode::ALL.contains(&ThemeMode::Midnight));
+        assert!(ThemeMode::ALL.contains(&ThemeMode::Ember));
+        assert!(ThemeMode::ALL.contains(&ThemeMode::Neon));
     }
 }

@@ -1311,9 +1311,9 @@ mod tests {
 
     // ---- Integration test ----
 
-    #[test]
-    fn synthetic_kick_bpm_converges() {
-        // Simulate 120 BPM kick drum: onset every 0.5s for 8 seconds
+    /// Run a BPM convergence test with synthetic kicks at the given tempo.
+    /// Returns the detected BPM after `duration_secs` seconds.
+    fn run_bpm_convergence_test(target_bpm: f64, duration_secs: f64) -> f32 {
         let sample_rate = 44100.0;
         let mut detector = BeatDetector::new(sample_rate);
 
@@ -1322,22 +1322,21 @@ mod tests {
         let high_len = 257;   // 512/2 + 1
 
         let dt = 0.01; // 100 Hz frame rate
-        let kick_interval = 0.5; // 120 BPM
+        let kick_interval = 60.0 / target_bpm;
         let mut last_kick = -1.0f64;
+        let num_frames = (duration_secs / dt) as usize;
 
         let mut last_bpm = 0.0f32;
 
-        for frame in 0..800 {
+        for frame in 0..num_frames {
             let t = frame as f64 * dt;
 
-            // Generate kick: a spike in bass spectrum every 0.5s
             let is_kick_frame = (t - last_kick) >= kick_interval - dt * 0.5;
             let mut bass = vec![0.001f32; bass_len];
             let mid = vec![0.001f32; mid_len];
             let high = vec![0.001f32; high_len];
 
             if is_kick_frame && t >= kick_interval {
-                // Put energy in kick bins (20-120 Hz)
                 for bin in 1..12 {
                     bass[bin] = 2.0;
                 }
@@ -1349,11 +1348,49 @@ mod tests {
             last_bpm = result.bpm;
         }
 
-        // After 8 seconds, BPM should be in the 100-140 range (centered on 120)
-        // The raw BPM (not normalized) — check that it's non-zero
-        assert!(last_bpm > 0.0, "BPM should be non-zero after 8s, got {}", last_bpm);
-        // BPM from BeatDetector is raw (not normalized), should be near 120
-        assert!(last_bpm > 80.0 && last_bpm < 180.0,
-            "BPM should be near 120, got {}", last_bpm);
+        eprintln!("BPM convergence: target={target_bpm}, detected={last_bpm}, duration={duration_secs}s");
+        last_bpm
+    }
+
+    #[test]
+    fn bpm_converges_120() {
+        let bpm = run_bpm_convergence_test(120.0, 8.0);
+        assert!(bpm > 102.0 && bpm < 138.0,
+            "120 BPM: expected 102-138, got {bpm}");
+    }
+
+    #[test]
+    fn bpm_converges_90() {
+        let bpm = run_bpm_convergence_test(90.0, 10.0);
+        assert!(bpm > 72.0 && bpm < 108.0,
+            "90 BPM: expected 72-108, got {bpm}");
+    }
+
+    #[test]
+    fn bpm_converges_140() {
+        let bpm = run_bpm_convergence_test(140.0, 10.0);
+        assert!(bpm > 112.0 && bpm < 168.0,
+            "140 BPM: expected 112-168, got {bpm}");
+    }
+
+    #[test]
+    fn bpm_converges_170() {
+        let bpm = run_bpm_convergence_test(170.0, 10.0);
+        assert!(bpm > 136.0 && bpm < 204.0,
+            "170 BPM: expected 136-204, got {bpm}");
+    }
+
+    #[test]
+    fn bpm_converges_200() {
+        let bpm = run_bpm_convergence_test(200.0, 10.0);
+        assert!(bpm > 160.0 && bpm < 240.0,
+            "200 BPM: expected 160-240, got {bpm}");
+    }
+
+    #[test]
+    fn bpm_converges_230() {
+        let bpm = run_bpm_convergence_test(230.0, 10.0);
+        assert!(bpm > 184.0 && bpm < 276.0,
+            "230 BPM: expected 184-276, got {bpm}");
     }
 }
