@@ -3,6 +3,12 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## v0.3.11 — 2026-02-27
+
+### Added
+- **Async preset loading** — presets with media/video layers decode in a background thread, keeping current content playing; atomic swap on completion with pulsing status bar indicator and preset button highlight
+- Generation-based cancellation for rapid MIDI preset cycling (only final preset applies)
+
 ## v0.3.10 — 2026-02-27
 
 ### Added

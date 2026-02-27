@@ -243,6 +243,14 @@ impl ApplicationHandler for PhosphorApp {
                         });
                     }
 
+                    // Store preset loading state in egui temp data for UI panels
+                    {
+                        let loading_state = app.preset_loader.state.clone();
+                        ctx.data_mut(|d| {
+                            d.insert_temp(egui::Id::new("preset_loading_state"), loading_state);
+                        });
+                    }
+
                     // Sync compile errors into shader editor
                     if app.shader_editor.open {
                         app.shader_editor.compile_error = app

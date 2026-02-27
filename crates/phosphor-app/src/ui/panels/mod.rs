@@ -69,6 +69,17 @@ pub fn draw_panels(
         });
         #[cfg(not(feature = "ndi"))]
         let ndi_running = false;
+        let preset_loading: Option<String> = ctx.data_mut(|d| {
+            d.get_temp::<crate::preset::loader::PresetLoadingState>(
+                egui::Id::new("preset_loading_state"),
+            )
+            .and_then(|s| match s {
+                crate::preset::loader::PresetLoadingState::Loading { preset_name, .. } => {
+                    Some(preset_name)
+                }
+                _ => None,
+            })
+        });
         status_bar::draw_status_bar(
             ui,
             shader_error,
@@ -83,6 +94,7 @@ pub fn draw_panels(
             web.client_count,
             ndi_running,
             status_error,
+            preset_loading.as_deref(),
         );
     });
 

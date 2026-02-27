@@ -50,6 +50,7 @@ pub fn draw_status_bar(
     web_client_count: usize,
     ndi_running: bool,
     status_error: &Option<(String, std::time::Instant)>,
+    preset_loading: Option<&str>,
 ) {
     let tc = theme_colors(ui.ctx());
 
@@ -68,6 +69,23 @@ pub fn draw_status_bar(
         else if let Some(err) = shader_error {
             ui.add_space(4.0);
             ui.colored_label(tc.error, RichText::new(format!("ERR: {err}")).size(SMALL_SIZE));
+        }
+        // Preset loading indicator
+        else if let Some(name) = preset_loading {
+            ui.add_space(4.0);
+            // Pulsing dots animation
+            let t = ui.input(|i| i.time);
+            let dots = match ((t * 3.0) as usize) % 4 {
+                0 => "",
+                1 => ".",
+                2 => "..",
+                _ => "...",
+            };
+            ui.colored_label(
+                tc.accent,
+                RichText::new(format!("Loading {name}{dots}")).size(SMALL_SIZE),
+            );
+            ui.ctx().request_repaint();
         }
         // Keyboard hints when idle
         else {
