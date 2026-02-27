@@ -243,8 +243,8 @@ fn try_load_from_dir(
                 return Some(lib);
             }
             Err(e) => {
-                log::debug!("NDI: {} failed: {e}", full.display());
-                diagnostics.push(format!("{}", full.display()));
+                log::warn!("NDI: {} failed: {e}", full.display());
+                diagnostics.push(format!("{}  ✗ {e}", full.display()));
             }
         }
     }
