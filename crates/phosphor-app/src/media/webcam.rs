@@ -209,6 +209,9 @@ fn capture_thread(
         res.height()
     );
 
+    let mut consecutive_panics: u32 = 0;
+    const MAX_CONSECUTIVE_PANICS: u32 = 10;
+
     while !shutdown.load(Ordering::Relaxed) {
         match camera.frame() {
             Ok(buffer) => {
@@ -220,6 +223,7 @@ fn capture_thread(
                 }));
                 match decoded {
                     Ok(Ok(img)) => {
+                        consecutive_panics = 0;
                         let frame = WebcamFrame {
                             data: img.into_raw(),
                             width: res.width(),
@@ -232,7 +236,17 @@ fn capture_thread(
                         log::warn!("Failed to decode webcam frame: {e}");
                     }
                     Err(_) => {
-                        log::warn!("Skipped corrupted webcam frame (decode panic)");
+                        consecutive_panics += 1;
+                        log::warn!(
+                            "Skipped corrupted webcam frame (decode panic, {consecutive_panics}/{MAX_CONSECUTIVE_PANICS})"
+                        );
+                        if consecutive_panics >= MAX_CONSECUTIVE_PANICS {
+                            log::error!(
+                                "Webcam producing only corrupted frames — stopping capture thread"
+                            );
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
                     }
                 }
             }
