@@ -14,7 +14,7 @@
 - **Combined "All Media" file filter** — media file picker defaults to showing all supported types (images + video) when video feature is enabled
 
 ### Fixes
-- Fix NDI runtime discovery on Windows and macOS — check `NDI_RUNTIME_DIR_V6`/`V5` env vars and well-known install paths
+- Fix NDI runtime discovery on macOS — remove non-existent versioned dylib names, skip `exists()` check (works around NDI 6.0.0 installer permissions bug), add `/opt/homebrew/lib` + `NDI_RUNTIME_DIR_V6`/`V5` env vars, show searched paths in UI when not found
 - **Webcam robustness** — validate camera access before spawning capture thread (user-friendly EBUSY error), catch libjpeg panics on corrupted MJPEG frames (skip frame instead of dying), detect dead capture threads with status bar notification, clean up capture when deleting webcam layers
 
 ## v0.3.6 — 2026-02-27

@@ -71,7 +71,8 @@ unsafe impl Sync for NdiLib {}
 impl NdiLib {
     /// Try to load the NDI runtime library.
     pub fn load() -> Result<Self, String> {
-        let lib = load_ndi_library()?;
+        let mut diagnostics = Vec::new();
+        let lib = load_ndi_library(&mut diagnostics)?;
 
         unsafe {
             let fn_initialize: FnInitialize = *lib
@@ -178,31 +179,72 @@ impl Drop for NdiSender {
     }
 }
 
+/// Cached NDI availability result with search diagnostics.
+struct NdiAvailability {
+    available: bool,
+    diagnostics: Vec<String>,
+}
+
+static NDI_AVAILABILITY: OnceLock<NdiAvailability> = OnceLock::new();
+
 /// Check whether the NDI runtime is available (cached).
 pub fn ndi_available() -> bool {
-    static AVAILABLE: OnceLock<bool> = OnceLock::new();
-    *AVAILABLE.get_or_init(|| {
-        match load_ndi_library() {
-            Ok(_) => {
-                log::info!("NDI runtime library found");
-                true
+    NDI_AVAILABILITY
+        .get_or_init(|| {
+            let mut diagnostics = Vec::new();
+            match load_ndi_library(&mut diagnostics) {
+                Ok(_) => {
+                    log::info!("NDI runtime library found");
+                    NdiAvailability {
+                        available: true,
+                        diagnostics,
+                    }
+                }
+                Err(e) => {
+                    log::info!("NDI runtime not available: {e}");
+                    NdiAvailability {
+                        available: false,
+                        diagnostics,
+                    }
+                }
             }
-            Err(e) => {
-                log::info!("NDI runtime not available: {e}");
-                false
+        })
+        .available
+}
+
+/// Return the paths searched during NDI library discovery (for UI diagnostics).
+pub fn ndi_search_diagnostics() -> &'static [String] {
+    NDI_AVAILABILITY
+        .get_or_init(|| {
+            // Trigger discovery if not yet run
+            let mut diagnostics = Vec::new();
+            let available = load_ndi_library(&mut diagnostics).is_ok();
+            NdiAvailability {
+                available,
+                diagnostics,
             }
-        }
-    })
+        })
+        .diagnostics
+        .as_slice()
 }
 
 /// Try to load the NDI library from a specific directory.
-fn try_load_from_dir(dir: &std::path::Path) -> Option<libloading::Library> {
+/// Always attempts `dlopen` even if `exists()` fails (works around NDI 6.0.0
+/// macOS installer permissions bug where `/usr/local/lib` is mode 700).
+fn try_load_from_dir(
+    dir: &std::path::Path,
+    diagnostics: &mut Vec<String>,
+) -> Option<libloading::Library> {
     for name in platform_lib_names() {
         let full = dir.join(name);
-        if full.exists() {
-            match unsafe { libloading::Library::new(&full) } {
-                Ok(lib) => return Some(lib),
-                Err(e) => log::debug!("NDI lib exists at {} but failed to load: {e}", full.display()),
+        match unsafe { libloading::Library::new(&full) } {
+            Ok(lib) => {
+                log::info!("NDI library loaded from {}", full.display());
+                return Some(lib);
+            }
+            Err(e) => {
+                log::debug!("NDI: {} failed: {e}", full.display());
+                diagnostics.push(format!("{}", full.display()));
             }
         }
     }
@@ -210,13 +252,12 @@ fn try_load_from_dir(dir: &std::path::Path) -> Option<libloading::Library> {
 }
 
 /// Try to find and load the NDI shared library.
-fn load_ndi_library() -> Result<libloading::Library, String> {
-    let mut checked: Vec<String> = Vec::new();
-
+/// Appends searched paths to `diagnostics` for UI display.
+fn load_ndi_library(diagnostics: &mut Vec<String>) -> Result<libloading::Library, String> {
     // 1. NDILIB_REDIST_FOLDER env var (official NDI SDK recommendation).
     if let Ok(folder) = std::env::var("NDILIB_REDIST_FOLDER") {
-        checked.push(format!("NDILIB_REDIST_FOLDER={folder}"));
-        if let Some(lib) = try_load_from_dir(std::path::Path::new(&folder)) {
+        diagnostics.push(format!("NDILIB_REDIST_FOLDER={folder}"));
+        if let Some(lib) = try_load_from_dir(std::path::Path::new(&folder), diagnostics) {
             return Ok(lib);
         }
     }
@@ -227,8 +268,10 @@ fn load_ndi_library() -> Result<libloading::Library, String> {
         // NDI 6/5 Runtime installer sets these env vars.
         for var in &["NDI_RUNTIME_DIR_V6", "NDI_RUNTIME_DIR_V5"] {
             if let Ok(folder) = std::env::var(var) {
-                checked.push(format!("{var}={folder}"));
-                if let Some(lib) = try_load_from_dir(std::path::Path::new(&folder)) {
+                diagnostics.push(format!("{var}={folder}"));
+                if let Some(lib) =
+                    try_load_from_dir(std::path::Path::new(&folder), diagnostics)
+                {
                     return Ok(lib);
                 }
             }
@@ -238,8 +281,8 @@ fn load_ndi_library() -> Result<libloading::Library, String> {
             r"C:\Program Files\NDI\NDI 6 Runtime\v6",
             r"C:\Program Files\NDI\NDI 5 Runtime\v5",
         ] {
-            checked.push(path.to_string());
-            if let Some(lib) = try_load_from_dir(std::path::Path::new(path)) {
+            diagnostics.push(path.to_string());
+            if let Some(lib) = try_load_from_dir(std::path::Path::new(path), diagnostics) {
                 return Ok(lib);
             }
         }
@@ -247,34 +290,48 @@ fn load_ndi_library() -> Result<libloading::Library, String> {
 
     #[cfg(target_os = "macos")]
     {
+        // NDI SDK defines these env vars for macOS too.
+        for var in &["NDI_RUNTIME_DIR_V6", "NDI_RUNTIME_DIR_V5"] {
+            if let Ok(folder) = std::env::var(var) {
+                diagnostics.push(format!("{var}={folder}"));
+                if let Some(lib) =
+                    try_load_from_dir(std::path::Path::new(&folder), diagnostics)
+                {
+                    return Ok(lib);
+                }
+            }
+        }
         let mut mac_paths = vec![
             "/usr/local/lib".to_string(),
+            "/opt/homebrew/lib".to_string(),
             "/Library/NDI SDK for Apple/lib/macOS".to_string(),
         ];
         if let Ok(home) = std::env::var("HOME") {
             mac_paths.push(format!("{home}/NDI SDK for Apple/lib/macOS"));
         }
         for path in &mac_paths {
-            checked.push(path.clone());
-            if let Some(lib) = try_load_from_dir(std::path::Path::new(path)) {
+            diagnostics.push(path.clone());
+            if let Some(lib) = try_load_from_dir(std::path::Path::new(path), diagnostics) {
                 return Ok(lib);
             }
         }
     }
 
     // 3. Bare library names via system linker (LD_LIBRARY_PATH, /usr/lib, etc.).
-    checked.push("system linker search".to_string());
+    diagnostics.push("system linker search".to_string());
     for name in platform_lib_names() {
         match unsafe { libloading::Library::new(name) } {
             Ok(lib) => return Ok(lib),
-            Err(_) => continue,
+            Err(e) => {
+                log::debug!("NDI: system linker {name} failed: {e}");
+            }
         }
     }
 
     Err(format!(
         "NDI library not found. Install the NDI Runtime from https://ndi.video/tools/\n\
          Searched: {}",
-        checked.join(", ")
+        diagnostics.join(", ")
     ))
 }
 
@@ -285,7 +342,7 @@ fn platform_lib_names() -> &'static [&'static str] {
     }
     #[cfg(target_os = "macos")]
     {
-        &["libndi.6.dylib", "libndi.5.dylib", "libndi.dylib"]
+        &["libndi.dylib"]
     }
     #[cfg(target_os = "windows")]
     {

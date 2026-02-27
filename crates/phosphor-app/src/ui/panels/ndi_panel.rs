@@ -1,5 +1,6 @@
 use egui::{Color32, RichText, Ui};
 
+use crate::ndi::ffi::ndi_search_diagnostics;
 use crate::ndi::types::OutputResolution;
 use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
@@ -25,7 +26,7 @@ pub fn draw_ndi_panel(ui: &mut Ui, info: &NdiInfo) {
 
     if !info.ndi_available {
         ui.label(
-            RichText::new("NDI® runtime not found. Install NDI® Tools:")
+            RichText::new("NDI® runtime not found. Install NDI® Runtime:")
                 .size(SMALL_SIZE)
                 .color(tc.text_secondary),
         );
@@ -33,6 +34,32 @@ pub fn draw_ndi_panel(ui: &mut Ui, info: &NdiInfo) {
             RichText::new("ndi.video →").size(SMALL_SIZE),
             "https://ndi.video",
         );
+        ui.add_space(4.0);
+
+        let diagnostics = ndi_search_diagnostics();
+        if !diagnostics.is_empty() {
+            ui.collapsing(
+                RichText::new("Searched locations").size(SMALL_SIZE),
+                |ui| {
+                    for path in diagnostics {
+                        ui.label(
+                            RichText::new(path)
+                                .size(SMALL_SIZE - 1.0)
+                                .color(tc.text_secondary),
+                        );
+                    }
+                    #[cfg(target_os = "macos")]
+                    {
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new("Tip: try  sudo chmod 755 /usr/local/lib")
+                                .size(SMALL_SIZE - 1.0)
+                                .color(tc.text_secondary),
+                        );
+                    }
+                },
+            );
+        }
         return;
     }
 
