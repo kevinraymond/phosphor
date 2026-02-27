@@ -783,6 +783,36 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
         }
     });
 
+    // Webcam button (feature-gated)
+    #[cfg(feature = "webcam")]
+    {
+        let webcam_btn = ui.add_enabled(
+            can_add,
+            egui::Button::new(
+                RichText::new("+ Webcam")
+                    .size(SMALL_SIZE)
+                    .color(if can_add {
+                        Color32::from_rgb(0x80, 0xA0, 0xE0)
+                    } else {
+                        tc.text_secondary
+                    }),
+            )
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::new(1.0, tc.card_border))
+            .corner_radius(CornerRadius::same(4))
+            .min_size(Vec2::new(ui.available_width(), MIN_INTERACT_HEIGHT)),
+        );
+        if webcam_btn.clicked() {
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(egui::Id::new("add_webcam_layer"), true));
+        }
+        if can_add {
+            webcam_btn.on_hover_text("Add a live webcam layer (max 8)");
+        } else {
+            webcam_btn.on_hover_text("Maximum 8 layers reached");
+        }
+    }
+
     // Clear All button (only when >1 layer)
     if num_layers > 1 {
         let now = ui.input(|i| i.time);

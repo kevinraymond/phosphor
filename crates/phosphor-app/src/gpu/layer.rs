@@ -289,6 +289,7 @@ pub struct LayerInfo {
     pub media_file_name: Option<String>,
     pub media_is_animated: bool,
     pub media_is_video: bool,
+    pub media_is_live: bool,
 }
 
 /// Manages an ordered stack of layers.
@@ -338,9 +339,9 @@ impl LayerStack {
         self.layers
             .iter()
             .map(|l| {
-                let (is_media, media_file_name, media_is_animated, media_is_video) = match &l.content {
-                    LayerContent::Media(m) => (true, Some(m.file_name.clone()), m.is_animated(), m.is_video()),
-                    _ => (false, None, false, false),
+                let (is_media, media_file_name, media_is_animated, media_is_video, media_is_live) = match &l.content {
+                    LayerContent::Media(m) => (true, Some(m.file_name.clone()), m.is_animated(), m.is_video(), m.is_live()),
+                    _ => (false, None, false, false, false),
                 };
                 LayerInfo {
                     name: l.name.clone(),
@@ -358,6 +359,7 @@ impl LayerStack {
                     media_file_name,
                     media_is_animated,
                     media_is_video,
+                    media_is_live,
                 }
             })
             .collect()

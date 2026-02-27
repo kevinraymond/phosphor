@@ -2,6 +2,8 @@ pub mod decoder;
 pub mod types;
 #[cfg(feature = "video")]
 pub mod video;
+#[cfg(feature = "webcam")]
+pub mod webcam;
 
 use std::path::PathBuf;
 
@@ -50,6 +52,12 @@ pub struct MediaLayer {
     needs_upload: bool,
     // PingPong direction for GIF
     pingpong_forward: bool,
+    // Live webcam frame data (set externally by capture thread)
+    #[cfg(feature = "webcam")]
+    live_frame_data: Option<Vec<u8>>,
+    /// Mirror horizontally (for selfie cameras).
+    #[cfg(feature = "webcam")]
+    pub mirror: bool,
 }
 
 impl MediaLayer {
@@ -75,11 +83,13 @@ impl MediaLayer {
                 delays_ms.iter().map(|&d| d as f64).sum::<f64>()
             }
             MediaSource::Static(_) => 0.0,
+            #[cfg(feature = "webcam")]
+            MediaSource::Live { .. } => 0.0,
         };
 
         let mut transport = TransportState::default();
         transport.duration = duration;
-        // Static images don't play
+        // Static images and live sources don't use transport playback
         if !source.is_animated() {
             transport.playing = false;
         }
@@ -109,10 +119,17 @@ impl MediaLayer {
             ..Default::default()
         });
 
-        // Upload first frame
-        let first_frame_data = match &source {
+        // Upload first frame (black for live sources)
+        #[cfg(feature = "webcam")]
+        let black_placeholder: Vec<u8>;
+        let first_frame_data: &[u8] = match &source {
             MediaSource::Static(f) => &f.data,
             MediaSource::Animated { frames, .. } => &frames[0].data,
+            #[cfg(feature = "webcam")]
+            MediaSource::Live { width, height } => {
+                black_placeholder = vec![0u8; (*width as usize) * (*height as usize) * 4];
+                &black_placeholder
+            }
         };
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -267,6 +284,10 @@ impl MediaLayer {
             media_height,
             needs_upload: false,
             pingpong_forward: true,
+            #[cfg(feature = "webcam")]
+            live_frame_data: None,
+            #[cfg(feature = "webcam")]
+            mirror: false,
         }
     }
 
@@ -302,6 +323,8 @@ impl MediaLayer {
         let delays_ms = match &self.source {
             MediaSource::Animated { delays_ms, .. } => delays_ms,
             MediaSource::Static(_) => return,
+            #[cfg(feature = "webcam")]
+            MediaSource::Live { .. } => return, // live frames set externally
         };
 
         let num_frames = delays_ms.len();
@@ -371,10 +394,21 @@ impl MediaLayer {
         }
         self.needs_upload = false;
 
-        let frame_data = match &self.source {
+        // For live sources, use the externally-set frame data
+        #[cfg(feature = "webcam")]
+        let live_data;
+        let frame_data: &[u8] = match &self.source {
             MediaSource::Static(f) => &f.data,
             MediaSource::Animated { frames, .. } => {
                 &frames[self.current_frame.min(frames.len() - 1)].data
+            }
+            #[cfg(feature = "webcam")]
+            MediaSource::Live { .. } => {
+                live_data = self.live_frame_data.take();
+                match &live_data {
+                    Some(data) => data,
+                    None => return,
+                }
             }
         };
 
@@ -435,6 +469,17 @@ impl MediaLayer {
 
     pub fn is_video(&self) -> bool {
         self.source.is_video()
+    }
+
+    pub fn is_live(&self) -> bool {
+        self.source.is_live()
+    }
+
+    /// Set live frame data from webcam capture thread.
+    #[cfg(feature = "webcam")]
+    pub fn set_live_frame(&mut self, data: Vec<u8>) {
+        self.live_frame_data = Some(data);
+        self.needs_upload = true;
     }
 
     pub fn frame_count(&self) -> usize {
