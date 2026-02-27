@@ -162,6 +162,14 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Name sanitization: strip `/ \ .`, trim whitespace, max 64 chars
 - MIDI triggers: NextPreset/PrevPreset cycle through preset list
 - Persists to disk as JSON, survives app restart
+- **Async preset loading**: presets with media/video layers decode in background thread via `PresetLoader`
+- `PresetLoader`: bounded(1) channels, "phosphor-preset-loader" thread, generation-based cancellation
+- `PresetDecodeRequest/Result`: carry preset data + media decode results across thread boundary
+- `PresetLoadingState`: `Idle` or `Loading { preset_name, preset_index }` — passed to UI via egui temp data
+- Fast path: presets with no media layers apply synchronously (zero overhead)
+- Async path: `load_preset()` sends decode request → background thread decodes media → `update()` drains result → `apply_preset_immediately()` creates GPU resources on main thread
+- Rapid preset cycling: generation counter ensures only the final request's result is applied
+- Status bar shows "Loading {name}..." with animated dots; preset button shows pulsing border
 
 #### Layer Composition
 - Up to 8 layers, each with own `PassExecutor`, `UniformBuffer`, `ParamStore`, `ShaderUniforms`
@@ -224,10 +232,11 @@ OSC Thread: UdpSocket recv → rosc decode → send OscInMessage via crossbeam b
 Web Accept Thread: TcpListener → HTTP serve or WS upgrade → spawn client thread
 Web Client Thread(s): 50ms read timeout → parse JSON → WsInMessage via crossbeam bounded(64); drain outbound broadcast channel
 NDI Sender Thread: recv NdiFrame via crossbeam bounded(2) → NDIlib_send_send_video_v2 (clock_video paced)
+Preset Loader Thread: recv PresetDecodeRequest → decode media (load_media per layer, cancellation check between jobs) → send PresetDecodeResult
 File Watcher Thread: notify → debounce → send changed paths
 ```
 
-No mutexes in hot path (web uses Arc<Mutex> only for client list + latest state, not per-frame). Six+ threads + cpal callback + midir callback.
+No mutexes in hot path (web uses Arc<Mutex> only for client list + latest state, not per-frame). Seven+ threads + cpal callback + midir callback.
 
 ### Render Pipeline
 ```
@@ -268,6 +277,7 @@ egui Overlay → Surface
 - Particle render uses vertex-pulling (no vertex buffer) — 6 vertices per instance expand to screen-space quads with aspect ratio correction.
 - midir 0.10: `MidiInputConnection<()>` is RAII — drop closes the port. No explicit close needed.
 - Presets stored at `~/.config/phosphor/presets/{name}.json`. `PresetStore` re-scans after every save/delete.
+- Preset loading: `load_preset()` scans for media layers → if none, `apply_preset_immediately()` (sync); if media found, `PresetLoader::request_load()` → background thread decodes via `decoder::load_media()` → `update()` drains result → `apply_preset_immediately()` with pre-decoded `MediaSource` HashMap (GPU resources created on main thread). Generation counter for cancellation, `MediaSource` moved (not cloned) via `HashMap::remove()`.
 - Layer system: each Layer owns its own `PassExecutor` + `UniformBuffer` + `ParamStore` + `ShaderUniforms`. Compositor is separate App field (not inside LayerStack) to avoid borrow conflicts when passing layer render targets to compositor.
 - `LayerInfo` snapshot struct: collected before mutable UI borrow to avoid simultaneous mutable+immutable borrow of layers vec.
 - Compositor uses ping-pong accumulator: blit first layer, then composite(accumulator.read, layer[i]) → accumulator.write for each subsequent layer, tracking read/write indices manually without flipping.
@@ -311,12 +321,12 @@ RUST_LOG=phosphor_app=debug cargo run  # verbose logging
 ```
 
 ### Test Coverage
-~241 unit tests covering pure logic, parsing, serde, and data transforms across 16 modules:
+~251 unit tests covering pure logic, parsing, serde, and data transforms across 17 modules:
 - **Audio**: beat detection pipeline (onset → tempo → scheduler), adaptive normalization, BPM convergence
 - **Params**: ParamDef/ParamValue types, ParamStore CRUD, pack_to_buffer with all types
 - **Effect loader**: `is_builtin`, `prepend_library` (with/without existing uniforms)
 - **GPU layer**: BlendMode serde/display, `adjusted_active_after_remove/move` edge cases
-- **Preset**: sanitize_name, LayerPreset serde defaults, Preset roundtrip, PresetStore API
+- **Preset**: sanitize_name, LayerPreset serde defaults, Preset roundtrip, PresetStore API, PresetLoader (generation tracking, loading state, empty/missing media, stale result discard)
 - **MIDI**: MidiMapping scale (inverted, custom range, zero range), matches (channel, omni, type), MidiConfig
 - **OSC**: parse all message types (param, layer, trigger, blend, enabled, raw), msg_address, OscConfig/OscLearnTarget
 - **Web**: parse_client_message (all types + edge cases), build_params (all ParamDef types), state builders
@@ -331,7 +341,7 @@ RUST_LOG=phosphor_app=debug cargo run  # verbose logging
 - File I/O in config load/save (tested implicitly via serde roundtrips)
 
 ```bash
-cargo test                         # run all tests (~241)
+cargo test                         # run all tests (~251)
 cargo test --features ndi          # include NDI tests
 cargo tarpaulin --features ndi     # line coverage report
 ```

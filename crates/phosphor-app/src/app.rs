@@ -22,6 +22,7 @@ use crate::midi::MidiSystem;
 use crate::osc::OscSystem;
 use crate::params::{ParamStore, ParamValue};
 use crate::web::WebSystem;
+use crate::preset::loader::{PresetLoader, MediaDecodeResult};
 use crate::preset::store::LayerPreset;
 use crate::preset::PresetStore;
 use crate::shader::ShaderWatcher;
@@ -51,6 +52,7 @@ pub struct App {
     pub pending_web_triggers: Vec<TriggerAction>,
     // Presets
     pub preset_store: PresetStore,
+    pub preset_loader: PresetLoader,
     // Settings
     pub settings: SettingsConfig,
     // Layers
@@ -263,6 +265,7 @@ impl App {
             web,
             pending_web_triggers: Vec::new(),
             preset_store,
+            preset_loader: PresetLoader::new(),
             settings,
             egui_overlay,
             effect_loader,
@@ -503,6 +506,31 @@ impl App {
 
             // After preset load, broadcast full state so all clients update
             if had_preset_loads && self.web.client_count > 0 {
+                let layer_infos = self.layer_stack.layer_infos(&self.effect_loader.effects);
+                let layer_data: Vec<_> = self.layer_stack.layers.iter().map(|l| {
+                    (&l.param_store, l.effect_index(), l.blend_mode, l.opacity, l.enabled, l.locked)
+                }).collect();
+                let state_json = crate::web::state::build_full_state(
+                    &self.effect_loader.effects,
+                    &layer_infos,
+                    self.layer_stack.active_layer,
+                    &layer_data,
+                    &self.preset_store,
+                    self.post_process.enabled,
+                );
+                self.web.broadcast_json(&state_json);
+            }
+        }
+
+        // Drain async preset decode results
+        if let Some(result) = self.preset_loader.try_recv() {
+            log::info!("Async preset decode complete, applying preset index {}", result.preset_index);
+            let index = result.preset_index;
+            let preset = result.preset;
+            self.apply_preset_immediately(index, &preset, result.decoded_media);
+
+            // Broadcast full state to web clients after async preset load
+            if self.web.client_count > 0 {
                 let layer_infos = self.layer_stack.layer_infos(&self.effect_loader.effects);
                 let layer_data: Vec<_> = self.layer_stack.layers.iter().map(|l| {
                     (&l.param_store, l.effect_index(), l.blend_mode, l.opacity, l.enabled, l.locked)
@@ -1205,6 +1233,60 @@ impl App {
             None => return,
         };
 
+        let preset_name = self
+            .preset_store
+            .presets
+            .get(index)
+            .map(|(n, _)| n.clone())
+            .unwrap_or_default();
+
+        // Scan for media layers that need decoding (skip locked, skip missing files)
+        let mut media_jobs: Vec<(usize, std::path::PathBuf)> = Vec::new();
+        for (i, lp) in preset.layers.iter().enumerate() {
+            // Skip locked layers
+            if let Some(layer) = self.layer_stack.layers.get(i) {
+                if layer.locked {
+                    continue;
+                }
+            }
+            // Skip webcam layers (handled synchronously)
+            if lp.webcam_device.is_some() {
+                continue;
+            }
+            if let Some(ref media_path) = lp.media_path {
+                let path = std::path::PathBuf::from(media_path);
+                if path.exists() {
+                    media_jobs.push((i, path));
+                } else {
+                    log::warn!("Media file '{}' not found for layer {}", media_path, i);
+                }
+            }
+        }
+
+        if media_jobs.is_empty() {
+            // Fast path: no media to decode, apply immediately
+            self.apply_preset_immediately(index, &preset, std::collections::HashMap::new());
+        } else {
+            // Async path: decode media in background
+            log::info!(
+                "Preset '{}' has {} media layer(s), decoding in background",
+                preset_name,
+                media_jobs.len()
+            );
+            self.preset_loader
+                .request_load(index, preset, media_jobs, preset_name);
+        }
+    }
+
+    /// Apply a preset immediately, using pre-decoded media from the HashMap.
+    /// Called directly for presets with no media (fast path) or when background
+    /// decode completes (async path).
+    fn apply_preset_immediately(
+        &mut self,
+        index: usize,
+        preset: &crate::preset::Preset,
+        mut decoded_media: std::collections::HashMap<usize, MediaDecodeResult>,
+    ) {
         // Remove extra layers or add missing ones to match preset
         while self.layer_stack.layers.len() > preset.layers.len()
             && self.layer_stack.layers.len() > 1
@@ -1236,11 +1318,33 @@ impl App {
 
             if !is_webcam_layer {
                 if let Some(ref media_path) = lp.media_path {
-                    // Load media layer
                     let path = std::path::PathBuf::from(media_path);
-                    if path.exists() {
-                        self.load_media_on_layer(i, path);
-                        // Apply transport settings
+                    // Try pre-decoded media first, fall back to sync decode
+                    let loaded = if let Some(decode_result) = decoded_media.remove(&i) {
+                        match decode_result {
+                            MediaDecodeResult::Ok(source) => {
+                                self.create_media_layer_from_source(i, source, &path);
+                                true
+                            }
+                            MediaDecodeResult::Err(e) => {
+                                log::warn!(
+                                    "Pre-decoded media failed for layer {}: {}",
+                                    i, e
+                                );
+                                false
+                            }
+                        }
+                    } else if path.exists() {
+                        // Fallback: sync decode (shouldn't happen in normal flow)
+                        self.load_media_on_layer(i, path.clone());
+                        true
+                    } else {
+                        log::warn!("Media file '{}' not found for layer {}", media_path, i);
+                        false
+                    };
+
+                    // Apply transport settings
+                    if loaded {
                         if let Some(layer) = self.layer_stack.layers.get_mut(i) {
                             if let Some(ref mut m) = layer.as_media_mut() {
                                 if let Some(speed) = lp.media_speed {
@@ -1251,8 +1355,6 @@ impl App {
                                 }
                             }
                         }
-                    } else {
-                        log::warn!("Media file '{}' not found for layer {}", media_path, i);
                     }
                 } else if !lp.effect_name.is_empty() {
                     let effect_idx = self
@@ -1302,7 +1404,38 @@ impl App {
         for layer in &mut self.layer_stack.layers {
             layer.param_store.changed = false;
         }
-        log::info!("Loaded preset '{}'", self.preset_store.presets[index].0);
+        if let Some((name, _)) = self.preset_store.presets.get(index) {
+            log::info!("Loaded preset '{}'", name);
+        }
+    }
+
+    /// Create a MediaLayer from an already-decoded MediaSource (GPU resource creation only).
+    /// Used by apply_preset_immediately to avoid re-decoding media.
+    fn create_media_layer_from_source(
+        &mut self,
+        layer_idx: usize,
+        source: crate::media::decoder::MediaSource,
+        path: &std::path::Path,
+    ) {
+        if layer_idx >= self.layer_stack.layers.len() {
+            return;
+        }
+
+        let hdr_format = GpuContext::hdr_format();
+        let media_layer = MediaLayer::new(
+            &self.gpu.device,
+            &self.gpu.queue,
+            hdr_format,
+            self.gpu.surface_config.width,
+            self.gpu.surface_config.height,
+            source,
+            path.to_path_buf(),
+        );
+        let file_name = media_layer.file_name.clone();
+        let layer = &mut self.layer_stack.layers[layer_idx];
+        layer.content = LayerContent::Media(media_layer);
+        layer.param_store = ParamStore::new();
+        log::info!("Layer {}: loaded media '{}' (pre-decoded)", layer_idx, file_name);
     }
 
     /// Collect LayerInfo snapshots for UI (avoids borrow conflicts).

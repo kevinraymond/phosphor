@@ -8,6 +8,18 @@ const COLS: usize = 2;
 
 pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
     let tc = theme_colors(ui.ctx());
+    // Read async loading state
+    let loading_index: Option<usize> = ui.ctx().data_mut(|d| {
+        d.get_temp::<crate::preset::loader::PresetLoadingState>(
+            egui::Id::new("preset_loading_state"),
+        )
+        .and_then(|s| match s {
+            crate::preset::loader::PresetLoadingState::Loading { preset_index, .. } => {
+                Some(preset_index)
+            }
+            _ => None,
+        })
+    });
     let warning_color = Color32::from_rgb(0xE0, 0x60, 0x40);
 
     // Compact save row
@@ -143,6 +155,7 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
                 pending_delete,
                 warning_color,
                 &mut new_pending,
+                loading_index,
             );
         });
     }
@@ -168,6 +181,7 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
                 pending_delete,
                 warning_color,
                 &mut new_pending,
+                loading_index,
             );
         }
     });
@@ -181,8 +195,8 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
         }
     });
 
-    // Request repaint while armed (for timeout expiry)
-    if new_pending.is_some() {
+    // Request repaint while armed (for timeout expiry) or loading (for pulse animation)
+    if new_pending.is_some() || loading_index.is_some() {
         ui.ctx().request_repaint();
     }
 
@@ -255,6 +269,7 @@ fn draw_preset_grid(
     pending_delete: Option<(usize, f64)>,
     warning_color: Color32,
     new_pending: &mut Option<(usize, f64)>,
+    loading_index: Option<usize>,
 ) {
     let now = ui.input(|i| i.time);
     let available_width = ui.available_width();
@@ -266,11 +281,19 @@ fn draw_preset_grid(
             ui.spacing_mut().item_spacing.x = gap;
             for &(i, (pname, _)) in row {
                 let is_current = store.current_preset == Some(i);
+                let is_loading = loading_index == Some(i);
                 let is_armed = !is_builtin_section
                     && pending_delete.map_or(false, |(idx, _)| idx == i);
 
                 let (fill, text_color, stroke) = if is_armed {
                     (warning_color, Color32::WHITE, Stroke::NONE)
+                } else if is_loading {
+                    // Pulsing border for loading preset
+                    let pulse = ((now * 3.0).sin() * 0.5 + 0.5) as f32;
+                    let border_alpha = (pulse * 200.0 + 55.0) as u8;
+                    (tc.card_bg, tc.accent, Stroke::new(2.0, Color32::from_rgba_unmultiplied(
+                        tc.accent.r(), tc.accent.g(), tc.accent.b(), border_alpha,
+                    )))
                 } else if is_current {
                     (tc.accent, Color32::WHITE, Stroke::NONE)
                 } else {
