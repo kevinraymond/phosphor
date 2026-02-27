@@ -186,7 +186,7 @@ impl ApplicationHandler for PhosphorApp {
 
                     // Collect media info if active layer is media (before mutable borrow)
                     let media_info = app.layer_stack.active().and_then(|l| {
-                        l.as_media().map(|m| {
+                        l.as_media().filter(|m| !m.is_live()).map(|m| {
                             crate::ui::panels::media_panel::MediaInfo {
                                 file_name: m.file_name.clone(),
                                 media_width: m.media_width,
@@ -201,6 +201,21 @@ impl ApplicationHandler for PhosphorApp {
                                 current_frame: m.current_frame,
                                 video_position_secs: m.position_secs(),
                                 video_duration_secs: m.duration_secs(),
+                            }
+                        })
+                    });
+
+                    // Collect webcam info if active layer is a live webcam
+                    let webcam_info = app.layer_stack.active().and_then(|l| {
+                        l.as_media().filter(|m| m.is_live()).map(|m| {
+                            crate::ui::panels::webcam_panel::WebcamInfo {
+                                device_name: m.file_name.clone(),
+                                width: m.media_width,
+                                height: m.media_height,
+                                #[cfg(feature = "webcam")]
+                                mirror: m.mirror,
+                                #[cfg(not(feature = "webcam"))]
+                                mirror: false,
                             }
                         })
                     });
@@ -254,6 +269,7 @@ impl ApplicationHandler for PhosphorApp {
                                 &layer_infos,
                                 active_layer,
                                 media_info,
+                                webcam_info,
                                 &app.status_error,
                                 app.settings.theme,
                             );
@@ -566,16 +582,27 @@ impl ApplicationHandler for PhosphorApp {
                     std::thread::Builder::new()
                         .name("file-dialog".into())
                         .spawn(move || {
-                            let mut dialog = rfd::FileDialog::new()
-                                .add_filter("Images", &["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
+                            #[allow(unused_mut)]
+                            let mut dialog = rfd::FileDialog::new();
                             #[cfg(feature = "video")]
                             {
                                 if crate::media::video::ffmpeg_available() {
-                                    dialog = dialog.add_filter(
-                                        "Video",
-                                        crate::media::decoder::VIDEO_EXTENSIONS,
-                                    );
+                                    let image_exts: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp"];
+                                    let video_exts = crate::media::decoder::VIDEO_EXTENSIONS;
+                                    let all: Vec<&str> = image_exts.iter().copied()
+                                        .chain(video_exts.iter().copied())
+                                        .collect();
+                                    dialog = dialog
+                                        .add_filter("All Media", &all)
+                                        .add_filter("Images", image_exts)
+                                        .add_filter("Video", video_exts);
+                                } else {
+                                    dialog = dialog.add_filter("Images", &["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
                                 }
+                            }
+                            #[cfg(not(feature = "video"))]
+                            {
+                                dialog = dialog.add_filter("Images", &["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
                             }
                             if let Some(path) = dialog.pick_file() {
                                 let _ = tx.send(path);
@@ -599,6 +626,41 @@ impl ApplicationHandler for PhosphorApp {
                         Err(crossbeam_channel::TryRecvError::Empty) => {
                             // Still open, keep waiting
                         }
+                    }
+                }
+
+                // Handle webcam layer signals
+                #[cfg(feature = "webcam")]
+                {
+                    let add_webcam: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("add_webcam_layer"))
+                    });
+                    if add_webcam.is_some() {
+                        app.add_webcam_layer(0); // Default to first camera
+                        app.preset_store.mark_dirty();
+                    }
+
+                    let webcam_mirror: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("webcam_mirror"))
+                    });
+                    if let Some(mirror) = webcam_mirror {
+                        if let Some(layer) = app.layer_stack.active_mut() {
+                            if let Some(m) = layer.as_media_mut() {
+                                m.mirror = mirror;
+                            }
+                        }
+                    }
+
+                    let webcam_disconnect: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("webcam_disconnect"))
+                    });
+                    if webcam_disconnect.is_some() {
+                        // Stop capture and remove the active webcam layer
+                        app.webcam_capture = None;
+                        let active = app.layer_stack.active_layer;
+                        app.layer_stack.remove_layer(active);
+                        app.sync_active_layer();
+                        app.preset_store.mark_dirty();
                     }
                 }
 
@@ -677,6 +739,8 @@ impl ApplicationHandler for PhosphorApp {
                     app.layer_stack.remove_layer(idx);
                     app.sync_active_layer();
                     app.preset_store.mark_dirty();
+                    #[cfg(feature = "webcam")]
+                    app.cleanup_webcam_if_unused();
                 }
 
                 // Handle clear all layers
@@ -684,6 +748,8 @@ impl ApplicationHandler for PhosphorApp {
                     d.remove_temp(egui::Id::new("clear_all_layers"))
                 });
                 if clear_all.is_some() {
+                    #[cfg(feature = "webcam")]
+                    { app.webcam_capture = None; }
                     app.clear_all_layers();
                     app.preset_store.mark_dirty();
                 }
