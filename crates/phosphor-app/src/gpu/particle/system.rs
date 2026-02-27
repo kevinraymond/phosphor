@@ -404,6 +404,19 @@ impl ParticleSystem {
         })
     }
 
+    /// Replace the compute shader and rebuild the pipeline (for switching shader at runtime).
+    /// Unlike recompile_compute, this also updates current_compute_source.
+    #[allow(dead_code)]
+    pub fn set_compute_shader(
+        &mut self,
+        device: &Device,
+        source: &str,
+    ) -> Result<(), String> {
+        self.recompile_compute(device, source)?;
+        self.current_compute_source = source.to_string();
+        Ok(())
+    }
+
     /// Recompile the compute pipeline (for hot-reload).
     pub fn recompile_compute(
         &mut self,
@@ -601,6 +614,35 @@ impl ParticleSystem {
             &self.emit_counter_buffer,
             &self.aux_buffer,
         );
+    }
+
+    /// Reset sprite, aux data, and compute shader to defaults.
+    #[allow(dead_code)]
+    pub fn clear_customization(&mut self, device: &Device, queue: &Queue) {
+        // Reset sprite to placeholder
+        let placeholder = super::sprite::create_placeholder_sprite(device, queue);
+        self.sprite_bind_group = create_sprite_bind_group(device, &self.sprite_bgl, &placeholder);
+        self.sprite = None;
+        self.render_uniforms.render_mode = 0;
+        self.render_uniforms.sprite_cols = 1;
+        self.render_uniforms.sprite_rows = 1;
+        self.render_uniforms.sprite_frames = 1;
+        self.blend_mode = "additive".to_string();
+
+        // Clear aux data
+        self.upload_aux_data(device, queue, &[]);
+
+        // Restore default compute shader
+        let default_source =
+            include_str!("../../../../../assets/shaders/builtin/particle_sim.wgsl");
+        if let Err(e) = self.recompile_compute(device, default_source) {
+            log::error!("Failed to restore default compute shader: {e}");
+        } else {
+            self.current_compute_source = default_source.to_string();
+        }
+
+        // Reset emitter shape
+        self.def.emitter.shape = "point".to_string();
     }
 
     /// Flip ping-pong buffers for next frame.

@@ -13,6 +13,10 @@
 - `ParticleSystem::set_compute_shader()` and `clear_customization()` for runtime particle shader management (infrastructure for future particle design system)
 - **Combined "All Media" file filter** — media file picker defaults to showing all supported types (images + video) when video feature is enabled
 
+### Changed
+- **Image scatter shader** — spring-damper physics with hardcoded constants, random scatter direction on beat, skip transparent particles, remove audio color shift (preserve original image colors)
+- CI: add `libclang-dev` dependency, clippy/test/build steps for `webcam` feature, release builds include `webcam` feature
+
 ### Fixes
 - Fix NDI runtime discovery on macOS — remove non-existent versioned dylib names, skip `exists()` check (works around NDI 6.0.0 installer permissions bug), add `/opt/homebrew/lib` + `NDI_RUNTIME_DIR_V6`/`V5` env vars, show searched paths in UI when not found
 - **Webcam robustness** — validate camera access before spawning capture thread (user-friendly EBUSY error), catch libjpeg panics on corrupted MJPEG frames (skip frame instead of dying), detect dead capture threads with status bar notification, clean up capture when deleting webcam layers

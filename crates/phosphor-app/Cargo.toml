@@ -60,6 +60,8 @@ glam = "0.29"
 egui_code_editor = "0.2"
 # Dynamic library loading (NDI runtime, PulseAudio runtime on Linux)
 libloading = "0.8"
+# Webcam capture
+nokhwa = { version = "0.10", features = ["input-native"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"
@@ -68,3 +70,4 @@ tempfile = "3"
 default = []
 video = []
 ndi = []
+webcam = ["nokhwa"]

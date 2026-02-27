@@ -15,6 +15,12 @@ pub enum MediaSource {
         #[cfg(feature = "video")]
         from_video: bool,
     },
+    /// Live webcam feed — frames arrive from capture thread, not stored here.
+    #[cfg(feature = "webcam")]
+    Live {
+        width: u32,
+        height: u32,
+    },
 }
 
 impl MediaSource {
@@ -22,6 +28,8 @@ impl MediaSource {
         match self {
             MediaSource::Static(_) => 1,
             MediaSource::Animated { frames, .. } => frames.len(),
+            #[cfg(feature = "webcam")]
+            MediaSource::Live { .. } => 1,
         }
     }
 
@@ -37,6 +45,14 @@ impl MediaSource {
         false
     }
 
+    pub fn is_live(&self) -> bool {
+        #[cfg(feature = "webcam")]
+        if let MediaSource::Live { .. } = self {
+            return true;
+        }
+        false
+    }
+
     /// Get frame dimensions.
     pub fn dimensions(&self) -> (u32, u32) {
         match self {
@@ -44,6 +60,8 @@ impl MediaSource {
             MediaSource::Animated { frames, .. } => {
                 frames.first().map_or((1, 1), |f| (f.width, f.height))
             }
+            #[cfg(feature = "webcam")]
+            MediaSource::Live { width, height } => (*width, *height),
         }
     }
 }

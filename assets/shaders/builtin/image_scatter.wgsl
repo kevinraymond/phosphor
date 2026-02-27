@@ -70,6 +70,12 @@ fn unpack_rgba(packed: f32) -> vec4f {
     );
 }
 
+// Hardcoded spring-damper constants — independent of effect's ParticleDef.
+const SPRING_K: f32 = 12.0;       // Spring stiffness — strong pull home
+const DAMPING: f32 = 0.85;        // Per-frame velocity retention at 60fps
+const SCATTER_SCALE: f32 = 0.12;  // Beat scatter impulse
+const MAX_VEL: f32 = 1.0;         // Velocity cap
+
 @compute @workgroup_size(256)
 fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let idx = gid.x;
@@ -81,6 +87,16 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let home_pos = home.xy;
     let home_color = unpack_rgba(home.z);
 
+    // Skip transparent particles (padding beyond sampled image pixels)
+    if home_color.a < 0.01 {
+        // Park invisible particles offscreen, dead
+        var p = particles_in[idx];
+        p.pos_life = vec4f(99.0, 99.0, 0.0, 0.0);
+        p.color = vec4f(0.0);
+        particles_out[idx] = p;
+        return;
+    }
+
     var p = particles_in[idx];
 
     // Initial emit: particles start at home position
@@ -88,7 +104,6 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         let slot = atomicAdd(&emit_counter, 1u);
         if slot < u.emit_count {
             let seed_base = u.seed + f32(idx) * 7.31;
-            // Start at home with slight random offset + staggered age
             p.pos_life = vec4f(home_pos + vec2f(hash(seed_base), hash(seed_base + 1.0)) * 0.01, 0.0, 1.0);
             p.vel_size = vec4f(0.0, 0.0, 0.0, u.initial_size);
             p.color = home_color;
@@ -102,53 +117,42 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     var vel = p.vel_size.xy;
     let dt = u.delta_time;
 
-    // Reform force: spring toward home position
-    // Stronger when audio is quiet, weaker when loud
-    let reform_strength = u.attraction_strength * (1.0 - u.rms * 0.8);
+    // Spring force toward home position
     let to_home = home_pos - pos;
-    let dist = length(to_home);
-    if dist > 0.001 {
-        // Spring force + damping
-        vel += to_home * reform_strength * dt * 60.0;
-        vel *= pow(0.92, dt * 60.0); // damping
-    }
+    vel += to_home * SPRING_K * dt;
 
-    // Beat scatter: impulse away from home
+    // Damping
+    vel *= pow(DAMPING, dt * 60.0);
+
+    // Beat scatter: gentle impulse away from home
     if u.beat > 0.5 {
-        let scatter_dir = normalize(pos - home_pos + vec2f(0.001));
-        let scatter_power = u.initial_speed * (1.0 + u.kick * 2.0);
-        vel += scatter_dir * scatter_power;
+        let seed_base = f32(idx) * 3.17 + u.time;
+        let random_dir = vec2f(hash(seed_base) - 0.5, hash(seed_base + 7.0) - 0.5);
+        let scatter_dir = normalize(pos - home_pos + random_dir * 0.5 + vec2f(0.001));
+        vel += scatter_dir * SCATTER_SCALE * (1.0 + u.kick * 0.5);
     }
 
-    // Audio-reactive jitter
-    if u.turbulence > 0.0 {
-        let seed_base = f32(idx) * 3.17 + u.time * 2.0;
-        let jitter = vec2f(hash(seed_base) - 0.5, hash(seed_base + 17.0) - 0.5);
-        vel += jitter * u.turbulence * u.rms * dt;
+    // Velocity cap
+    let speed = length(vel);
+    if speed > MAX_VEL {
+        vel = vel * (MAX_VEL / speed);
     }
 
     // Integrate
     pos += vel * dt;
 
-    // Color: blend between home color and audio-reactive shift
-    var color = home_color;
-    let audio_hue = u.centroid * 0.5 + u.beat_phase * 0.3;
-    let shift = vec3f(
-        sin(audio_hue * 6.28) * 0.15,
-        sin((audio_hue + 0.33) * 6.28) * 0.15,
-        sin((audio_hue + 0.67) * 6.28) * 0.15,
-    );
-    color = vec4f(clamp(color.rgb + shift * u.rms, vec3f(0.0), vec3f(1.0)), color.a);
+    // Preserve original image color (no audio color shift)
+    let color = home_color;
 
-    // Size pulsing with bass
-    let size = u.initial_size * (1.0 + u.bass * 0.5);
+    // Size: slight bass pulse
+    let size = u.initial_size * (1.0 + u.bass * 0.2);
 
     p.pos_life = vec4f(pos, 0.0, 1.0);
     p.vel_size = vec4f(vel, 0.0, size);
     p.color = color;
-    p.flags.x += dt; // age
+    p.flags.x += dt;
 
-    // Wrap-around instead of death for image particles (they're persistent)
+    // Wrap-around instead of death (image particles are persistent)
     if p.flags.x >= p.flags.y {
         p.flags.x = 0.0;
     }
