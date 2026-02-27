@@ -29,7 +29,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Audio pipeline: cpal capture → lock-free ring buffer → dedicated thread → multi-resolution FFT (4096/1024/512-pt) → 20 features (7 bands + aggregates + spectral + beat) → adaptive normalization → 3-stage beat detection → asymmetric EMA smoothing → crossbeam channel to main thread
 - egui overlay (D key toggle): WCAG 2.2 AA dark/light themes, audio spectrum bars, auto-generated param controls, effect browser, status bar
 - .pfx JSON effect format with WGSL shader library (noise, palette, sdf, tonemap) auto-prepended
-- 9 curated effects (see Effect Set below)
+- 12 curated effects (see Effect Set below)
 
 #### Phase 2
 - Off-screen Rgba16Float HDR render targets (`RenderTarget`, `PingPongTarget`)
@@ -184,7 +184,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - `MidiSystem::update_triggers_only()`: drains MIDI but skips CC→param when active layer is locked
 
 #### Effect Set
-9 curated audio-reactive effects designed for compositing across layers:
+12 curated audio-reactive effects designed for compositing across layers:
 
 1. **Aurora** (`aurora.wgsl`) — 7 frequency bands as horizontal flowing northern light curtains. Params: curtain_speed, band_spread, glow_width. No feedback.
 2. **Drift** (`drift.wgsl`) — Triple domain-warped FBM fluid smoke with advected feedback. Params: warp_intensity, flow_speed, color_mode, density. Uses `mix()` feedback blend (not `max()`) so darks reclaim space.
@@ -195,6 +195,9 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 7. **Iris** (`feedback_test.wgsl`) — Spinning dot with fading feedback trails. Params: trail_length. Uses feedback.
 8. **Swarm** (`spectral_eye_bg.wgsl` + `spectral_eye_sim.wgsl`) — Orbital particle cloud with custom compute shader. Params: orbit_speed, trail_decay. Uses feedback + particles.
 9. **Storm** (`storm.wgsl`) — Volumetric dark clouds with beat-triggered internal lightning. FBM-Worley density (smooth log-sum-exp Worley for puffy billow shapes), Beer-Lambert 4-step light march for self-shadowing, silver lining at cloud edges. Params: turbulence, flow_speed, flash_power, flash_spread. Uses feedback.
+10. **Veil** (`veil_bg.wgsl` + `veil_sim.wgsl`) — Flowing silk curtain with 6000 particles on screen emitter. Multi-layer displacement field (bass billow + mid ripple + noise flutter) with spring-return physics for coherent sheet motion. Params: flow_speed, trail_decay, wind_strength, color_shift, density. Uses feedback + particles.
+11. **Nova** (`nova_bg.wgsl` + `nova_sim.wgsl`) — Fireworks display with burst emission from random points. Two particle types: shells (20%, large, bright) and sparks (80%, small, flickering). Gravity, dripping feedback trails, ground glow. Params: trail_decay, gravity_strength, spread, sparkle. Uses feedback + particles.
+12. **Vortex** (`vortex_bg.wgsl` + `vortex_sim.wgsl`) — Gravity well with Newtonian 1/r² orbital mechanics forming an accretion disk. Event horizon kills inner particles. Beat-triggered polar jets. Gravitational lensing UV distortion in background. Params: trail_decay, gravity_well, event_horizon, jet_power, lensing. Uses feedback + particles.
 
 **Bundled preset**: "Crucible" (`~/.config/phosphor/presets/Crucible.json`) — all 8 layers composited with tuned blend modes, opacities, and params.
 
