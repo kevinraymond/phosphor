@@ -47,91 +47,6 @@ jobs:
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }} --features "video,ndi"
 
-      - name: Package and sign (macOS)
-        if: runner.os == 'macOS'
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-
-          # Import certificate
-          KEYCHAIN="build.keychain"
-          KEYCHAIN_PASSWORD="actions"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security default-keychain -s "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
-          security import certificate.p12 -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          rm certificate.p12
-
-          # Install create-dmg for polished DMG
-          brew install create-dmg
-
-          # Create .app bundle
-          APP="Phosphor.app"
-          mkdir -p "$APP/Contents/MacOS"
-          mkdir -p "$APP/Contents/Resources"
-          cp "target/${{ matrix.target }}/release/phosphor-app" "$APP/Contents/MacOS/Phosphor"
-          cp -r assets "$APP/Contents/Resources/assets"
-          sed "s/__VERSION__/$VERSION/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
-
-          # Generate .icns from source PNG
-          ICONSET="Phosphor.iconset"
-          mkdir -p "$ICONSET"
-          for size in 16 32 64 128 256 512 1024; do
-            sips -z $size $size packaging/icon/icon_1024x1024.png --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-          done
-          cp "$ICONSET/icon_32x32.png"     "$ICONSET/icon_16x16@2x.png"
-          cp "$ICONSET/icon_64x64.png"     "$ICONSET/icon_32x32@2x.png"
-          cp "$ICONSET/icon_256x256.png"   "$ICONSET/icon_128x128@2x.png"
-          cp "$ICONSET/icon_512x512.png"   "$ICONSET/icon_256x256@2x.png"
-          cp "$ICONSET/icon_1024x1024.png" "$ICONSET/icon_512x512@2x.png"
-          rm "$ICONSET/icon_64x64.png" "$ICONSET/icon_1024x1024.png"
-          iconutil --convert icns "$ICONSET" --output "$APP/Contents/Resources/Phosphor.icns"
-          rm -rf "$ICONSET"
-
-          # Codesign the bundle
-          codesign --force --deep --options runtime \
-            --entitlements packaging/macos/entitlements.plist \
-            --sign "Developer ID Application" "$APP" --timestamp
-          codesign --verify --verbose "$APP"
-
-          # Create polished DMG with drag-to-Applications
-          DMG="phosphor-${TAG}-${{ matrix.target }}.dmg"
-          VOLICON="$APP/Contents/Resources/Phosphor.icns"
-          mkdir -p dmg_staging
-          mv "$APP" dmg_staging/
-          create-dmg \
-            --volname "Phosphor" \
-            --volicon "dmg_staging/$VOLICON" \
-            --background "packaging/macos/dmg_background.png" \
-            --window-pos 200 120 \
-            --window-size 660 400 \
-            --icon-size 128 \
-            --icon "Phosphor.app" 180 190 \
-            --hide-extension "Phosphor.app" \
-            --app-drop-link 480 190 \
-            --no-internet-enable \
-            "$DMG" \
-            "dmg_staging/" \
-          || hdiutil create -volname "Phosphor" -srcfolder "dmg_staging" -ov -format UDZO "$DMG"
-
-          # Notarize and staple
-          xcrun notarytool submit "$DMG" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_ID_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
-          xcrun stapler staple "$DMG"
-
-          echo "ASSET=${DMG}" >> "$GITHUB_ENV"
-
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -163,7 +78,15 @@ jobs:
           Compress-Archive -Path "$staging" -DestinationPath "${staging}.zip"
           "ASSET=${staging}.zip" | Out-File -Append -FilePath $env:GITHUB_ENV
 
+      - name: Upload artifact (macOS binary for universal job)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phosphor-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/phosphor-app
+
       - name: Upload artifact
+        if: runner.os != 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: phosphor-${{ matrix.target }}
@@ -210,28 +133,17 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           rm certificate.p12
 
-          # Mount per-arch DMGs and extract binaries
-          ARM_MNT=$(mktemp -d)
-          X86_MNT=$(mktemp -d)
-          hdiutil attach artifacts/arm64/*.dmg -mountpoint "$ARM_MNT" -nobrowse -quiet
-          hdiutil attach artifacts/x86_64/*.dmg -mountpoint "$X86_MNT" -nobrowse -quiet
-          ARM_BIN=$(find "$ARM_MNT" -name Phosphor -type f -path "*/MacOS/*")
-          X86_BIN=$(find "$X86_MNT" -name Phosphor -type f -path "*/MacOS/*")
-
           # Install create-dmg for polished DMG
           brew install create-dmg
 
-          # Create universal .app bundle
+          # Create universal binary from per-arch builds
           APP="Phosphor.app"
           mkdir -p "$APP/Contents/MacOS"
           mkdir -p "$APP/Contents/Resources"
-          lipo -create "$ARM_BIN" "$X86_BIN" -output "$APP/Contents/MacOS/Phosphor"
+          lipo -create artifacts/arm64/phosphor-app artifacts/x86_64/phosphor-app -output "$APP/Contents/MacOS/Phosphor"
           chmod +x "$APP/Contents/MacOS/Phosphor"
           cp -r assets "$APP/Contents/Resources/assets"
           sed "s/__VERSION__/$VERSION/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
-
-          hdiutil detach "$ARM_MNT" -quiet
-          hdiutil detach "$X86_MNT" -quiet
 
           # Generate .icns from source PNG
           ICONSET="Phosphor.iconset"
@@ -295,10 +207,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download macOS universal artifact
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: phosphor-universal-apple-darwin
+          path: artifacts/macos
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: phosphor-x86_64-unknown-linux-gnu
+          path: artifacts/linux
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: phosphor-x86_64-pc-windows-msvc
+          path: artifacts/windows
 
       - name: List artifacts
         run: find artifacts -type f
