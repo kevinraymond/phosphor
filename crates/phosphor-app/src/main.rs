@@ -301,24 +301,44 @@ impl ApplicationHandler for PhosphorApp {
                         let was_shown: bool = ctx.data(|d| d.get_temp(dialog_id).unwrap_or(false));
                         ctx.data_mut(|d| d.insert_temp(dialog_id, true));
 
+                        let tc = crate::ui::theme::colors::theme_colors(&ctx);
+
                         egui::Window::new("Quit Phosphor?")
                             .collapsible(false)
                             .resizable(false)
+                            .fixed_size(egui::Vec2::new(280.0, 0.0))
                             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                             .show(&ctx, |ui| {
-                                ui.label("Are you sure you want to quit?");
-                                ui.add_space(8.0);
+                                ui.label(
+                                    egui::RichText::new("Are you sure you want to quit?")
+                                        .size(14.0)
+                                        .color(tc.text_primary),
+                                );
+                                ui.add_space(12.0);
+                                let btn_size = egui::Vec2::new(100.0, 32.0);
+                                let esc_cancel = was_shown
+                                    && ui.input(|i| i.key_pressed(egui::Key::Escape));
                                 ui.horizontal(|ui| {
-                                    if ui.button("Quit").clicked() {
+                                    let quit_fill = egui::Color32::from_rgba_unmultiplied(
+                                        tc.error.r(), tc.error.g(), tc.error.b(), 60,
+                                    );
+                                    if ui
+                                        .add(egui::Button::new(
+                                            egui::RichText::new("Quit").color(tc.error),
+                                        ).fill(quit_fill).min_size(btn_size))
+                                        .clicked()
+                                    {
                                         ui.ctx().data_mut(|d| {
                                             d.insert_temp(egui::Id::new("confirm_quit"), true);
                                         });
                                     }
-                                    let esc_cancel = was_shown
-                                        && ui.input(|i| i.key_pressed(egui::Key::Escape));
-                                    if ui.button("Cancel").clicked() || esc_cancel {
-                                        app.quit_requested = false;
-                                    }
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui.add(egui::Button::new("Cancel").min_size(btn_size)).clicked()
+                                            || esc_cancel
+                                        {
+                                            app.quit_requested = false;
+                                        }
+                                    });
                                 });
                             });
                     } else {
