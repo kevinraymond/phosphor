@@ -672,6 +672,14 @@ impl ApplicationHandler for PhosphorApp {
                     d.remove_temp(egui::Id::new("save_scene"))
                 });
                 if let Some(name) = save_scene {
+                    let is_new = !app.scene_store.scenes.iter().any(|(n, _)| n == &name);
+                    if is_new {
+                        // New scene: clear timeline so user starts with a blank cue list
+                        app.timeline.cues.clear();
+                        app.timeline.stop();
+                        app.timeline.loop_mode = false;
+                        app.timeline.advance_mode = crate::scene::types::AdvanceMode::Manual;
+                    }
                     let set = crate::scene::types::SceneSet {
                         version: 1,
                         name: name.clone(),
