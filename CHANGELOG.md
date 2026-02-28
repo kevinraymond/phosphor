@@ -3,6 +3,14 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## v1.0.1 — 2026-02-27
+
+### UI
+- Shader compilation errors in status bar now have a dismiss (×) button
+
+### Documentation
+- Add comprehensive TUTORIALS.md covering all features
+
 ## v1.0.0 — 2026-02-27
 
 ### Rendering

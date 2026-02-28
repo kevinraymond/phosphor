@@ -407,6 +407,19 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
 
+                // Handle shader error dismiss from status bar
+                let dismiss_error: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("dismiss_shader_error"))
+                });
+                if dismiss_error.is_some() {
+                    if let Some(layer) = app.layer_stack.active_mut() {
+                        if let Some(e) = layer.as_effect_mut() {
+                            e.shader_error = None;
+                        }
+                    }
+                    app.shader_editor.compile_error = None;
+                }
+
                 let new_prompt: Option<bool> = app.egui_overlay.context().data_mut(|d| {
                     d.remove_temp(egui::Id::new("new_effect_prompt"))
                 });
