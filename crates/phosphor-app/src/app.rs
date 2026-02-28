@@ -884,6 +884,131 @@ impl App {
                 }
             }
         }
+
+        // PFX hot-reload — update effect definitions when .pfx files change
+        let pfx_changes = self.shader_watcher.drain_pfx_changes();
+        for pfx_path in &pfx_changes {
+            let json = match std::fs::read_to_string(pfx_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("Failed to read .pfx file {}: {e}", pfx_path.display());
+                    if self.shader_editor.open {
+                        self.shader_editor.compile_error = Some(format!("Read error: {e}"));
+                    }
+                    continue;
+                }
+            };
+            let new_effect = match serde_json::from_str::<crate::effect::format::PfxEffect>(&json) {
+                Ok(mut e) => {
+                    e.source_path = Some(pfx_path.clone());
+                    e
+                }
+                Err(e) => {
+                    log::error!("Failed to parse .pfx file {}: {e}", pfx_path.display());
+                    if self.shader_editor.open {
+                        self.shader_editor.compile_error = Some(format!("JSON error: {e}"));
+                    }
+                    continue;
+                }
+            };
+
+            // Find matching effect by source_path.
+            // Notify delivers absolute paths; source_path is canonicalized at scan time.
+            let pfx_canonical = pfx_path.canonicalize().unwrap_or_else(|_| pfx_path.clone());
+            let effect_idx = self
+                .effect_loader
+                .effects
+                .iter()
+                .position(|e| e.source_path.as_ref() == Some(&pfx_canonical));
+            let effect_idx = match effect_idx {
+                Some(i) => i,
+                None => {
+                    log::debug!("No matching effect for {}", pfx_path.display());
+                    continue;
+                }
+            };
+
+            let old_effect = self.effect_loader.effects[effect_idx].clone();
+            // Preserve the original source_path (may be relative) for consistent future lookups
+            let mut new_effect = new_effect;
+            new_effect.source_path = old_effect.source_path.clone();
+            let diff = old_effect.diff(&new_effect);
+
+            if diff.is_empty() {
+                continue;
+            }
+
+            log::info!(
+                "PFX hot-reload: {} (inputs={}, passes={}, particles={}, postprocess={}, meta={})",
+                new_effect.name,
+                diff.inputs_changed,
+                diff.passes_changed,
+                diff.particles_changed,
+                diff.postprocess_changed,
+                diff.metadata_changed,
+            );
+
+            // Update the effect definition in the loader
+            self.effect_loader.effects[effect_idx] = new_effect.clone();
+
+            // Clear editor error on successful parse
+            if self.shader_editor.open {
+                self.shader_editor.compile_error = None;
+            }
+
+            // Update layers using this effect
+            for layer_idx in 0..self.layer_stack.layers.len() {
+                let layer = &self.layer_stack.layers[layer_idx];
+                let LayerContent::Effect(ref eff) = layer.content else { continue };
+                if eff.effect_index != Some(effect_idx) {
+                    continue;
+                }
+
+                if diff.needs_rebuild() {
+                    // Full rebuild needed — capture param values, rebuild, restore
+                    let saved_values = self.layer_stack.layers[layer_idx]
+                        .param_store
+                        .values
+                        .clone();
+                    self.load_effect_on_layer(layer_idx, effect_idx);
+                    // Restore params that still exist with matching types
+                    let layer = &mut self.layer_stack.layers[layer_idx];
+                    for (name, value) in &saved_values {
+                        if let Some(def) = layer.param_store.defs.iter().find(|d| d.name() == name) {
+                            if def.default_value().float_count() == value.float_count() {
+                                layer.param_store.values.insert(name.clone(), value.clone());
+                            }
+                        }
+                    }
+                    layer.param_store.changed = true;
+                } else {
+                    // Incremental update — no GPU rebuild needed
+                    if diff.inputs_changed {
+                        self.layer_stack.layers[layer_idx]
+                            .param_store
+                            .merge_from_defs(&new_effect.inputs);
+                    }
+                    if diff.postprocess_changed {
+                        let pp = new_effect.postprocess.clone().unwrap_or_default();
+                        self.layer_stack.layers[layer_idx].postprocess = pp.clone();
+                        if layer_idx == self.layer_stack.active_layer {
+                            self.post_process.enabled = pp.enabled;
+                        }
+                    }
+                }
+            }
+
+            // Update editor paired content if open on this effect
+            if self.shader_editor.open {
+                if let Some(ref paired_path) = self.shader_editor.paired_path {
+                    let paired_canonical = paired_path.canonicalize().unwrap_or_else(|_| paired_path.clone());
+                    if paired_canonical == pfx_canonical {
+                        self.shader_editor.paired_content = json.clone();
+                        self.shader_editor.paired_disk_content = json;
+                    }
+                }
+            }
+        }
     }
 
     /// Build a ParticleSystem from a ParticleDef, or None if the effect doesn't use particles.
@@ -1131,6 +1256,13 @@ impl App {
                     if let Ok(content) = std::fs::read_to_string(&path) {
                         self.shader_editor.open_file(&effect.name, path, content);
                         self.shader_editor.compile_error = Some(format!("{e}"));
+                        // Load paired .pfx for tab switching
+                        if let Some(ref pfx_path) = effect.source_path {
+                            if let Ok(pfx_content) = std::fs::read_to_string(pfx_path) {
+                                self.shader_editor
+                                    .load_paired_pfx(pfx_path.clone(), pfx_content);
+                            }
+                        }
                     }
                 }
             }
@@ -2199,6 +2331,15 @@ impl App {
         if wgsl_path.exists() {
             let content = std::fs::read_to_string(&wgsl_path)?;
             self.shader_editor.open_file(new_name, wgsl_path, content);
+            // Load paired .pfx for tab switching
+            if let Some(new_idx) = new_idx {
+                if let Some(ref pfx_path) = self.effect_loader.effects[new_idx].source_path {
+                    if let Ok(pfx_content) = std::fs::read_to_string(pfx_path) {
+                        self.shader_editor
+                            .load_paired_pfx(pfx_path.clone(), pfx_content);
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -2323,6 +2464,11 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {{
         if wgsl_path.exists() {
             let content = std::fs::read_to_string(&wgsl_path)?;
             self.shader_editor.open_file(name, wgsl_path, content);
+            // Load paired .pfx for tab switching
+            if let Ok(pfx_content) = std::fs::read_to_string(&pfx_path) {
+                self.shader_editor
+                    .load_paired_pfx(pfx_path, pfx_content);
+            }
         }
 
         Ok(())

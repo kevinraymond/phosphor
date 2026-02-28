@@ -54,27 +54,33 @@ impl ApplicationHandler for PhosphorApp {
         let mut attrs = WindowAttributes::default()
             .with_title("Phosphor")
             .with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
-        if let Some(icon) = load_window_icon() {
-            attrs = attrs.with_window_icon(Some(icon));
-        }
 
-        let window = Arc::new(event_loop.create_window(attrs).expect("Failed to create window"));
-
-        // Center window on primary monitor
+        // Center window on primary monitor via initial position hint.
+        // On Wayland, set_outer_position is a no-op and compositors handle placement,
+        // so we set position on WindowAttributes which winit can pass as a hint.
         if let Some(monitor) = event_loop
             .primary_monitor()
             .or_else(|| event_loop.available_monitors().next())
         {
             let monitor_size = monitor.size();
-            let window_size = window.outer_size();
             let monitor_pos = monitor.position();
-            let x = (monitor_size.width.saturating_sub(window_size.width)) / 2;
-            let y = (monitor_size.height.saturating_sub(window_size.height)) / 2;
-            window.set_outer_position(winit::dpi::PhysicalPosition::new(
+            // Use the requested inner size (1280x720 logical → physical)
+            let scale = monitor.scale_factor();
+            let win_w = (1280.0 * scale) as u32;
+            let win_h = (720.0 * scale) as u32;
+            let x = (monitor_size.width.saturating_sub(win_w)) / 2;
+            let y = (monitor_size.height.saturating_sub(win_h)) / 2;
+            attrs = attrs.with_position(winit::dpi::PhysicalPosition::new(
                 monitor_pos.x + x as i32,
                 monitor_pos.y + y as i32,
             ));
         }
+
+        if let Some(icon) = load_window_icon() {
+            attrs = attrs.with_window_icon(Some(icon));
+        }
+
+        let window = Arc::new(event_loop.create_window(attrs).expect("Failed to create window"));
 
         self.window = Some(window.clone());
 
@@ -421,6 +427,12 @@ impl ApplicationHandler for PhosphorApp {
                                 let path = app.effect_loader.resolve_shader_path(&pass.shader);
                                 if let Ok(content) = std::fs::read_to_string(&path) {
                                     app.shader_editor.open_file(&effect.name, path, content);
+                                    // Load paired .pfx file for tab switching
+                                    if let Some(ref pfx_path) = effect.source_path {
+                                        if let Ok(pfx_content) = std::fs::read_to_string(pfx_path) {
+                                            app.shader_editor.load_paired_pfx(pfx_path.clone(), pfx_content);
+                                        }
+                                    }
                                 } else {
                                     log::error!("Could not read shader: {}", path.display());
                                 }

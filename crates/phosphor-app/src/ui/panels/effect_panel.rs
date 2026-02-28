@@ -112,12 +112,12 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
             .map_or(false, |e| EffectLoader::is_builtin(e));
 
         if current_is_builtin {
-            // "Copy Shader" for built-in effects
+            // "Copy Effect" for built-in effects
             if ui
                 .add_enabled(
                     has_effect,
                     egui::Button::new(
-                        RichText::new("Copy Shader")
+                        RichText::new("Copy Effect")
                             .size(SMALL_SIZE)
                             .color(if has_effect { tc.text_primary } else { tc.text_secondary }),
                     )
@@ -132,12 +132,12 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
                     .data_mut(|d| d.insert_temp(egui::Id::new("copy_builtin_prompt"), true));
             }
         } else {
-            // "Edit Shader" for user effects
+            // "Edit Effect" for user effects
             if ui
                 .add_enabled(
                     has_effect,
                     egui::Button::new(
-                        RichText::new("Edit Shader")
+                        RichText::new("Edit Effect")
                             .size(SMALL_SIZE)
                             .color(if has_effect { tc.text_primary } else { tc.text_secondary }),
                     )
@@ -145,7 +145,7 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
                     .stroke(Stroke::new(1.0, tc.card_border))
                     .corner_radius(CornerRadius::same(4)),
                 )
-                .on_hover_text("Open shader in editor")
+                .on_hover_text("Open effect in editor")
                 .clicked()
             {
                 ui.ctx()

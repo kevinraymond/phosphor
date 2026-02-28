@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Emitter shape and position definition for .pfx files.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EmitterDef {
     #[serde(default = "default_shape")]
     pub shape: String,

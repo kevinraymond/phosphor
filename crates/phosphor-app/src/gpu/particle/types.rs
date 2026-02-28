@@ -112,7 +112,7 @@ pub struct ParticleRenderUniforms {
 }
 
 /// Sprite atlas definition for textured particles.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpriteDef {
     /// Texture file path relative to assets/images/
     pub texture: String,
@@ -127,7 +127,7 @@ pub struct SpriteDef {
 }
 
 /// Image sampling configuration for image-to-particle decomposition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImageSampleDef {
     /// Sampling mode: "grid", "threshold", or "random"
     #[serde(default = "default_sample_mode")]
@@ -154,7 +154,7 @@ fn default_one_u32() -> u32 {
 }
 
 /// .pfx particle definition (JSON).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParticleDef {
     #[serde(default = "default_max_count")]
     pub max_count: u32,

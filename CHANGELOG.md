@@ -3,6 +3,17 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## Unreleased
+
+### PFX Hot-Reload + Editor Integration
+- `.pfx` file hot-reload: editing effect metadata (params, postprocess, passes, particles) live-updates without restarting
+- Differential updates: param-only or postprocess-only changes skip GPU pipeline rebuilds
+- `merge_from_defs` on ParamStore preserves slider positions when param definitions change
+- Editor tab switching: Shader and Effect tabs in code editor for `.wgsl` and `.pfx` side by side
+- JSON syntax highlighting for `.pfx` editing
+- "Edit Shader" → "Edit Effect", "Copy Shader" → "Copy Effect" button labels
+- 12 new unit tests for PfxDiff and merge_from_defs
+
 ## v1.2.0 — 2026-02-28
 
 ### GPU Particle System

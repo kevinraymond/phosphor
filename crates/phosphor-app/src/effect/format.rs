@@ -6,7 +6,7 @@ use crate::gpu::particle::types::ParticleDef;
 use crate::params::ParamDef;
 
 /// A render pass definition within a multi-pass effect.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PassDef {
     pub name: String,
     pub shader: String,
@@ -25,7 +25,7 @@ fn default_scale() -> f32 {
 }
 
 /// Per-effect post-processing overrides.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PostProcessDef {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -87,7 +87,7 @@ impl Default for PostProcessDef {
 }
 
 /// Describes which audio feature drives which visual aspect of an effect.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AudioMapping {
     pub feature: String,
     pub target: String,
@@ -144,6 +144,47 @@ impl PfxEffect {
         } else {
             vec![]
         }
+    }
+
+    /// Compare two PfxEffect versions and identify what changed.
+    pub fn diff(&self, other: &PfxEffect) -> PfxDiff {
+        PfxDiff {
+            metadata_changed: self.name != other.name
+                || self.author != other.author
+                || self.description != other.description
+                || self.hidden != other.hidden
+                || self.audio_mappings != other.audio_mappings,
+            inputs_changed: self.inputs != other.inputs,
+            postprocess_changed: self.postprocess != other.postprocess,
+            passes_changed: self.normalized_passes() != other.normalized_passes(),
+            particles_changed: self.particles != other.particles,
+        }
+    }
+}
+
+/// Describes what changed between two versions of a PfxEffect.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PfxDiff {
+    pub metadata_changed: bool,
+    pub inputs_changed: bool,
+    pub postprocess_changed: bool,
+    pub passes_changed: bool,
+    pub particles_changed: bool,
+}
+
+impl PfxDiff {
+    /// Returns true if nothing changed.
+    pub fn is_empty(&self) -> bool {
+        !self.metadata_changed
+            && !self.inputs_changed
+            && !self.postprocess_changed
+            && !self.passes_changed
+            && !self.particles_changed
+    }
+
+    /// Returns true if changes require a full GPU rebuild (new pipelines).
+    pub fn needs_rebuild(&self) -> bool {
+        self.passes_changed || self.particles_changed
     }
 }
 
@@ -262,5 +303,130 @@ mod tests {
         assert!(approx_eq(pass.scale, 1.0, 1e-6));
         assert!(!pass.feedback);
         assert!(pass.inputs.is_empty());
+    }
+
+    fn make_effect(name: &str, shader: &str) -> PfxEffect {
+        PfxEffect {
+            name: name.into(),
+            author: String::new(),
+            description: String::new(),
+            shader: shader.into(),
+            inputs: vec![],
+            passes: vec![],
+            postprocess: None,
+            particles: None,
+            audio_mappings: vec![],
+            hidden: false,
+            source_path: None,
+        }
+    }
+
+    #[test]
+    fn diff_identical_effects_is_empty() {
+        let a = make_effect("test", "t.wgsl");
+        let b = make_effect("test", "t.wgsl");
+        let diff = a.diff(&b);
+        assert!(diff.is_empty());
+        assert!(!diff.needs_rebuild());
+    }
+
+    #[test]
+    fn diff_detects_metadata_change() {
+        let a = make_effect("test", "t.wgsl");
+        let mut b = make_effect("test", "t.wgsl");
+        b.description = "changed".into();
+        let diff = a.diff(&b);
+        assert!(diff.metadata_changed);
+        assert!(!diff.inputs_changed);
+        assert!(!diff.passes_changed);
+        assert!(!diff.needs_rebuild());
+    }
+
+    #[test]
+    fn diff_detects_inputs_change() {
+        let a = make_effect("test", "t.wgsl");
+        let mut b = make_effect("test", "t.wgsl");
+        b.inputs = vec![ParamDef::Float {
+            name: "speed".into(),
+            default: 0.5,
+            min: 0.0,
+            max: 1.0,
+        }];
+        let diff = a.diff(&b);
+        assert!(!diff.metadata_changed);
+        assert!(diff.inputs_changed);
+        assert!(!diff.needs_rebuild());
+    }
+
+    #[test]
+    fn diff_detects_postprocess_change() {
+        let a = make_effect("test", "t.wgsl");
+        let mut b = make_effect("test", "t.wgsl");
+        b.postprocess = Some(PostProcessDef {
+            bloom_threshold: 0.5,
+            ..PostProcessDef::default()
+        });
+        let diff = a.diff(&b);
+        assert!(diff.postprocess_changed);
+        assert!(!diff.needs_rebuild());
+    }
+
+    #[test]
+    fn diff_detects_passes_change() {
+        let a = make_effect("test", "a.wgsl");
+        let b = make_effect("test", "b.wgsl");
+        let diff = a.diff(&b);
+        assert!(diff.passes_changed);
+        assert!(diff.needs_rebuild());
+    }
+
+    #[test]
+    fn diff_detects_particles_change() {
+        let a = make_effect("test", "t.wgsl");
+        let mut b = make_effect("test", "t.wgsl");
+        b.particles = Some(crate::gpu::particle::types::ParticleDef {
+            max_count: 1000,
+            compute_shader: String::new(),
+            emitter: Default::default(),
+            lifetime: 3.0,
+            initial_speed: 0.3,
+            initial_size: 0.02,
+            size_end: 0.0,
+            gravity: [0.0, 0.0],
+            drag: 0.98,
+            turbulence: 0.0,
+            attraction_strength: 0.0,
+            emit_rate: 100.0,
+            burst_on_beat: 0,
+            sprite: None,
+            image_sample: None,
+            blend: "additive".into(),
+            flow_field: false,
+            flow_strength: 1.0,
+            flow_scale: 1.0,
+            flow_speed: 0.5,
+            trail_length: 0,
+            trail_width: 0.005,
+            interaction: false,
+        });
+        let diff = a.diff(&b);
+        assert!(diff.particles_changed);
+        assert!(diff.needs_rebuild());
+    }
+
+    #[test]
+    fn diff_multiple_changes() {
+        let a = make_effect("test", "a.wgsl");
+        let mut b = make_effect("renamed", "b.wgsl");
+        b.inputs = vec![ParamDef::Bool {
+            name: "flag".into(),
+            default: false,
+        }];
+        let diff = a.diff(&b);
+        assert!(diff.metadata_changed);
+        assert!(diff.inputs_changed);
+        assert!(diff.passes_changed);
+        assert!(diff.needs_rebuild());
+        assert!(!diff.is_empty());
     }
 }

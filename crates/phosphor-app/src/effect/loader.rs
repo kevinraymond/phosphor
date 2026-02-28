@@ -197,8 +197,9 @@ impl EffectLoader {
             match std::fs::read_to_string(entry.path()) {
                 Ok(json) => match serde_json::from_str::<PfxEffect>(&json) {
                     Ok(mut effect) => {
-                        log::info!("Found effect: {} ({})", effect.name, entry.path().display());
-                        effect.source_path = Some(entry.path());
+                        let path = entry.path().canonicalize().unwrap_or_else(|_| entry.path());
+                        log::info!("Found effect: {} ({})", effect.name, path.display());
+                        effect.source_path = Some(path);
                         self.effects.push(effect);
                     }
                     Err(e) => {

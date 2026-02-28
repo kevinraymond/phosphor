@@ -9,6 +9,13 @@ use egui_code_editor::{ColorTheme, Syntax, Token, TokenType};
 use crate::ui::theme::ThemeMode;
 use crate::ui::theme::colors::theme_colors;
 
+/// Which file type is currently active in the editor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EditorFileType {
+    Wgsl,
+    Pfx,
+}
+
 /// State for the shader editor overlay.
 pub struct ShaderEditorState {
     pub open: bool,
@@ -23,6 +30,16 @@ pub struct ShaderEditorState {
     pub new_effect_prompt: bool,
     pub new_effect_name: String,
     pub copy_builtin_mode: bool,
+    /// Currently active file type (Wgsl or Pfx).
+    pub file_type: EditorFileType,
+    /// Path to the paired file (.pfx when editing .wgsl, and vice versa).
+    pub paired_path: Option<PathBuf>,
+    /// Content of the paired file (swapped in/out on tab switch).
+    pub paired_content: String,
+    /// Disk content of the paired file (for dirty detection after swap).
+    pub paired_disk_content: String,
+    /// File name of the paired file.
+    pub paired_file_name: String,
 }
 
 impl Default for ShaderEditorState {
@@ -40,6 +57,11 @@ impl Default for ShaderEditorState {
             new_effect_prompt: false,
             new_effect_name: String::new(),
             copy_builtin_mode: false,
+            file_type: EditorFileType::Wgsl,
+            paired_path: None,
+            paired_content: String::new(),
+            paired_disk_content: String::new(),
+            paired_file_name: String::new(),
         }
     }
 }
@@ -61,6 +83,31 @@ impl ShaderEditorState {
         self.code = content.clone();
         self.disk_content = content;
         self.compile_error = None;
+        self.file_type = EditorFileType::Wgsl;
+    }
+
+    /// Load the paired .pfx file for tab switching.
+    pub fn load_paired_pfx(&mut self, path: PathBuf, content: String) {
+        self.paired_file_name = path
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_default();
+        self.paired_path = Some(path);
+        self.paired_content = content.clone();
+        self.paired_disk_content = content;
+    }
+
+    /// Switch between Wgsl and Pfx tabs by swapping current ↔ paired buffers.
+    pub fn switch_tab(&mut self, target: EditorFileType) {
+        if target == self.file_type {
+            return;
+        }
+        // Swap current ↔ paired
+        std::mem::swap(&mut self.code, &mut self.paired_content);
+        std::mem::swap(&mut self.disk_content, &mut self.paired_disk_content);
+        std::mem::swap(&mut self.file_path, &mut self.paired_path);
+        std::mem::swap(&mut self.file_name, &mut self.paired_file_name);
+        self.file_type = target;
     }
 
     pub fn close(&mut self) {
@@ -69,6 +116,16 @@ impl ShaderEditorState {
         self.code.clear();
         self.disk_content.clear();
         self.compile_error = None;
+        self.paired_path = None;
+        self.paired_content.clear();
+        self.paired_disk_content.clear();
+        self.paired_file_name.clear();
+        self.file_type = EditorFileType::Wgsl;
+    }
+
+    /// Check if the paired file has unsaved changes.
+    pub fn paired_is_dirty(&self) -> bool {
+        self.paired_content != self.paired_disk_content
     }
 }
 
@@ -164,6 +221,13 @@ fn wgsl_syntax() -> Syntax {
         ])
 }
 
+/// Build a JSON syntax definition for .pfx editing.
+fn json_syntax() -> Syntax {
+    Syntax::new("json")
+        .with_case_sensitive(true)
+        .with_keywords(["true", "false", "null"])
+}
+
 /// Get the color theme for syntax highlighting (no bg hacking needed).
 fn editor_color_theme(theme: ThemeMode) -> ColorTheme {
     match theme {
@@ -219,6 +283,9 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
         (state.editor_opacity * 255.0) as u8,
     );
 
+    // Pre-read tab switch request to avoid borrow issues
+    let has_paired = state.paired_path.is_some();
+
     let editor_id = Id::new("shader_editor_overlay");
     egui::Area::new(editor_id)
         .fixed_pos(panel_pos)
@@ -251,13 +318,77 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
                             .color(tc.text_primary)
                             .strong(),
                     );
-                    ui.label(
-                        RichText::new(&state.file_name)
-                            .size(12.0)
-                            .color(tc.text_secondary),
-                    );
-                    if state.is_dirty() {
-                        ui.label(RichText::new("*").size(14.0).color(tc.warning));
+
+                    // Tab bar (only show if we have a paired file)
+                    if has_paired {
+                        ui.add_space(8.0);
+                        let shader_active = state.file_type == EditorFileType::Wgsl;
+                        let pfx_active = state.file_type == EditorFileType::Pfx;
+
+                        // Shader tab
+                        let shader_label = if shader_active && state.is_dirty() {
+                            "Shader *"
+                        } else {
+                            "Shader"
+                        };
+                        let shader_btn = ui.add(
+                            egui::Button::new(
+                                RichText::new(shader_label)
+                                    .size(12.0)
+                                    .color(if shader_active { tc.text_primary } else { tc.text_secondary }),
+                            )
+                            .fill(if shader_active { tc.card_bg } else { Color32::TRANSPARENT })
+                            .stroke(if shader_active {
+                                Stroke::new(1.0, tc.accent)
+                            } else {
+                                Stroke::NONE
+                            })
+                            .corner_radius(CornerRadius::same(3)),
+                        );
+                        if shader_btn.clicked() && !shader_active {
+                            state.switch_tab(EditorFileType::Wgsl);
+                        }
+
+                        // Effect tab
+                        let pfx_dirty = if pfx_active {
+                            state.is_dirty()
+                        } else {
+                            state.paired_is_dirty()
+                        };
+                        let pfx_label = if pfx_active && pfx_dirty {
+                            "Effect *"
+                        } else if !pfx_active && pfx_dirty {
+                            "Effect *"
+                        } else {
+                            "Effect"
+                        };
+                        let pfx_btn = ui.add(
+                            egui::Button::new(
+                                RichText::new(pfx_label)
+                                    .size(12.0)
+                                    .color(if pfx_active { tc.text_primary } else { tc.text_secondary }),
+                            )
+                            .fill(if pfx_active { tc.card_bg } else { Color32::TRANSPARENT })
+                            .stroke(if pfx_active {
+                                Stroke::new(1.0, tc.accent)
+                            } else {
+                                Stroke::NONE
+                            })
+                            .corner_radius(CornerRadius::same(3)),
+                        );
+                        if pfx_btn.clicked() && !pfx_active {
+                            state.switch_tab(EditorFileType::Pfx);
+                        }
+                    } else {
+                        // No paired file — show file name as before
+                        ui.label(
+                            RichText::new(&state.file_name)
+                                .size(12.0)
+                                .color(tc.text_secondary),
+                        );
+                        if state.is_dirty() {
+                            ui.label(RichText::new("*").size(14.0).color(tc.warning));
+                        }
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -370,11 +501,22 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
                 style.override_font_id = Some(egui::FontId::monospace(fontsize));
                 style.visuals.text_cursor.stroke.width = fontsize * 0.1;
 
-                let syntax = wgsl_syntax();
+                let syntax = match state.file_type {
+                    EditorFileType::Wgsl => wgsl_syntax(),
+                    EditorFileType::Pfx => json_syntax(),
+                };
                 let num_color = color_theme.type_color(TokenType::Comment(true));
 
-                // State-dependent ids force egui to recreate widgets on minimize/expand toggle
-                let mode_salt = if state.minimized { "min" } else { "full" };
+                // State-dependent ids force egui to recreate widgets on minimize/expand/tab toggle
+                let file_salt = match state.file_type {
+                    EditorFileType::Wgsl => "wgsl",
+                    EditorFileType::Pfx => "pfx",
+                };
+                let mode_salt = if state.minimized {
+                    format!("min_{file_salt}")
+                } else {
+                    format!("full_{file_salt}")
+                };
                 egui::ScrollArea::vertical()
                     .id_salt(format!("shader_scroll_{mode_salt}"))
                     .min_scrolled_height(code_height)
