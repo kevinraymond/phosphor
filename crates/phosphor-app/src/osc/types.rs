@@ -22,6 +22,16 @@ pub enum OscInMessage {
     LayerEnabled { layer: usize, value: bool },
     /// Toggle post-processing: /phosphor/postprocess/enabled
     PostProcessEnabled(bool),
+    /// Jump to a specific cue: /phosphor/scene/goto_cue
+    SceneGotoCue(usize),
+    /// Load scene by index: /phosphor/scene/load (int arg)
+    SceneLoadIndex(usize),
+    /// Load scene by name: /phosphor/scene/load (string arg)
+    SceneLoadName(String),
+    /// Set loop mode: /phosphor/scene/loop_mode
+    SceneLoopMode(bool),
+    /// Set advance mode: /phosphor/scene/advance_mode (0=Manual, 1=Timer, 2=BeatSync)
+    SceneAdvanceMode(u8),
     /// Unrecognized address (captured for learn mode)
     Raw { address: String, value: f32 },
 }

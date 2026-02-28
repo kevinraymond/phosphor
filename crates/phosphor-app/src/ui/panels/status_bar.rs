@@ -49,6 +49,8 @@ pub fn draw_status_bar(
     web_enabled: bool,
     web_client_count: usize,
     ndi_running: bool,
+    scene_active: bool,
+    scene_cue: Option<(usize, usize)>,
     status_error: &Option<(String, std::time::Instant)>,
     preset_loading: Option<&str>,
 ) {
@@ -153,6 +155,16 @@ pub fn draw_status_bar(
                         .color(Color32::from_rgb(0x80, 0xB0, 0xE0)),
                 );
                 label(ui, "PTL");
+                ui.add_space(6.0);
+            }
+
+            // Scene
+            if scene_active {
+                if let Some((current, total)) = scene_cue {
+                    fixed_value(ui, &format!("{}/{}", current + 1, total), 28.0, Color32::from_rgb(0xFF, 0xA0, 0x40));
+                }
+                dot(ui, true, Color32::from_rgb(0xFF, 0xA0, 0x40));
+                label(ui, "SCN");
                 ui.add_space(6.0);
             }
 

@@ -23,6 +23,12 @@ pub struct OscFrameResult {
     pub layer_blend: Vec<(usize, u32)>,
     pub layer_enabled: Vec<(usize, bool)>,
     pub postprocess_enabled: Option<bool>,
+    // Scene control
+    pub scene_goto_cue: Option<usize>,
+    pub scene_load_index: Option<usize>,
+    pub scene_load_name: Option<String>,
+    pub scene_loop_mode: Option<bool>,
+    pub scene_advance_mode: Option<u8>,
 }
 
 impl OscFrameResult {
@@ -34,6 +40,11 @@ impl OscFrameResult {
             layer_blend: Vec::new(),
             layer_enabled: Vec::new(),
             postprocess_enabled: None,
+            scene_goto_cue: None,
+            scene_load_index: None,
+            scene_load_name: None,
+            scene_loop_mode: None,
+            scene_advance_mode: None,
         }
     }
 }
@@ -237,6 +248,21 @@ impl OscSystem {
                 OscInMessage::PostProcessEnabled(enabled) => {
                     result.postprocess_enabled = Some(enabled);
                 }
+                OscInMessage::SceneGotoCue(index) => {
+                    result.scene_goto_cue = Some(index);
+                }
+                OscInMessage::SceneLoadIndex(index) => {
+                    result.scene_load_index = Some(index);
+                }
+                OscInMessage::SceneLoadName(name) => {
+                    result.scene_load_name = Some(name);
+                }
+                OscInMessage::SceneLoopMode(enabled) => {
+                    result.scene_loop_mode = Some(enabled);
+                }
+                OscInMessage::SceneAdvanceMode(mode) => {
+                    result.scene_advance_mode = Some(mode);
+                }
                 OscInMessage::Raw { ref address, value } => {
                     // Check learned param mappings
                     if let Some(param_name) = self.config.find_param(address) {
@@ -318,6 +344,21 @@ impl OscSystem {
                 OscInMessage::PostProcessEnabled(enabled) => {
                     result.postprocess_enabled = Some(enabled);
                 }
+                OscInMessage::SceneGotoCue(index) => {
+                    result.scene_goto_cue = Some(index);
+                }
+                OscInMessage::SceneLoadIndex(index) => {
+                    result.scene_load_index = Some(index);
+                }
+                OscInMessage::SceneLoadName(name) => {
+                    result.scene_load_name = Some(name);
+                }
+                OscInMessage::SceneLoopMode(enabled) => {
+                    result.scene_loop_mode = Some(enabled);
+                }
+                OscInMessage::SceneAdvanceMode(mode) => {
+                    result.scene_advance_mode = Some(mode);
+                }
                 OscInMessage::Raw { ref address, value } => {
                     if let Some(action) = self.config.find_trigger(address) {
                         if value > 0.5 {
@@ -333,7 +374,16 @@ impl OscSystem {
     }
 
     /// Send outbound state if TX is enabled and rate-limited.
-    pub fn send_state(&mut self, features: &AudioFeatures, active_layer: usize, effect_name: &str) {
+    pub fn send_state(
+        &mut self,
+        features: &AudioFeatures,
+        active_layer: usize,
+        effect_name: &str,
+        timeline_active: bool,
+        timeline_cue_index: usize,
+        timeline_cue_count: usize,
+        timeline_transition_progress: f32,
+    ) {
         if !self.config.tx_enabled {
             return;
         }
@@ -344,6 +394,12 @@ impl OscSystem {
         self.last_tx_time = Instant::now();
         self.sender.send_audio(features);
         self.sender.send_state(active_layer, effect_name);
+        self.sender.send_timeline(
+            timeline_active,
+            timeline_cue_index,
+            timeline_cue_count,
+            timeline_transition_progress,
+        );
     }
 }
 
@@ -363,6 +419,11 @@ fn msg_address(msg: &OscInMessage) -> String {
         OscInMessage::LayerBlend { layer, .. } => format!("/phosphor/layer/{layer}/blend"),
         OscInMessage::LayerEnabled { layer, .. } => format!("/phosphor/layer/{layer}/enabled"),
         OscInMessage::PostProcessEnabled(_) => "/phosphor/postprocess/enabled".to_string(),
+        OscInMessage::SceneGotoCue(_) => "/phosphor/scene/goto_cue".to_string(),
+        OscInMessage::SceneLoadIndex(_) => "/phosphor/scene/load".to_string(),
+        OscInMessage::SceneLoadName(_) => "/phosphor/scene/load".to_string(),
+        OscInMessage::SceneLoopMode(_) => "/phosphor/scene/loop_mode".to_string(),
+        OscInMessage::SceneAdvanceMode(_) => "/phosphor/scene/advance_mode".to_string(),
         OscInMessage::Raw { address, .. } => address.clone(),
     }
 }
@@ -377,6 +438,9 @@ fn trigger_slug(action: &TriggerAction) -> &'static str {
         TriggerAction::PrevPreset => "prev_preset",
         TriggerAction::NextLayer => "next_layer",
         TriggerAction::PrevLayer => "prev_layer",
+        TriggerAction::SceneGoNext => "scene_go_next",
+        TriggerAction::SceneGoPrev => "scene_go_prev",
+        TriggerAction::ToggleTimeline => "toggle_timeline",
     }
 }
 
@@ -412,6 +476,9 @@ mod tests {
             (TriggerAction::PrevPreset, "prev_preset"),
             (TriggerAction::NextLayer, "next_layer"),
             (TriggerAction::PrevLayer, "prev_layer"),
+            (TriggerAction::SceneGoNext, "scene_go_next"),
+            (TriggerAction::SceneGoPrev, "scene_go_prev"),
+            (TriggerAction::ToggleTimeline, "toggle_timeline"),
         ];
         for (action, slug) in expected {
             assert_eq!(trigger_slug(&action), slug);
@@ -477,5 +544,42 @@ mod tests {
         assert!(r.layer_blend.is_empty());
         assert!(r.layer_enabled.is_empty());
         assert!(r.postprocess_enabled.is_none());
+        assert!(r.scene_goto_cue.is_none());
+        assert!(r.scene_load_index.is_none());
+        assert!(r.scene_load_name.is_none());
+        assert!(r.scene_loop_mode.is_none());
+        assert!(r.scene_advance_mode.is_none());
+    }
+
+    // ---- Scene msg_address tests ----
+
+    #[test]
+    fn msg_address_scene_goto_cue() {
+        let msg = OscInMessage::SceneGotoCue(3);
+        assert_eq!(msg_address(&msg), "/phosphor/scene/goto_cue");
+    }
+
+    #[test]
+    fn msg_address_scene_load_index() {
+        let msg = OscInMessage::SceneLoadIndex(0);
+        assert_eq!(msg_address(&msg), "/phosphor/scene/load");
+    }
+
+    #[test]
+    fn msg_address_scene_load_name() {
+        let msg = OscInMessage::SceneLoadName("Test".into());
+        assert_eq!(msg_address(&msg), "/phosphor/scene/load");
+    }
+
+    #[test]
+    fn msg_address_scene_loop_mode() {
+        let msg = OscInMessage::SceneLoopMode(true);
+        assert_eq!(msg_address(&msg), "/phosphor/scene/loop_mode");
+    }
+
+    #[test]
+    fn msg_address_scene_advance_mode() {
+        let msg = OscInMessage::SceneAdvanceMode(1);
+        assert_eq!(msg_address(&msg), "/phosphor/scene/advance_mode");
     }
 }

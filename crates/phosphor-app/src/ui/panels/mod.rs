@@ -9,9 +9,11 @@ pub mod ndi_panel;
 pub mod osc_panel;
 pub mod param_panel;
 pub mod preset_panel;
+pub mod scene_panel;
 pub mod settings_panel;
 pub mod shader_editor;
 pub mod status_bar;
+pub mod timeline_bar;
 pub mod web_panel;
 pub mod webcam_panel;
 
@@ -50,6 +52,7 @@ pub fn draw_panels(
     active_layer: usize,
     media_info: Option<media_panel::MediaInfo>,
     webcam_info: Option<webcam_panel::WebcamInfo>,
+    scene_info: Option<scene_panel::SceneInfo>,
     status_error: &Option<(String, std::time::Instant)>,
     current_theme: ThemeMode,
 ) {
@@ -59,6 +62,8 @@ pub fn draw_panels(
 
     let tc = theme_colors(ctx);
 
+    // Status bar must be drawn FIRST so it claims the bottom-most position.
+    // Timeline bar draws second and sits directly above it.
     egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
         let midi_port = midi.connected_port().unwrap_or("");
         let midi_active = midi.connected_port().is_some();
@@ -80,6 +85,8 @@ pub fn draw_panels(
                 _ => None,
             })
         });
+        let scene_active = scene_info.as_ref().and_then(|s| s.timeline.as_ref()).map_or(false, |t| t.active);
+        let scene_cue = scene_info.as_ref().and_then(|s| s.timeline.as_ref()).filter(|t| t.active).map(|t| (t.current_cue, t.cue_count));
         status_bar::draw_status_bar(
             ui,
             shader_error,
@@ -93,10 +100,34 @@ pub fn draw_panels(
             web.config.enabled,
             web.client_count,
             ndi_running,
+            scene_active,
+            scene_cue,
             status_error,
             preset_loading.as_deref(),
         );
     });
+
+    // Timeline bar (above status bar) — only when scene is active
+    if let Some(ref scene) = scene_info {
+        if let Some(ref tl) = scene.timeline {
+            if tl.active {
+                egui::TopBottomPanel::bottom("timeline_bar")
+                    .exact_height(36.0)
+                    .frame(Frame {
+                        fill: tc.panel,
+                        inner_margin: Margin::symmetric(2, 2),
+                        ..Default::default()
+                    })
+                    .show(ctx, |ui| {
+                        let cue_names: Vec<String> = scene.cue_list
+                            .iter()
+                            .map(|c| c.preset_name.clone())
+                            .collect();
+                        timeline_bar::draw_timeline_bar(ui, tl, &cue_names);
+                    });
+            }
+        }
+    }
 
     let panel_frame = Frame {
         fill: tc.panel,
@@ -105,7 +136,7 @@ pub fn draw_panels(
     };
 
     egui::SidePanel::left("left_panel")
-        .exact_width(270.0)
+        .exact_width(315.0)
         .resizable(false)
         .frame(panel_frame)
         .show(ctx, |ui| {
@@ -157,6 +188,29 @@ pub fn draw_panels(
                         preset_panel::draw_preset_panel(ui, preset_store);
                     },
                 );
+
+                // Scenes section (default collapsed)
+                if let Some(ref scene) = scene_info {
+                    let scene_count = scene.scene_store_names.len();
+                    let scene_badge_owned = format!("{}", scene_count);
+                    let scene_badge: Option<&str> = if scene.timeline.as_ref().map_or(false, |t| t.active) {
+                        Some("LIVE")
+                    } else if scene_count > 0 {
+                        Some(&scene_badge_owned)
+                    } else {
+                        None
+                    };
+                    widgets::section(
+                        ui,
+                        "sec_scenes",
+                        "Scenes",
+                        scene_badge,
+                        false,
+                        |ui| {
+                            scene_panel::draw_scene_panel(ui, scene);
+                        },
+                    );
+                }
 
                 // Layers section
                 let layer_badge = format!("{}", layers.len());
@@ -264,7 +318,7 @@ pub fn draw_panels(
         });
 
     egui::SidePanel::right("right_panel")
-        .exact_width(270.0)
+        .exact_width(315.0)
         .resizable(false)
         .frame(panel_frame)
         .show(ctx, |ui| {

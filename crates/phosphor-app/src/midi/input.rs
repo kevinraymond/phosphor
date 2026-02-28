@@ -49,8 +49,9 @@ pub struct MidiPort {
 }
 
 impl MidiPort {
-    /// Open a MIDI port by name. Returns the port handle and a receiver for parsed messages.
-    pub fn open(port_name: &str) -> anyhow::Result<(Self, Receiver<MidiMessage>)> {
+    /// Open a MIDI port by name. Returns the port handle, a receiver for parsed messages,
+    /// and a receiver for MIDI clock bytes (0xF8/0xFA/0xFB/0xFC system realtime).
+    pub fn open(port_name: &str) -> anyhow::Result<(Self, Receiver<MidiMessage>, Receiver<u8>)> {
         let midi_in = midir::MidiInput::new("phosphor")?;
         let ports = midi_in.ports();
 
@@ -66,6 +67,8 @@ impl MidiPort {
 
         let (tx, rx): (Sender<MidiMessage>, Receiver<MidiMessage>) =
             crossbeam_channel::bounded(64);
+        let (clock_tx, clock_rx): (Sender<u8>, Receiver<u8>) =
+            crossbeam_channel::bounded(256);
 
         // midir manages its own callback thread internally
         let connection = midi_in
@@ -73,6 +76,11 @@ impl MidiPort {
                 port,
                 "phosphor-midi",
                 move |_timestamp, data, _| {
+                    // System realtime messages (1-byte, 0xF8..0xFF)
+                    if !data.is_empty() && data[0] >= 0xF8 {
+                        let _ = clock_tx.try_send(data[0]);
+                        return;
+                    }
                     if let Some(msg) = parse_midi_bytes(data) {
                         let _ = tx.try_send(msg); // drop if full
                     }
@@ -87,6 +95,7 @@ impl MidiPort {
                 port_name: port_name.to_string(),
             },
             rx,
+            clock_rx,
         ))
     }
 
