@@ -3,6 +3,23 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## v1.1.0 — 2026-02-28
+
+### Scene System
+- Scene = ordered cue list referencing presets with transitions (Cut, Dissolve, ParamMorph)
+- SceneStore: save/load/delete scenes to `~/.config/phosphor/scenes/*.json`
+- Timeline state machine: Idle → Holding → Transitioning with auto-advance and beat sync
+- ParamMorph transitions: smooth interpolation of all params and layer opacities
+- Dissolve transitions: GPU crossfade via fullscreen shader with snapshot capture
+- Scene panel in left sidebar: cue list management, transport controls, save/load/delete
+- Timeline bar above status bar: cue blocks, transition progress overlay, click-to-jump
+- Scene status indicator (SCN) in status bar with cue counter
+- Keyboard: Space (next cue), T (toggle timeline)
+- MIDI triggers: SceneGoNext, SceneGoPrev, ToggleTimeline
+- OSC: `/phosphor/trigger/scene_go_next`, `scene_go_prev`, `toggle_timeline`
+- Web control: scene trigger actions via WebSocket
+- MIDI Clock sync: parse 0xF8/FA/FB/FC system realtime, derive external BPM, beat-synced advance
+
 ## v1.0.1 — 2026-02-27
 
 ### UI

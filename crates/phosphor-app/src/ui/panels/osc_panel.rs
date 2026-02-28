@@ -14,6 +14,7 @@ const TRIGGER_PAIRS: &[(TriggerAction, TriggerAction)] = &[
     (TriggerAction::NextPreset, TriggerAction::PrevPreset),
     (TriggerAction::NextLayer, TriggerAction::PrevLayer),
     (TriggerAction::TogglePostProcess, TriggerAction::ToggleOverlay),
+    (TriggerAction::SceneGoNext, TriggerAction::SceneGoPrev),
 ];
 
 pub fn draw_osc_panel(ui: &mut Ui, osc: &mut OscSystem) {

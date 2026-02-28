@@ -17,6 +17,7 @@ use crate::gpu::placeholder::PlaceholderTexture;
 use crate::gpu::postprocess::PostProcessChain;
 use crate::gpu::render_target::PingPongTarget;
 use crate::gpu::{GpuContext, ShaderPipeline, ShaderUniforms, UniformBuffer};
+use crate::midi::clock::MidiClock;
 use crate::midi::types::TriggerAction;
 use crate::midi::MidiSystem;
 use crate::osc::OscSystem;
@@ -25,6 +26,10 @@ use crate::web::WebSystem;
 use crate::preset::loader::{PresetLoader, MediaDecodeResult};
 use crate::preset::store::LayerPreset;
 use crate::preset::PresetStore;
+use crate::scene::SceneStore;
+use crate::scene::timeline::{Timeline, TimelineEvent};
+use crate::scene::transition::TransitionRenderer;
+use crate::scene::types::AdvanceMode;
 use crate::shader::ShaderWatcher;
 use crate::settings::SettingsConfig;
 use crate::ui::EguiOverlay;
@@ -66,6 +71,16 @@ pub struct App {
     // NDI output (feature-gated)
     #[cfg(feature = "ndi")]
     pub ndi: crate::ndi::NdiSystem,
+    // Scenes
+    pub scene_store: SceneStore,
+    pub timeline: Timeline,
+    pub transition_renderer: Option<TransitionRenderer>,
+    /// Set to true when a dissolve transition begins; render() captures snapshot on this frame.
+    pub dissolve_capture_pending: bool,
+    pub midi_clock: MidiClock,
+    /// Morph transition state: from-params per layer (layer_idx → param_name → value).
+    pub morph_from_params: Option<Vec<std::collections::HashMap<String, ParamValue>>>,
+    pub morph_from_opacities: Option<Vec<f32>>,
     // Shader editor
     pub shader_editor: ShaderEditorState,
     // Quit confirmation
@@ -239,6 +254,8 @@ impl App {
         let web = WebSystem::new();
         let mut preset_store = PresetStore::new();
         preset_store.scan();
+        let mut scene_store = SceneStore::new();
+        scene_store.scan();
         let egui_overlay = EguiOverlay::new(&gpu.device, gpu.format, &window, settings.theme);
         #[cfg(feature = "ndi")]
         let ndi = crate::ndi::NdiSystem::new(
@@ -266,6 +283,13 @@ impl App {
             pending_web_triggers: Vec::new(),
             preset_store,
             preset_loader: PresetLoader::new(),
+            scene_store,
+            timeline: Timeline::new(Vec::new(), false, AdvanceMode::Manual),
+            transition_renderer: None,
+            dissolve_capture_pending: false,
+            midi_clock: MidiClock::new(),
+            morph_from_params: None,
+            morph_from_opacities: None,
             settings,
             egui_overlay,
             effect_loader,
@@ -294,6 +318,9 @@ impl App {
         self.post_process.resize(&self.gpu.device, width, height);
         self.egui_overlay
             .resize(width, height, self.window.scale_factor() as f32);
+        if let Some(ref mut tr) = self.transition_renderer {
+            tr.resize(&self.gpu.device, width, height, GpuContext::hdr_format());
+        }
         #[cfg(feature = "ndi")]
         self.ndi.resize(&self.gpu.device, width, height);
     }
@@ -544,6 +571,31 @@ impl App {
                     self.post_process.enabled,
                 );
                 self.web.broadcast_json(&state_json);
+            }
+        }
+
+        // Drain MIDI clock bytes into MidiClock
+        self.midi.drain_clock(&mut self.midi_clock);
+
+        // Advance timeline (scene system)
+        if self.timeline.active {
+            // Feed beat signal for BeatSync mode
+            let beat_on = self.uniforms.beat > 0.5;
+            let beat_event = self.timeline.feed_beat(beat_on);
+            self.process_timeline_event(beat_event);
+
+            // Tick for timer-based advance
+            let tick_event = self.timeline.tick(dt);
+            self.process_timeline_event(tick_event);
+
+            // Apply morph interpolation during ParamMorph transitions
+            if let crate::scene::timeline::PlaybackState::Transitioning {
+                progress,
+                transition_type: crate::scene::types::TransitionType::ParamMorph,
+                ..
+            } = &self.timeline.state
+            {
+                self.apply_morph_interpolation(*progress);
             }
         }
 
@@ -1482,6 +1534,195 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// Load a scene and start its timeline.
+    pub fn load_scene(&mut self, index: usize) {
+        let scene = match self.scene_store.load(index) {
+            Some(s) => s.clone(),
+            None => return,
+        };
+
+        self.scene_store.current_scene = Some(index);
+
+        self.timeline = Timeline::new(
+            scene.cues.clone(),
+            scene.loop_mode,
+            scene.advance_mode,
+        );
+
+        // Start at cue 0
+        let event = self.timeline.start(0);
+        self.process_timeline_event(event);
+
+        log::info!("Loaded scene '{}' with {} cues", scene.name, scene.cues.len());
+    }
+
+    /// Process a timeline event (load cue, begin transition, etc.).
+    pub fn process_timeline_event(&mut self, event: TimelineEvent) {
+        match event {
+            TimelineEvent::None => {}
+            TimelineEvent::LoadCue { cue_index } => {
+                // Look up the preset by name and load it
+                if let Some(cue) = self.timeline.cues.get(cue_index) {
+                    let preset_name = cue.preset_name.clone();
+                    let preset_idx = self
+                        .preset_store
+                        .presets
+                        .iter()
+                        .position(|(name, _)| name == &preset_name);
+                    if let Some(idx) = preset_idx {
+                        self.load_preset(idx);
+                    } else {
+                        log::warn!("Preset '{}' not found for cue {}", preset_name, cue_index);
+                    }
+                }
+            }
+            TimelineEvent::BeginTransition {
+                from_cue: _,
+                to_cue,
+                transition_type,
+                duration: _,
+            } => {
+                match transition_type {
+                    crate::scene::types::TransitionType::Dissolve => {
+                        // Ensure TransitionRenderer exists
+                        if self.transition_renderer.is_none() {
+                            self.transition_renderer = Some(TransitionRenderer::new(
+                                &self.gpu.device,
+                                GpuContext::hdr_format(),
+                            ));
+                        }
+                        // Mark that render() should capture the current frame before loading new preset
+                        self.dissolve_capture_pending = true;
+
+                        // Load the target preset so the incoming scene renders
+                        if let Some(cue) = self.timeline.cues.get(to_cue) {
+                            let preset_name = cue.preset_name.clone();
+                            let preset_idx = self
+                                .preset_store
+                                .presets
+                                .iter()
+                                .position(|(name, _)| name == &preset_name);
+                            if let Some(idx) = preset_idx {
+                                self.load_preset(idx);
+                            }
+                        }
+                    }
+                    crate::scene::types::TransitionType::ParamMorph => {
+                        // Snapshot current params for interpolation
+                        let from_params: Vec<std::collections::HashMap<String, ParamValue>> = self
+                            .layer_stack
+                            .layers
+                            .iter()
+                            .map(|l| l.param_store.values.clone())
+                            .collect();
+                        let from_opacities: Vec<f32> = self
+                            .layer_stack
+                            .layers
+                            .iter()
+                            .map(|l| l.opacity)
+                            .collect();
+                        self.morph_from_params = Some(from_params);
+                        self.morph_from_opacities = Some(from_opacities);
+
+                        // Load target preset (params will be overridden by interpolation)
+                        if let Some(cue) = self.timeline.cues.get(to_cue) {
+                            let preset_name = cue.preset_name.clone();
+                            let preset_idx = self
+                                .preset_store
+                                .presets
+                                .iter()
+                                .position(|(name, _)| name == &preset_name);
+                            if let Some(idx) = preset_idx {
+                                // Load the target preset but immediately start morphing
+                                self.load_preset(idx);
+                            }
+                        }
+                    }
+                    crate::scene::types::TransitionType::Cut => {
+                        // Handled by LoadCue
+                    }
+                }
+            }
+            TimelineEvent::TransitionProgress { .. } => {
+                // Morph interpolation handled in update() loop
+                // Dissolve crossfade handled in render() loop
+            }
+            TimelineEvent::TransitionComplete { cue_index: _ } => {
+                // Clear morph state
+                self.morph_from_params = None;
+                self.morph_from_opacities = None;
+            }
+        }
+    }
+
+    /// Apply morph interpolation between saved params and current (target) params.
+    fn apply_morph_interpolation(&mut self, progress: f32) {
+        let from_params = match &self.morph_from_params {
+            Some(p) => p,
+            None => return,
+        };
+        let from_opacities = self.morph_from_opacities.as_ref();
+
+        for (i, layer) in self.layer_stack.layers.iter_mut().enumerate() {
+            // Interpolate params
+            if let Some(from_layer_params) = from_params.get(i) {
+                let target_values = layer.param_store.values.clone();
+                for (name, target_val) in &target_values {
+                    if let Some(from_val) = from_layer_params.get(name) {
+                        let interpolated = from_val.lerp(target_val, progress);
+                        layer.param_store.set(name, interpolated);
+                    }
+                }
+            }
+
+            // Interpolate opacity
+            if let Some(opacities) = from_opacities {
+                if let Some(&from_opacity) = opacities.get(i) {
+                    let target_opacity = layer.opacity;
+                    layer.opacity = from_opacity + (target_opacity - from_opacity) * progress;
+                }
+            }
+        }
+    }
+
+    /// Build SceneInfo snapshot for UI.
+    pub fn scene_info(&self) -> crate::ui::panels::scene_panel::SceneInfo {
+        let scene_store_names: Vec<String> = self
+            .scene_store
+            .scenes
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        let timeline = if self.scene_store.current_scene.is_some() {
+            Some(self.timeline.info())
+        } else {
+            None
+        };
+        let preset_names: Vec<String> = self
+            .preset_store
+            .presets
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        let cue_list: Vec<crate::ui::panels::scene_panel::CueDisplayInfo> = self
+            .timeline
+            .cues
+            .iter()
+            .map(|c| crate::ui::panels::scene_panel::CueDisplayInfo {
+                preset_name: c.display_name().to_string(),
+                transition: c.transition,
+                transition_secs: c.transition_secs,
+            })
+            .collect();
+        crate::ui::panels::scene_panel::SceneInfo {
+            scene_store_names,
+            current_scene: self.scene_store.current_scene,
+            timeline,
+            preset_names,
+            cue_list,
+        }
+    }
+
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.gpu.surface.get_current_texture()?;
         let surface_view = output
@@ -1536,6 +1777,41 @@ impl App {
                 &layer_outputs,
             );
             (composited, self.current_postprocess())
+        };
+
+        // Dissolve capture: on the first frame of a dissolve transition, capture outgoing
+        if self.dissolve_capture_pending {
+            if let Some(ref mut tr) = self.transition_renderer {
+                tr.capture_snapshot(&self.gpu.device, &self.gpu.queue, &mut encoder, source);
+            }
+            self.dissolve_capture_pending = false;
+        }
+
+        // Dissolve crossfade: if transitioning with dissolve, blend snapshot + current
+        let source = if let crate::scene::timeline::PlaybackState::Transitioning {
+            transition_type: crate::scene::types::TransitionType::Dissolve,
+            progress,
+            ..
+        } = &self.timeline.state
+        {
+            if let Some(ref tr) = self.transition_renderer {
+                if tr.has_snapshot() {
+                    tr.crossfade(
+                        &self.gpu.device,
+                        &self.gpu.queue,
+                        &mut encoder,
+                        source,
+                        *progress,
+                    )
+                    .unwrap_or(source)
+                } else {
+                    source
+                }
+            } else {
+                source
+            }
+        } else {
+            source
         };
 
         // Post-process → surface

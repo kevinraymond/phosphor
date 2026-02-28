@@ -9,6 +9,7 @@ mod ndi;
 mod osc;
 mod params;
 mod preset;
+mod scene;
 mod settings;
 mod shader;
 mod ui;
@@ -136,6 +137,22 @@ impl ApplicationHandler for PhosphorApp {
                     KeyCode::KeyD => {
                         app.egui_overlay.toggle_visible();
                     }
+                    KeyCode::Space => {
+                        // Scene: go to next cue (when timeline has cues)
+                        if !app.timeline.cues.is_empty() {
+                            app.egui_overlay.context().data_mut(|d| {
+                                d.insert_temp(egui::Id::new("scene_go_next"), true);
+                            });
+                        }
+                    }
+                    KeyCode::KeyT => {
+                        // Toggle timeline active (when cues loaded)
+                        if !app.timeline.cues.is_empty() {
+                            app.egui_overlay.context().data_mut(|d| {
+                                d.insert_temp(egui::Id::new("scene_toggle_play"), true);
+                            });
+                        }
+                    }
                     KeyCode::BracketLeft => {
                         // Previous layer
                         let num = app.layer_stack.layers.len();
@@ -259,6 +276,9 @@ impl ApplicationHandler for PhosphorApp {
                             .and_then(|l| l.shader_error().map(|s| s.to_string()));
                     }
 
+                    // Collect scene info before mutable borrows
+                    let scene_info = Some(app.scene_info());
+
                     // Get active layer's param_store (mutable for MIDI badges)
                     let active_params = app.layer_stack.active_mut();
                     if let Some(layer) = active_params {
@@ -281,6 +301,7 @@ impl ApplicationHandler for PhosphorApp {
                                 active_layer,
                                 media_info,
                                 webcam_info,
+                                scene_info,
                                 &app.status_error,
                                 app.settings.theme,
                             );
@@ -646,6 +667,98 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
 
+                // Handle scene UI signals
+                let save_scene: Option<String> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("save_scene"))
+                });
+                if let Some(name) = save_scene {
+                    let set = crate::scene::types::SceneSet {
+                        version: 1,
+                        name: name.clone(),
+                        cues: app.timeline.cues.clone(),
+                        loop_mode: app.timeline.loop_mode,
+                        advance_mode: app.timeline.advance_mode,
+                    };
+                    if let Err(e) = app.scene_store.save(&name, set) {
+                        log::error!("Failed to save scene: {e}");
+                    }
+                }
+                let load_scene_idx: Option<usize> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("load_scene"))
+                });
+                if let Some(idx) = load_scene_idx {
+                    app.load_scene(idx);
+                }
+                let delete_scene: Option<usize> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("delete_scene"))
+                });
+                if let Some(idx) = delete_scene {
+                    if let Err(e) = app.scene_store.delete(idx) {
+                        log::error!("Failed to delete scene: {e}");
+                    }
+                }
+                let scene_go_next: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("scene_go_next"))
+                });
+                if scene_go_next.is_some() {
+                    let event = app.timeline.go_next();
+                    app.process_timeline_event(event);
+                }
+                let scene_go_prev: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("scene_go_prev"))
+                });
+                if scene_go_prev.is_some() {
+                    let event = app.timeline.go_prev();
+                    app.process_timeline_event(event);
+                }
+                let scene_toggle_play: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("scene_toggle_play"))
+                });
+                if scene_toggle_play.is_some() {
+                    if app.timeline.active {
+                        app.timeline.stop();
+                    } else if !app.timeline.cues.is_empty() {
+                        let event = app.timeline.start(0);
+                        app.process_timeline_event(event);
+                    }
+                }
+                let add_cue: Option<String> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("scene_add_cue"))
+                });
+                if let Some(preset_name) = add_cue {
+                    let cue = crate::scene::types::SceneCue {
+                        preset_name,
+                        transition: crate::scene::types::TransitionType::Cut,
+                        transition_secs: 1.0,
+                        hold_secs: None,
+                        label: None,
+                        param_overrides: Vec::new(),
+                        transition_beats: None,
+                    };
+                    app.timeline.cues.push(cue);
+                }
+                let scene_jump: Option<usize> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("scene_jump_to_cue"))
+                });
+                if let Some(cue_idx) = scene_jump {
+                    let event = app.timeline.go_to_cue(cue_idx);
+                    app.process_timeline_event(event);
+                }
+                let scene_loop: Option<bool> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("scene_set_loop"))
+                });
+                if let Some(loop_mode) = scene_loop {
+                    app.timeline.loop_mode = loop_mode;
+                }
+                let scene_remove_cue: Option<usize> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("scene_remove_cue"))
+                });
+                if let Some(cue_idx) = scene_remove_cue {
+                    if cue_idx < app.timeline.cues.len() {
+                        app.timeline.cues.remove(cue_idx);
+                    }
+                }
+
                 // Handle media layer signals
                 let add_media: Option<bool> = app.egui_overlay.context().data_mut(|d| {
                     d.remove_temp(egui::Id::new("add_media_layer"))
@@ -990,6 +1103,22 @@ impl ApplicationHandler for PhosphorApp {
                             app.layer_stack.active_layer =
                                 if current == 0 { num - 1 } else { current - 1 };
                             app.sync_active_layer();
+                        }
+                        TriggerAction::SceneGoNext => {
+                            let event = app.timeline.go_next();
+                            app.process_timeline_event(event);
+                        }
+                        TriggerAction::SceneGoPrev => {
+                            let event = app.timeline.go_prev();
+                            app.process_timeline_event(event);
+                        }
+                        TriggerAction::ToggleTimeline => {
+                            if app.timeline.active {
+                                app.timeline.stop();
+                            } else if !app.timeline.cues.is_empty() {
+                                let event = app.timeline.start(0);
+                                app.process_timeline_event(event);
+                            }
                         }
                         _ => {}
                     }
