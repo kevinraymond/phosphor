@@ -193,14 +193,17 @@ impl App {
         if let Some(idx) = effect_index {
             if let Some(ref pd) = effect_loader.effects[idx].particles {
                 let compute_source = if pd.compute_shader.is_empty() {
-                    include_str!("../../../assets/shaders/builtin/particle_sim.wgsl").to_string()
+                    effect_loader.prepend_compute_libraries(
+                        include_str!("../../../assets/shaders/builtin/particle_sim.wgsl"),
+                    )
                 } else {
                     effect_loader
                         .load_compute_source(&pd.compute_shader)
                         .unwrap_or_else(|e| {
                             log::warn!("Failed to load compute shader: {e}");
-                            include_str!("../../../assets/shaders/builtin/particle_sim.wgsl")
-                                .to_string()
+                            effect_loader.prepend_compute_libraries(
+                                include_str!("../../../assets/shaders/builtin/particle_sim.wgsl"),
+                            )
                         })
                 };
                 match ParticleSystem::new(
@@ -210,8 +213,24 @@ impl App {
                     pd,
                     &compute_source,
                 ) {
-                    Ok(ps) => {
+                    Ok(mut ps) => {
                         log::info!("Particle system created: {} particles", pd.max_count);
+                        if pd.trail_length >= 2 {
+                            ps.setup_trails(
+                                &gpu.device,
+                                hdr_format,
+                                pd.trail_length,
+                                pd.trail_width,
+                            );
+                            log::info!(
+                                "Trail rendering enabled: {} points",
+                                pd.trail_length
+                            );
+                        }
+                        if pd.interaction {
+                            ps.setup_spatial_hash(&gpu.device);
+                            log::info!("Spatial hash enabled for particle interaction");
+                        }
                         pass_executor.particle_system = Some(ps);
                     }
                     Err(e) => log::error!("Failed to create particle system: {e}"),
@@ -876,9 +895,13 @@ impl App {
 
         // For image emitters, use the builtin image_scatter compute shader
         let compute_source = if is_image_emitter && particles.compute_shader.is_empty() {
-            include_str!("../../../assets/shaders/builtin/image_scatter.wgsl").to_string()
+            self.effect_loader.prepend_compute_libraries(
+                include_str!("../../../assets/shaders/builtin/image_scatter.wgsl"),
+            )
         } else if particles.compute_shader.is_empty() {
-            include_str!("../../../assets/shaders/builtin/particle_sim.wgsl").to_string()
+            self.effect_loader.prepend_compute_libraries(
+                include_str!("../../../assets/shaders/builtin/particle_sim.wgsl"),
+            )
         } else {
             match self.effect_loader.load_compute_source(&particles.compute_shader) {
                 Ok(src) => src,
@@ -948,6 +971,27 @@ impl App {
                             log::warn!("Failed to load sprite '{}': {e}", sprite_def.texture);
                         }
                     }
+                }
+
+                // Set up trail rendering if trail_length specified
+                if particles.trail_length >= 2 {
+                    ps.setup_trails(
+                        &self.gpu.device,
+                        hdr_format,
+                        particles.trail_length,
+                        particles.trail_width,
+                    );
+                    log::info!(
+                        "Trail rendering enabled: {} points, width {}",
+                        particles.trail_length,
+                        particles.trail_width
+                    );
+                }
+
+                // Set up spatial hash if interaction enabled
+                if particles.interaction {
+                    ps.setup_spatial_hash(&self.gpu.device);
+                    log::info!("Spatial hash enabled for particle interaction");
                 }
 
                 Some(ps)

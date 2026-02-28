@@ -1,74 +1,7 @@
 // Spectral Eye custom particle compute shader.
 // Orbital mechanics: particles orbit center with tangential velocity,
 // beat-burst radial push, attraction back to orbit radius.
-
-struct ParticleUniforms {
-    delta_time: f32,
-    time: f32,
-    max_particles: u32,
-    emit_count: u32,
-
-    emitter_pos: vec2f,
-    emitter_radius: f32,
-    emitter_shape: u32,
-
-    lifetime: f32,
-    initial_speed: f32,
-    initial_size: f32,
-    size_end: f32,
-
-    gravity: vec2f,
-    drag: f32,
-    turbulence: f32,
-
-    attraction_point: vec2f,
-    attraction_strength: f32,
-    seed: f32,
-
-    sub_bass: f32,
-    bass: f32,
-    mid: f32,
-    rms: f32,
-    kick: f32,
-    onset: f32,
-    centroid: f32,
-    flux: f32,
-    beat: f32,
-    beat_phase: f32,
-
-    resolution: vec2f,
-}
-
-struct Particle {
-    pos_life: vec4f,
-    vel_size: vec4f,
-    color: vec4f,
-    flags: vec4f,
-}
-
-@group(0) @binding(0) var<uniform> u: ParticleUniforms;
-@group(0) @binding(1) var<storage, read> particles_in: array<Particle>;
-@group(0) @binding(2) var<storage, read_write> particles_out: array<Particle>;
-@group(0) @binding(3) var<storage, read_write> emit_counter: atomic<u32>;
-
-fn hash(n: f32) -> f32 {
-    return fract(sin(n) * 43758.5453123);
-}
-
-// Aspect ratio: width / height
-fn aspect() -> f32 {
-    return u.resolution.x / u.resolution.y;
-}
-
-// Convert clip-space position to aspect-corrected space (circular orbits look circular)
-fn to_screen(p: vec2f) -> vec2f {
-    return vec2f(p.x * aspect(), p.y);
-}
-
-// Convert force/velocity from screen space back to clip space
-fn to_clip(v: vec2f) -> vec2f {
-    return vec2f(v.x / aspect(), v.y);
-}
+// Structs, bindings, and helpers are in particle_lib.wgsl (auto-prepended).
 
 fn emit_particle(idx: u32) -> Particle {
     var p: Particle;
@@ -116,11 +49,14 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let max_life = p.flags.y;
 
     if life <= 0.0 {
-        let slot = atomicAdd(&emit_counter, 1u);
+        let slot = emit_claim();
         if slot < u.emit_count {
             p = emit_particle(idx);
+            particles_out[idx] = p;
+            mark_alive(idx);
+        } else {
+            particles_out[idx] = p;
         }
-        particles_out[idx] = p;
         return;
     }
 
@@ -154,7 +90,6 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     screen_vel += dir_to_center * displacement * 12.0 * dt;
 
     // 2. Heavy radial damping — kill oscillation immediately
-    //    Remove most of the radial velocity each frame
     screen_vel -= dir_to_center * radial_vel * 8.0 * dt;
 
     // 3. Drive tangential speed toward orbital speed (preserve direction)
@@ -202,4 +137,5 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     p.flags.x = new_age;
 
     particles_out[idx] = p;
+    mark_alive(idx);
 }
