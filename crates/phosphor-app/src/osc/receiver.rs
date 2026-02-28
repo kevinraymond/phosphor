@@ -84,6 +84,14 @@ fn first_float(args: &[OscType]) -> Option<f32> {
     })
 }
 
+/// Extract the first string value from OSC args.
+fn first_string(args: &[OscType]) -> Option<String> {
+    args.first().and_then(|a| match a {
+        OscType::String(s) => Some(s.clone()),
+        _ => None,
+    })
+}
+
 fn parse_osc_message(msg: &OscMessage) -> Option<OscInMessage> {
     let addr = &msg.addr;
     let parts: Vec<&str> = addr.split('/').collect();
@@ -165,6 +173,41 @@ fn parse_osc_message(msg: &OscMessage) -> Option<OscInMessage> {
         "postprocess" if parts.len() >= 4 && parts[3] == "enabled" => {
             let value = first_float(&msg.args)?;
             Some(OscInMessage::PostProcessEnabled(value > 0.5))
+        }
+
+        // /phosphor/scene/...
+        "scene" if parts.len() >= 4 => {
+            match parts[3] {
+                // /phosphor/scene/goto_cue i
+                "goto_cue" => {
+                    let value = first_float(&msg.args)? as usize;
+                    Some(OscInMessage::SceneGotoCue(value))
+                }
+                // /phosphor/scene/load i (int) or s (string)
+                "load" => {
+                    // Try string first, fall back to int
+                    if let Some(name) = first_string(&msg.args) {
+                        Some(OscInMessage::SceneLoadName(name))
+                    } else {
+                        let value = first_float(&msg.args)? as usize;
+                        Some(OscInMessage::SceneLoadIndex(value))
+                    }
+                }
+                // /phosphor/scene/loop_mode f (0/1)
+                "loop_mode" => {
+                    let value = first_float(&msg.args)?;
+                    Some(OscInMessage::SceneLoopMode(value > 0.5))
+                }
+                // /phosphor/scene/advance_mode i (0=Manual, 1=Timer, 2=BeatSync)
+                "advance_mode" => {
+                    let value = first_float(&msg.args)? as u8;
+                    Some(OscInMessage::SceneAdvanceMode(value))
+                }
+                _ => {
+                    let value = first_float(&msg.args).unwrap_or(1.0);
+                    Some(OscInMessage::Raw { address: addr.clone(), value })
+                }
+            }
         }
 
         // Unknown /phosphor/... address — capture as Raw
@@ -359,5 +402,68 @@ mod tests {
     #[test]
     fn first_float_string_returns_none() {
         assert_eq!(first_float(&[OscType::String("hello".into())]), None);
+    }
+
+    // ---- Scene control parse tests ----
+
+    #[test]
+    fn parse_scene_goto_cue() {
+        let msg = OscMessage { addr: "/phosphor/scene/goto_cue".into(), args: vec![OscType::Int(2)] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::SceneGotoCue(idx)) => assert_eq!(idx, 2),
+            other => panic!("expected SceneGotoCue, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_scene_load_int() {
+        let msg = OscMessage { addr: "/phosphor/scene/load".into(), args: vec![OscType::Int(1)] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::SceneLoadIndex(idx)) => assert_eq!(idx, 1),
+            other => panic!("expected SceneLoadIndex, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_scene_load_string() {
+        let msg = OscMessage { addr: "/phosphor/scene/load".into(), args: vec![OscType::String("My Scene".into())] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::SceneLoadName(name)) => assert_eq!(name, "My Scene"),
+            other => panic!("expected SceneLoadName, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_scene_loop_mode() {
+        let msg = OscMessage { addr: "/phosphor/scene/loop_mode".into(), args: vec![OscType::Float(1.0)] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::SceneLoopMode(v)) => assert!(v),
+            other => panic!("expected SceneLoopMode, got {:?}", other),
+        }
+        let msg = OscMessage { addr: "/phosphor/scene/loop_mode".into(), args: vec![OscType::Float(0.0)] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::SceneLoopMode(v)) => assert!(!v),
+            other => panic!("expected SceneLoopMode, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_scene_advance_mode() {
+        let msg = OscMessage { addr: "/phosphor/scene/advance_mode".into(), args: vec![OscType::Int(2)] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::SceneAdvanceMode(m)) => assert_eq!(m, 2),
+            other => panic!("expected SceneAdvanceMode, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_scene_unknown_returns_raw() {
+        let msg = OscMessage { addr: "/phosphor/scene/unknown".into(), args: vec![OscType::Float(1.0)] };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::Raw { address, .. }) => {
+                assert_eq!(address, "/phosphor/scene/unknown");
+            }
+            other => panic!("expected Raw, got {:?}", other),
+        }
     }
 }

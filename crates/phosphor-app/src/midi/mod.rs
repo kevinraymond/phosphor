@@ -111,12 +111,17 @@ impl MidiSystem {
     }
 
     /// Drain MIDI clock bytes and feed them to a MidiClock.
-    pub fn drain_clock(&self, clock: &mut clock::MidiClock) {
+    /// Returns true if a beat boundary was crossed during this drain.
+    pub fn drain_clock(&self, clock: &mut clock::MidiClock) -> bool {
+        let mut beat_crossed = false;
         if let Some(ref rx) = self.clock_receiver {
             while let Ok(byte) = rx.try_recv() {
-                clock.process_byte(byte);
+                if clock.process_byte(byte) {
+                    beat_crossed = true;
+                }
             }
         }
+        beat_crossed
     }
 
     /// Start MIDI learn for a parameter or trigger.
