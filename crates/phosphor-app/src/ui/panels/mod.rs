@@ -62,29 +62,8 @@ pub fn draw_panels(
 
     let tc = theme_colors(ctx);
 
-    // Timeline bar (above status bar) — only when scene is active
-    if let Some(ref scene) = scene_info {
-        if let Some(ref tl) = scene.timeline {
-            if tl.active {
-                egui::TopBottomPanel::bottom("timeline_bar")
-                    .exact_height(36.0)
-                    .frame(Frame {
-                        fill: tc.panel,
-                        inner_margin: Margin::symmetric(2, 2),
-                        ..Default::default()
-                    })
-                    .show(ctx, |ui| {
-                        // Use preset names from cue list
-                        let cue_names: Vec<String> = scene.cue_list
-                            .iter()
-                            .map(|c| c.preset_name.clone())
-                            .collect();
-                        timeline_bar::draw_timeline_bar(ui, tl, &cue_names);
-                    });
-            }
-        }
-    }
-
+    // Status bar must be drawn FIRST so it claims the bottom-most position.
+    // Timeline bar draws second and sits directly above it.
     egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
         let midi_port = midi.connected_port().unwrap_or("");
         let midi_active = midi.connected_port().is_some();
@@ -127,6 +106,28 @@ pub fn draw_panels(
             preset_loading.as_deref(),
         );
     });
+
+    // Timeline bar (above status bar) — only when scene is active
+    if let Some(ref scene) = scene_info {
+        if let Some(ref tl) = scene.timeline {
+            if tl.active {
+                egui::TopBottomPanel::bottom("timeline_bar")
+                    .exact_height(36.0)
+                    .frame(Frame {
+                        fill: tc.panel,
+                        inner_margin: Margin::symmetric(2, 2),
+                        ..Default::default()
+                    })
+                    .show(ctx, |ui| {
+                        let cue_names: Vec<String> = scene.cue_list
+                            .iter()
+                            .map(|c| c.preset_name.clone())
+                            .collect();
+                        timeline_bar::draw_timeline_bar(ui, tl, &cue_names);
+                    });
+            }
+        }
+    }
 
     let panel_frame = Frame {
         fill: tc.panel,

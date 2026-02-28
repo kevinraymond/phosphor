@@ -12,12 +12,16 @@
 - ParamMorph transitions: smooth interpolation of all params and layer opacities
 - Dissolve transitions: GPU crossfade via fullscreen shader with snapshot capture
 - Scene panel in left sidebar: cue list management, transport controls, save/load/delete
-- Timeline bar above status bar: cue blocks, transition progress overlay, click-to-jump
+- Per-cue transition type editing: click to cycle Cut → Dissolve → Morph
+- Per-cue transition duration editing via DragValue
+- Advance mode selector: Manual / Timer / Beat Sync with per-cue hold times and beats-per-cue
+- Auto-save: cue and timeline changes persist to disk immediately
+- Timeline bar above status bar: cue blocks, playhead during hold and transitions, click-to-jump
 - Scene status indicator (SCN) in status bar with cue counter
 - Keyboard: Space (next cue), T (toggle timeline)
 - MIDI triggers: SceneGoNext, SceneGoPrev, ToggleTimeline
 - OSC: `/phosphor/trigger/scene_go_next`, `scene_go_prev`, `toggle_timeline`
-- Web control: scene trigger actions via WebSocket
+- Web control: Prev Cue / Next Cue / Timeline trigger buttons
 - MIDI Clock sync: parse 0xF8/FA/FB/FC system realtime, derive external BPM, beat-synced advance
 
 ## v1.0.1 — 2026-02-27
