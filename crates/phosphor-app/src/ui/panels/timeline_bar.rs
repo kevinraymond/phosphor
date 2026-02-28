@@ -110,26 +110,48 @@ pub fn draw_timeline_bar(
         // Playhead indicator
         let base_y = ui.min_rect().min.y;
         match &timeline.state {
-            TimelineInfoState::Transitioning { from, to, progress, .. } => {
-                let from_center = (*from as f32 + 0.5) * block_width;
-                let to_center = (*to as f32 + 0.5) * block_width;
-                let playhead_x = from_center + (to_center - from_center) * progress;
+            TimelineInfoState::Transitioning { to, progress, transition_type, .. } => {
+                // Show playhead as progress within the target cue block
+                let cue_x = *to as f32 * block_width;
+                let playhead_x = cue_x + progress * block_width;
                 let top = egui::pos2(playhead_x, base_y);
                 let bottom = egui::pos2(playhead_x, base_y + bar_height);
+                let playhead_color = match transition_type {
+                    TransitionType::Dissolve => tc.accent,
+                    TransitionType::ParamMorph => tc.success,
+                    TransitionType::Cut => tc.accent,
+                };
                 ui.painter().line_segment(
                     [top, bottom],
-                    egui::Stroke::new(2.0, tc.accent),
+                    egui::Stroke::new(2.0, playhead_color),
+                );
+
+                // Transition label centered in the bar
+                let label = format!(
+                    "{} {:.0}%",
+                    transition_type.display_name(),
+                    progress * 100.0,
+                );
+                let galley = ui.painter().layout_no_wrap(
+                    label,
+                    egui::FontId::proportional(SMALL_SIZE),
+                    tc.text_primary,
+                );
+                let label_x = available_width * 0.5 - galley.size().x * 0.5;
+                let label_y = base_y + bar_height - galley.size().y - 2.0;
+                ui.painter().galley(
+                    egui::pos2(label_x, label_y),
+                    galley,
+                    tc.text_primary,
                 );
             }
             TimelineInfoState::Holding { elapsed, hold_secs } => {
-                // Static playhead at current cue center, with optional hold progress
+                // Playhead within the current cue block
                 let cue_x = timeline.current_cue as f32 * block_width;
                 let playhead_x = if let Some(hold) = hold_secs {
-                    // Show progress within the cue block
                     let frac = (elapsed / hold).min(1.0);
                     cue_x + frac * block_width
                 } else {
-                    // No hold timer — static marker at cue center
                     cue_x + block_width * 0.5
                 };
                 let top = egui::pos2(playhead_x, base_y);
