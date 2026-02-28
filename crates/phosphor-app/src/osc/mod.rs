@@ -377,6 +377,9 @@ fn trigger_slug(action: &TriggerAction) -> &'static str {
         TriggerAction::PrevPreset => "prev_preset",
         TriggerAction::NextLayer => "next_layer",
         TriggerAction::PrevLayer => "prev_layer",
+        TriggerAction::SceneGoNext => "scene_go_next",
+        TriggerAction::SceneGoPrev => "scene_go_prev",
+        TriggerAction::ToggleTimeline => "toggle_timeline",
     }
 }
 
@@ -412,6 +415,9 @@ mod tests {
             (TriggerAction::PrevPreset, "prev_preset"),
             (TriggerAction::NextLayer, "next_layer"),
             (TriggerAction::PrevLayer, "prev_layer"),
+            (TriggerAction::SceneGoNext, "scene_go_next"),
+            (TriggerAction::SceneGoPrev, "scene_go_prev"),
+            (TriggerAction::ToggleTimeline, "toggle_timeline"),
         ];
         for (action, slug) in expected {
             assert_eq!(trigger_slug(&action), slug);

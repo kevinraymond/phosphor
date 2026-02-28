@@ -150,6 +150,9 @@ fn parse_osc_message(msg: &OscMessage) -> Option<OscInMessage> {
                 "prev_preset" => TriggerAction::PrevPreset,
                 "next_layer" => TriggerAction::NextLayer,
                 "prev_layer" => TriggerAction::PrevLayer,
+                "scene_go_next" => TriggerAction::SceneGoNext,
+                "scene_go_prev" => TriggerAction::SceneGoPrev,
+                "toggle_timeline" => TriggerAction::ToggleTimeline,
                 _ => {
                     let value = first_float(&msg.args).unwrap_or(1.0);
                     return Some(OscInMessage::Raw { address: addr.clone(), value });
