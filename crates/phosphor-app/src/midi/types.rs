@@ -27,6 +27,9 @@ pub enum TriggerAction {
     PrevPreset,
     NextLayer,
     PrevLayer,
+    SceneGoNext,
+    SceneGoPrev,
+    ToggleTimeline,
 }
 
 impl TriggerAction {
@@ -39,6 +42,9 @@ impl TriggerAction {
         TriggerAction::PrevPreset,
         TriggerAction::NextLayer,
         TriggerAction::PrevLayer,
+        TriggerAction::SceneGoNext,
+        TriggerAction::SceneGoPrev,
+        TriggerAction::ToggleTimeline,
     ];
 
     pub fn display_name(&self) -> &'static str {
@@ -51,6 +57,9 @@ impl TriggerAction {
             TriggerAction::PrevPreset => "Prev Preset",
             TriggerAction::NextLayer => "Next Layer",
             TriggerAction::PrevLayer => "Prev Layer",
+            TriggerAction::SceneGoNext => "Scene Next",
+            TriggerAction::SceneGoPrev => "Scene Prev",
+            TriggerAction::ToggleTimeline => "Toggle Timeline",
         }
     }
 
@@ -64,6 +73,9 @@ impl TriggerAction {
             TriggerAction::PrevPreset => "Prev Pre",
             TriggerAction::NextLayer => "Next Lyr",
             TriggerAction::PrevLayer => "Prev Lyr",
+            TriggerAction::SceneGoNext => "Scn Next",
+            TriggerAction::SceneGoPrev => "Scn Prev",
+            TriggerAction::ToggleTimeline => "Timeline",
         }
     }
 }
@@ -81,7 +93,7 @@ mod tests {
 
     #[test]
     fn trigger_action_all_count() {
-        assert_eq!(TriggerAction::ALL.len(), 8);
+        assert_eq!(TriggerAction::ALL.len(), 11);
     }
 
     #[test]

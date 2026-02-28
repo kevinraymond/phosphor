@@ -3,6 +3,34 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## v1.1.0 — 2026-02-28
+
+### Scene System
+- Scene = ordered cue list referencing presets with transitions (Cut, Dissolve, ParamMorph)
+- SceneStore: save/load/delete scenes to `~/.config/phosphor/scenes/*.json`
+- Timeline state machine: Idle → Holding → Transitioning with auto-advance and beat sync
+- ParamMorph transitions: smooth interpolation of all params and layer opacities
+- Dissolve transitions: GPU crossfade via fullscreen shader with snapshot capture
+- Scene panel in left sidebar: cue list management, transport controls, save/load/delete
+- Per-cue transition type editing: click to cycle Cut → Dissolve → Morph
+- Per-cue transition duration editing via DragValue
+- Advance mode selector: Manual / Timer / Beat Sync with per-cue hold times and beats-per-cue
+- Auto-save: cue and timeline changes persist to disk immediately
+- Timeline bar above status bar: cue blocks, playhead during hold and transitions, click-to-jump
+- Scene status indicator (SCN) in status bar with cue counter
+- Keyboard: Space (next cue), T (toggle timeline)
+- MIDI triggers: SceneGoNext, SceneGoPrev, ToggleTimeline
+- OSC: `/phosphor/trigger/scene_go_next`, `scene_go_prev`, `toggle_timeline`
+- Web control: Prev Cue / Next Cue / Timeline trigger buttons
+- MIDI Clock sync: parse 0xF8/FA/FB/FC system realtime, derive external BPM, beat-synced advance
+- MIDI Clock → Timeline: auto-follow transport (play/stop), MIDI clock beats drive BeatSync mode with audio fallback
+- OSC scene control: `/phosphor/scene/goto_cue`, `/scene/load` (int or string), `/scene/loop_mode`, `/scene/advance_mode`
+- OSC outbound timeline state: `/phosphor/state/timeline/active`, `cue_index`, `cue_count`, `transition_progress` at TX rate
+
+### UI
+- Redesign scene panel: card-framed scene list, section headers (TRANSPORT / CUE LIST), sized transport buttons (PLAY ghost-border, STOP|PREV|GO), transition type badges with color per type, ghost-border "+ Cue" button
+- Widen side panels from 270px to 315px
+
 ## v1.0.1 — 2026-02-27
 
 ### UI

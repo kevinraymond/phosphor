@@ -142,6 +142,9 @@ fn parse_client_message(text: &str) -> Option<WsInMessage> {
                 "prev_preset" => TriggerAction::PrevPreset,
                 "next_layer" => TriggerAction::NextLayer,
                 "prev_layer" => TriggerAction::PrevLayer,
+                "scene_go_next" => TriggerAction::SceneGoNext,
+                "scene_go_prev" => TriggerAction::SceneGoPrev,
+                "toggle_timeline" => TriggerAction::ToggleTimeline,
                 _ => return None,
             };
             Some(WsInMessage::Trigger(action))
@@ -269,6 +272,9 @@ mod tests {
             ("prev_preset", TriggerAction::PrevPreset),
             ("next_layer", TriggerAction::NextLayer),
             ("prev_layer", TriggerAction::PrevLayer),
+            ("scene_go_next", TriggerAction::SceneGoNext),
+            ("scene_go_prev", TriggerAction::SceneGoPrev),
+            ("toggle_timeline", TriggerAction::ToggleTimeline),
         ] {
             let json = format!(r#"{{"type":"trigger","action":"{action_str}"}}"#);
             match parse_client_message(&json) {

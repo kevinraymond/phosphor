@@ -64,6 +64,33 @@ impl ParamValue {
         }
     }
 
+    /// Interpolate between two param values. Type mismatches return `self`.
+    pub fn lerp(&self, other: &ParamValue, t: f32) -> ParamValue {
+        match (self, other) {
+            (ParamValue::Float(a), ParamValue::Float(b)) => {
+                ParamValue::Float(a + (b - a) * t)
+            }
+            (ParamValue::Color(a), ParamValue::Color(b)) => {
+                ParamValue::Color([
+                    a[0] + (b[0] - a[0]) * t,
+                    a[1] + (b[1] - a[1]) * t,
+                    a[2] + (b[2] - a[2]) * t,
+                    a[3] + (b[3] - a[3]) * t,
+                ])
+            }
+            (ParamValue::Point2D(a), ParamValue::Point2D(b)) => {
+                ParamValue::Point2D([
+                    a[0] + (b[0] - a[0]) * t,
+                    a[1] + (b[1] - a[1]) * t,
+                ])
+            }
+            (ParamValue::Bool(a), ParamValue::Bool(b)) => {
+                ParamValue::Bool(if t < 0.5 { *a } else { *b })
+            }
+            _ => self.clone(), // type mismatch fallback
+        }
+    }
+
     /// Write this value into a slice at the given offset.
     pub fn write_to(&self, buf: &mut [f32], offset: usize) {
         match self {
@@ -203,5 +230,77 @@ mod tests {
         ParamValue::Point2D([0.3, 0.7]).write_to(&mut buf, 1);
         assert!(approx_eq(buf[1], 0.3, 1e-6));
         assert!(approx_eq(buf[2], 0.7, 1e-6));
+    }
+
+    // ---- Lerp tests ----
+
+    #[test]
+    fn lerp_float() {
+        let a = ParamValue::Float(0.0);
+        let b = ParamValue::Float(1.0);
+        match a.lerp(&b, 0.5) {
+            ParamValue::Float(v) => assert!(approx_eq(v, 0.5, 1e-6)),
+            _ => panic!("expected Float"),
+        }
+        match a.lerp(&b, 0.0) {
+            ParamValue::Float(v) => assert!(approx_eq(v, 0.0, 1e-6)),
+            _ => panic!("expected Float"),
+        }
+        match a.lerp(&b, 1.0) {
+            ParamValue::Float(v) => assert!(approx_eq(v, 1.0, 1e-6)),
+            _ => panic!("expected Float"),
+        }
+    }
+
+    #[test]
+    fn lerp_color() {
+        let a = ParamValue::Color([0.0, 0.0, 0.0, 0.0]);
+        let b = ParamValue::Color([1.0, 0.5, 0.2, 1.0]);
+        match a.lerp(&b, 0.5) {
+            ParamValue::Color(c) => {
+                assert!(approx_eq(c[0], 0.5, 1e-6));
+                assert!(approx_eq(c[1], 0.25, 1e-6));
+                assert!(approx_eq(c[2], 0.1, 1e-6));
+                assert!(approx_eq(c[3], 0.5, 1e-6));
+            }
+            _ => panic!("expected Color"),
+        }
+    }
+
+    #[test]
+    fn lerp_point2d() {
+        let a = ParamValue::Point2D([0.0, 1.0]);
+        let b = ParamValue::Point2D([1.0, 0.0]);
+        match a.lerp(&b, 0.25) {
+            ParamValue::Point2D(p) => {
+                assert!(approx_eq(p[0], 0.25, 1e-6));
+                assert!(approx_eq(p[1], 0.75, 1e-6));
+            }
+            _ => panic!("expected Point2D"),
+        }
+    }
+
+    #[test]
+    fn lerp_bool() {
+        let a = ParamValue::Bool(false);
+        let b = ParamValue::Bool(true);
+        match a.lerp(&b, 0.3) {
+            ParamValue::Bool(v) => assert!(!v),
+            _ => panic!("expected Bool"),
+        }
+        match a.lerp(&b, 0.7) {
+            ParamValue::Bool(v) => assert!(v),
+            _ => panic!("expected Bool"),
+        }
+    }
+
+    #[test]
+    fn lerp_type_mismatch_returns_self() {
+        let a = ParamValue::Float(0.5);
+        let b = ParamValue::Bool(true);
+        match a.lerp(&b, 0.5) {
+            ParamValue::Float(v) => assert!(approx_eq(v, 0.5, 1e-6)),
+            _ => panic!("expected Float (self)"),
+        }
     }
 }

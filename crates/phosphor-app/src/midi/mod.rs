@@ -1,3 +1,4 @@
+pub mod clock;
 pub mod input;
 pub mod mapping;
 pub mod types;
@@ -20,6 +21,7 @@ pub struct MidiFrameResult {
 /// Central MIDI system: owns connection, config, learn state.
 pub struct MidiSystem {
     receiver: Option<Receiver<MidiMessage>>,
+    clock_receiver: Option<Receiver<u8>>,
     connection: Option<MidiPort>,
     pub config: MidiConfig,
     pub learn_target: Option<LearnTarget>,
@@ -35,6 +37,7 @@ impl MidiSystem {
         let config = MidiConfig::load();
         let mut sys = Self {
             receiver: None,
+            clock_receiver: None,
             connection: None,
             config,
             learn_target: None,
@@ -69,10 +72,11 @@ impl MidiSystem {
         self.disconnect();
 
         match MidiPort::open(port_name) {
-            Ok((port, rx)) => {
+            Ok((port, rx, clock_rx)) => {
                 log::info!("Connected to MIDI port: {}", port_name);
                 self.connection = Some(port);
                 self.receiver = Some(rx);
+                self.clock_receiver = Some(clock_rx);
                 self.config.port_name = Some(port_name.to_string());
                 self.config.save();
             }
@@ -89,6 +93,7 @@ impl MidiSystem {
         }
         self.connection = None;
         self.receiver = None;
+        self.clock_receiver = None;
         self.last_message = None;
         self.trigger_prev_values.clear();
     }
@@ -103,6 +108,20 @@ impl MidiSystem {
         self.last_activity
             .map(|t| t.elapsed().as_millis() < 300)
             .unwrap_or(false)
+    }
+
+    /// Drain MIDI clock bytes and feed them to a MidiClock.
+    /// Returns true if a beat boundary was crossed during this drain.
+    pub fn drain_clock(&self, clock: &mut clock::MidiClock) -> bool {
+        let mut beat_crossed = false;
+        if let Some(ref rx) = self.clock_receiver {
+            while let Ok(byte) = rx.try_recv() {
+                if clock.process_byte(byte) {
+                    beat_crossed = true;
+                }
+            }
+        }
+        beat_crossed
     }
 
     /// Start MIDI learn for a parameter or trigger.

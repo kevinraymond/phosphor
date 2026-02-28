@@ -64,6 +64,14 @@ impl OscSender {
         self.send_string("/phosphor/state/effect", effect_name);
     }
 
+    /// Send timeline state.
+    pub fn send_timeline(&self, active: bool, cue_index: usize, cue_count: usize, progress: f32) {
+        self.send_int("/phosphor/state/timeline/active", active as i32);
+        self.send_int("/phosphor/state/timeline/cue_index", cue_index as i32);
+        self.send_int("/phosphor/state/timeline/cue_count", cue_count as i32);
+        self.send_float("/phosphor/state/timeline/transition_progress", progress);
+    }
+
     fn send_float(&self, addr: &str, value: f32) {
         self.send_packet(addr, vec![OscType::Float(value)]);
     }
