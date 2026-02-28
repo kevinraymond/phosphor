@@ -78,6 +78,10 @@ pub struct App {
     /// When a dissolve begins, render() captures the outgoing frame then loads this preset.
     pub dissolve_capture_pending: Option<usize>,
     pub midi_clock: MidiClock,
+    /// Whether MIDI clock was playing last frame (for rising-edge transport detection).
+    pub midi_clock_was_playing: bool,
+    /// Whether a MIDI clock beat boundary was crossed this frame.
+    pub midi_clock_beat_crossed: bool,
     /// Morph transition state: from/to params per layer (layer_idx → param_name → value).
     pub morph_from_params: Option<Vec<std::collections::HashMap<String, ParamValue>>>,
     pub morph_to_params: Option<Vec<std::collections::HashMap<String, ParamValue>>>,
@@ -290,6 +294,8 @@ impl App {
             transition_renderer: None,
             dissolve_capture_pending: None,
             midi_clock: MidiClock::new(),
+            midi_clock_was_playing: false,
+            midi_clock_beat_crossed: false,
             morph_from_params: None,
             morph_to_params: None,
             morph_from_opacities: None,
@@ -403,6 +409,13 @@ impl App {
             };
             self.pending_osc_triggers = osc_result.triggers;
 
+            // Extract scene control fields before layer borrow ends
+            let scene_goto_cue = osc_result.scene_goto_cue;
+            let scene_load_index = osc_result.scene_load_index;
+            let scene_load_name = osc_result.scene_load_name;
+            let scene_loop_mode = osc_result.scene_loop_mode;
+            let scene_advance_mode = osc_result.scene_advance_mode;
+
             // Apply layer-targeted OSC messages
             for (layer_idx, name, value) in osc_result.layer_params {
                 if let Some(target_layer) = self.layer_stack.layers.get_mut(layer_idx) {
@@ -449,6 +462,33 @@ impl App {
                 if let Some(layer) = self.layer_stack.active_mut() {
                     layer.postprocess.enabled = pp_enabled;
                 }
+            }
+
+            // Process scene control (outside layer borrow)
+            if let Some(index) = scene_goto_cue {
+                let event = self.timeline.go_to_cue(index);
+                self.process_timeline_event(event);
+            }
+            if let Some(index) = scene_load_index {
+                self.load_scene(index);
+            }
+            if let Some(name) = scene_load_name {
+                if let Some(idx) = self.scene_store.scenes.iter().position(|(n, _)| n == &name) {
+                    self.load_scene(idx);
+                }
+            }
+            if let Some(looping) = scene_loop_mode {
+                self.timeline.loop_mode = looping;
+                self.autosave_scene();
+            }
+            if let Some(mode) = scene_advance_mode {
+                use crate::scene::types::AdvanceMode;
+                self.timeline.advance_mode = match mode {
+                    0 => AdvanceMode::Manual,
+                    1 => AdvanceMode::Timer,
+                    _ => AdvanceMode::BeatSync { beats_per_cue: 4 },
+                };
+                self.autosave_scene();
             }
         }
 
@@ -579,12 +619,29 @@ impl App {
         }
 
         // Drain MIDI clock bytes into MidiClock
-        self.midi.drain_clock(&mut self.midi_clock);
+        self.midi_clock_beat_crossed = self.midi.drain_clock(&mut self.midi_clock);
+
+        // Auto-follow MIDI transport → timeline
+        if self.midi_clock.playing() && !self.midi_clock_was_playing
+            && !self.timeline.active && !self.timeline.cues.is_empty()
+        {
+            let event = self.timeline.start(0);
+            self.process_timeline_event(event);
+        }
+        if !self.midi_clock.playing() && self.midi_clock_was_playing && self.timeline.active {
+            self.timeline.stop();
+        }
+        self.midi_clock_was_playing = self.midi_clock.playing();
 
         // Advance timeline (scene system)
         if self.timeline.active {
-            // Feed beat signal for BeatSync mode
-            let beat_on = self.uniforms.beat > 0.5;
+            // Feed beat signal for BeatSync mode:
+            // prefer MIDI clock beat when playing, fall back to audio beat detector
+            let beat_on = if self.midi_clock.playing() {
+                self.midi_clock_beat_crossed
+            } else {
+                self.uniforms.beat > 0.5
+            };
             let beat_event = self.timeline.feed_beat(beat_on);
             self.process_timeline_event(beat_event);
 
@@ -603,7 +660,7 @@ impl App {
             }
         }
 
-        // OSC TX: send audio features + state (throttled internally)
+        // OSC TX: send audio features + state + timeline (throttled internally)
         if let Some(features) = self.latest_audio {
             let active = self.layer_stack.active_layer;
             let effect_name = self.layer_stack.active()
@@ -611,7 +668,18 @@ impl App {
                 .and_then(|i| self.effect_loader.effects.get(i))
                 .map(|e| e.name.as_str())
                 .unwrap_or("");
-            self.osc.send_state(&features, active, effect_name);
+            let tl_progress = if let crate::scene::timeline::PlaybackState::Transitioning { progress, .. } = &self.timeline.state {
+                *progress
+            } else {
+                0.0
+            };
+            self.osc.send_state(
+                &features, active, effect_name,
+                self.timeline.active,
+                self.timeline.current_cue_index(),
+                self.timeline.cues.len(),
+                tl_progress,
+            );
 
             // Web: broadcast audio at 10Hz
             self.web.broadcast_audio(&features);

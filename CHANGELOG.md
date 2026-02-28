@@ -23,6 +23,9 @@
 - OSC: `/phosphor/trigger/scene_go_next`, `scene_go_prev`, `toggle_timeline`
 - Web control: Prev Cue / Next Cue / Timeline trigger buttons
 - MIDI Clock sync: parse 0xF8/FA/FB/FC system realtime, derive external BPM, beat-synced advance
+- MIDI Clock → Timeline: auto-follow transport (play/stop), MIDI clock beats drive BeatSync mode with audio fallback
+- OSC scene control: `/phosphor/scene/goto_cue`, `/scene/load` (int or string), `/scene/loop_mode`, `/scene/advance_mode`
+- OSC outbound timeline state: `/phosphor/state/timeline/active`, `cue_index`, `cue_count`, `transition_progress` at TX rate
 
 ## v1.0.1 — 2026-02-27
 
