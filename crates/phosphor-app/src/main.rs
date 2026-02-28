@@ -727,11 +727,17 @@ impl ApplicationHandler for PhosphorApp {
                 });
                 let mut scene_dirty = false;
                 if let Some(preset_name) = add_cue {
+                    // In Timer mode, default hold_secs so the timer can advance
+                    let hold_secs = if matches!(app.timeline.advance_mode, crate::scene::types::AdvanceMode::Timer) {
+                        Some(4.0)
+                    } else {
+                        None
+                    };
                     let cue = crate::scene::types::SceneCue {
                         preset_name,
                         transition: crate::scene::types::TransitionType::Cut,
                         transition_secs: 1.0,
-                        hold_secs: None,
+                        hold_secs,
                         label: None,
                         param_overrides: Vec::new(),
                         transition_beats: None,
