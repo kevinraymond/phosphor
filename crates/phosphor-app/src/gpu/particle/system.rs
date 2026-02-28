@@ -95,6 +95,7 @@ pub struct ParticleSystem {
     // Counter readback: staging buffer + async map state
     counter_readback: wgpu::Buffer,
     counter_map_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    counter_map_ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
 
     // Emission accumulator (fractional particles per frame)
     emit_accumulator: f32,
@@ -592,6 +593,7 @@ impl ParticleSystem {
                 mapped_at_creation: false,
             }),
             counter_map_pending: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            counter_map_ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             emit_accumulator: 0.0,
             emit_rate: def.emit_rate,
             burst_on_beat: def.burst_on_beat,
@@ -828,12 +830,18 @@ impl ParticleSystem {
         if self.counter_map_pending.load(Ordering::Relaxed) {
             return; // Previous map still pending
         }
-        let flag = self.counter_map_pending.clone();
+        // Set pending BEFORE map_async — wgpu considers buffer mapped immediately
+        self.counter_map_pending.store(true, Ordering::Release);
+        let pending = self.counter_map_pending.clone();
+        let ready = self.counter_map_ready.clone();
         self.counter_readback
             .slice(..)
             .map_async(wgpu::MapMode::Read, move |result| {
                 if result.is_ok() {
-                    flag.store(true, Ordering::Release);
+                    ready.store(true, Ordering::Release);
+                } else {
+                    // Map failed — reset pending so we can retry next frame
+                    pending.store(false, Ordering::Release);
                 }
             });
     }
@@ -842,8 +850,8 @@ impl ParticleSystem {
     /// Call once per frame before dispatch.
     pub fn poll_counter_readback(&mut self) {
         use std::sync::atomic::Ordering;
-        if !self.counter_map_pending.load(Ordering::Acquire) {
-            return;
+        if !self.counter_map_ready.load(Ordering::Acquire) {
+            return; // Map not yet complete
         }
         {
             let view = self.counter_readback.slice(..).get_mapped_range();
@@ -851,6 +859,7 @@ impl ParticleSystem {
             self.alive_count = data[0];
         }
         self.counter_readback.unmap();
+        self.counter_map_ready.store(false, Ordering::Release);
         self.counter_map_pending.store(false, Ordering::Release);
     }
 
