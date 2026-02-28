@@ -8,6 +8,7 @@ pub mod midi_panel;
 pub mod ndi_panel;
 pub mod osc_panel;
 pub mod param_panel;
+pub mod particle_panel;
 pub mod preset_panel;
 pub mod scene_panel;
 pub mod settings_panel;
@@ -52,6 +53,7 @@ pub fn draw_panels(
     active_layer: usize,
     media_info: Option<media_panel::MediaInfo>,
     webcam_info: Option<webcam_panel::WebcamInfo>,
+    particle_info: Option<particle_panel::ParticleInfo>,
     scene_info: Option<scene_panel::SceneInfo>,
     status_error: &Option<(String, std::time::Instant)>,
     current_theme: ThemeMode,
@@ -359,6 +361,28 @@ pub fn draw_panels(
                             param_panel::draw_param_panel(ui, params, midi, osc);
                         },
                     );
+
+                    // Particle section (shows when active layer has particles)
+                    if let Some(ref pinfo) = particle_info {
+                        let particle_badge = format!(
+                            "{}",
+                            if pinfo.alive_count >= 1000 {
+                                format!("{:.1}K", pinfo.alive_count as f32 / 1000.0)
+                            } else {
+                                format!("{}", pinfo.alive_count)
+                            }
+                        );
+                        widgets::section(
+                            ui,
+                            "sec_particles",
+                            "Particles",
+                            Some(&particle_badge),
+                            true,
+                            |ui| {
+                                particle_panel::draw_particle_panel(ui, pinfo);
+                            },
+                        );
+                    }
 
                     // Audio Reactivity section (default collapsed)
                     let active_info = layers.get(active_layer);

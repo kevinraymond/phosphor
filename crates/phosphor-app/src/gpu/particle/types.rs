@@ -63,7 +63,22 @@ pub struct ParticleUniforms {
 
     // Resolution (8 bytes) — needed for aspect ratio correction in orbital mechanics
     pub resolution: [f32; 2],
-    // Total: 32 fields = 128 bytes (no padding needed)
+    // --- 128 bytes above ---
+
+    // Flow field params (16 bytes)
+    pub flow_strength: f32,
+    pub flow_scale: f32,
+    pub flow_speed: f32,
+    pub flow_enabled: f32, // 0.0 or 1.0 (bool as float for GPU)
+
+    // Trail params (16 bytes) — reserved for Phase 1B
+    pub trail_length: u32,
+    pub trail_width: f32,
+    pub _reserved_trail: [f32; 2],
+
+    // Padding to 192 bytes (32 bytes)
+    pub _pad192: [f32; 8],
+    // Total = 192 bytes
 }
 
 /// Auxiliary particle data: 16 bytes (1 x vec4f).
@@ -76,7 +91,7 @@ pub struct ParticleAux {
     pub home: [f32; 4],
 }
 
-/// Particle render uniforms: 32 bytes.
+/// Particle render uniforms: 48 bytes.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct ParticleRenderUniforms {
@@ -84,11 +99,16 @@ pub struct ParticleRenderUniforms {
     pub time: f32,
     /// 0 = soft circle (default), 1 = sprite texture, 2 = animated sprite
     pub render_mode: u32,
-    /// Sprite atlas columns, rows, total frames, padding
+    /// Sprite atlas columns, rows, total frames
     pub sprite_cols: u32,
     pub sprite_rows: u32,
     pub sprite_frames: u32,
-    pub _pad: u32,
+    /// Frame index for trail ring buffer head
+    pub frame_index: u32,
+    /// Trail params
+    pub trail_length: u32,
+    pub trail_width: f32,
+    pub _pad: [f32; 2],
 }
 
 /// Sprite atlas definition for textured particles.
@@ -172,6 +192,27 @@ pub struct ParticleDef {
     /// Blend mode: "additive" (default) or "alpha"
     #[serde(default = "default_blend")]
     pub blend: String,
+    /// Enable 3D curl noise flow field (opt-in)
+    #[serde(default)]
+    pub flow_field: bool,
+    /// Flow field strength (how much the field affects velocity)
+    #[serde(default = "default_flow_strength")]
+    pub flow_strength: f32,
+    /// Flow field sampling scale (spatial frequency)
+    #[serde(default = "default_flow_scale")]
+    pub flow_scale: f32,
+    /// Flow field animation speed (z-axis scroll)
+    #[serde(default = "default_flow_speed")]
+    pub flow_speed: f32,
+    /// Trail length in points (0 = no trails). When > 0, enables trail rendering.
+    #[serde(default)]
+    pub trail_length: u32,
+    /// Trail ribbon width in screen units
+    #[serde(default = "default_trail_width")]
+    pub trail_width: f32,
+    /// Enable spatial hash grid for particle-particle interaction
+    #[serde(default)]
+    pub interaction: bool,
 }
 
 fn default_blend() -> String {
@@ -196,6 +237,18 @@ fn default_drag() -> f32 {
 fn default_emit_rate() -> f32 {
     100.0
 }
+fn default_flow_strength() -> f32 {
+    1.0
+}
+fn default_flow_scale() -> f32 {
+    1.0
+}
+fn default_flow_speed() -> f32 {
+    0.5
+}
+fn default_trail_width() -> f32 {
+    0.005
+}
 
 #[cfg(test)]
 mod tests {
@@ -207,13 +260,13 @@ mod tests {
     }
 
     #[test]
-    fn particle_uniforms_size_128() {
-        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 128);
+    fn particle_uniforms_size_192() {
+        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 192);
     }
 
     #[test]
-    fn particle_render_uniforms_size_32() {
-        assert_eq!(std::mem::size_of::<ParticleRenderUniforms>(), 32);
+    fn particle_render_uniforms_size_48() {
+        assert_eq!(std::mem::size_of::<ParticleRenderUniforms>(), 48);
     }
 
     #[test]

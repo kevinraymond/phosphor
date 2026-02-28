@@ -1,71 +1,7 @@
 // Veil particle simulation — flowing silk curtain.
 // Particles have home positions; a multi-layer displacement field moves the homes,
 // spring forces keep particles tracking their displaced homes for coherent sheet motion.
-
-struct ParticleUniforms {
-    delta_time: f32,
-    time: f32,
-    max_particles: u32,
-    emit_count: u32,
-
-    emitter_pos: vec2f,
-    emitter_radius: f32,
-    emitter_shape: u32,
-
-    lifetime: f32,
-    initial_speed: f32,
-    initial_size: f32,
-    size_end: f32,
-
-    gravity: vec2f,
-    drag: f32,
-    turbulence: f32,
-
-    attraction_point: vec2f,
-    attraction_strength: f32,
-    seed: f32,
-
-    sub_bass: f32,
-    bass: f32,
-    mid: f32,
-    rms: f32,
-    kick: f32,
-    onset: f32,
-    centroid: f32,
-    flux: f32,
-    beat: f32,
-    beat_phase: f32,
-
-    resolution: vec2f,
-}
-
-struct Particle {
-    pos_life: vec4f,
-    vel_size: vec4f,
-    color: vec4f,
-    flags: vec4f, // x=age, y=lifetime, z=home_x, w=home_y
-}
-
-@group(0) @binding(0) var<uniform> u: ParticleUniforms;
-@group(0) @binding(1) var<storage, read> particles_in: array<Particle>;
-@group(0) @binding(2) var<storage, read_write> particles_out: array<Particle>;
-@group(0) @binding(3) var<storage, read_write> emit_counter: atomic<u32>;
-
-fn hash(n: f32) -> f32 {
-    return fract(sin(n) * 43758.5453123);
-}
-
-fn aspect() -> f32 {
-    return u.resolution.x / u.resolution.y;
-}
-
-fn to_screen(p: vec2f) -> vec2f {
-    return vec2f(p.x * aspect(), p.y);
-}
-
-fn to_clip(v: vec2f) -> vec2f {
-    return vec2f(v.x / aspect(), v.y);
-}
+// Structs, bindings, and helpers are in particle_lib.wgsl (auto-prepended).
 
 // Multi-layer displacement field for fabric-like coherent motion
 fn displacement_field(home: vec2f, t: f32) -> vec2f {
@@ -110,7 +46,6 @@ fn emit_particle(idx: u32) -> Particle {
     let vel = vec2f(cos(angle), sin(angle)) * u.initial_speed * 0.1;
 
     // Color: cool-toned flowing gradient based on position
-    // Span full hue range, biased toward cyans/blues/purples for silk feel
     let hue = fract((home_y * 0.5 + 0.5) * 0.6 + 0.5 + u.centroid * 0.3);
     let r_c = abs(hue * 6.0 - 3.0) - 1.0;
     let g_c = 2.0 - abs(hue * 6.0 - 2.0);
@@ -141,11 +76,14 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let max_life = p.flags.y;
 
     if life <= 0.0 {
-        let slot = atomicAdd(&emit_counter, 1u);
+        let slot = emit_claim();
         if slot < u.emit_count {
             p = emit_particle(idx);
+            particles_out[idx] = p;
+            mark_alive(idx);
+        } else {
+            particles_out[idx] = p;
         }
-        particles_out[idx] = p;
         return;
     }
 
@@ -195,7 +133,6 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let size = base_size * (1.0 + u.rms * 0.2);
 
     // Alpha: fade in/out, boosted at fabric folds (high displacement)
-    // Dampen by audio energy so loud parts don't blow out to uniform fill
     let fade_in = smoothstep(0.0, 0.1, life_frac);
     let fade_out = 1.0 - smoothstep(0.7, 1.0, life_frac);
     let fold_boost = smoothstep(0.02, 0.2, disp_mag);
@@ -213,4 +150,5 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     p.flags.x = new_age;
 
     particles_out[idx] = p;
+    mark_alive(idx);
 }
