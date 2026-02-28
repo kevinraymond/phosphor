@@ -65,10 +65,13 @@ pub fn draw_status_bar(
                 ui.colored_label(tc.error, RichText::new(msg).size(SMALL_SIZE));
             }
         }
-        // Shader errors
+        // Shader errors (dismissable)
         else if let Some(err) = shader_error {
             ui.add_space(4.0);
             ui.colored_label(tc.error, RichText::new(format!("ERR: {err}")).size(SMALL_SIZE));
+            if ui.small_button("×").clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("dismiss_shader_error"), true));
+            }
         }
         // Preset loading indicator
         else if let Some(name) = preset_loading {
