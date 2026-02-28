@@ -167,11 +167,11 @@ fn aspect() -> f32 {
 }
 
 fn to_screen(p: vec2f) -> vec2f {
-    return vec2f(p.x * p_aspect(), p.y);
+    return vec2f(p.x * aspect(), p.y);
 }
 
 fn to_clip(v: vec2f) -> vec2f {
-    return vec2f(v.x / p_aspect(), v.y);
+    return vec2f(v.x / aspect(), v.y);
 }
 
 // --- Alive/dead list management ---
