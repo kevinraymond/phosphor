@@ -43,7 +43,9 @@ cargo run --release                # standard build
 cargo run --release --features video  # with video layer support (requires ffmpeg)
 ```
 
-On first launch: press **D** to show the UI, pick an effect from the browser, and press **F** for fullscreen. Audio reactivity works immediately from your default input device.
+On first launch: the UI fades in automatically after a couple seconds (or press **D** to show it immediately). Pick an effect from the browser and press **F** for fullscreen. Audio reactivity works immediately from your default input device.
+
+**New to Phosphor?** Check out the [Tutorials](TUTORIALS.md) for in-depth guides on every feature — effects, audio, layers, MIDI, OSC, and more.
 
 ## Controls
 
