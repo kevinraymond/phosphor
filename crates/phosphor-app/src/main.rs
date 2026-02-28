@@ -725,6 +725,7 @@ impl ApplicationHandler for PhosphorApp {
                 let add_cue: Option<String> = app.egui_overlay.context().data_mut(|d| {
                     d.remove_temp(egui::Id::new("scene_add_cue"))
                 });
+                let mut scene_dirty = false;
                 if let Some(preset_name) = add_cue {
                     let cue = crate::scene::types::SceneCue {
                         preset_name,
@@ -736,6 +737,7 @@ impl ApplicationHandler for PhosphorApp {
                         transition_beats: None,
                     };
                     app.timeline.cues.push(cue);
+                    scene_dirty = true;
                 }
                 let scene_jump: Option<usize> = app.egui_overlay.context().data_mut(|d| {
                     d.remove_temp(egui::Id::new("scene_jump_to_cue"))
@@ -749,6 +751,7 @@ impl ApplicationHandler for PhosphorApp {
                 });
                 if let Some(loop_mode) = scene_loop {
                     app.timeline.loop_mode = loop_mode;
+                    scene_dirty = true;
                 }
                 let scene_remove_cue: Option<usize> = app.egui_overlay.context().data_mut(|d| {
                     d.remove_temp(egui::Id::new("scene_remove_cue"))
@@ -756,7 +759,75 @@ impl ApplicationHandler for PhosphorApp {
                 if let Some(cue_idx) = scene_remove_cue {
                     if cue_idx < app.timeline.cues.len() {
                         app.timeline.cues.remove(cue_idx);
+                        scene_dirty = true;
                     }
+                }
+                // Per-cue transition type
+                let set_cue_transition: Option<(usize, crate::scene::types::TransitionType)> =
+                    app.egui_overlay.context().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("scene_set_cue_transition"))
+                    });
+                if let Some((idx, tt)) = set_cue_transition {
+                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
+                        cue.transition = tt;
+                        scene_dirty = true;
+                    }
+                }
+                // Per-cue transition duration
+                let set_cue_dur: Option<(usize, f32)> =
+                    app.egui_overlay.context().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("scene_set_cue_transition_secs"))
+                    });
+                if let Some((idx, secs)) = set_cue_dur {
+                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
+                        cue.transition_secs = secs;
+                        scene_dirty = true;
+                    }
+                }
+                // Advance mode
+                let set_advance: Option<u32> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("scene_set_advance_mode"))
+                });
+                if let Some(mode_id) = set_advance {
+                    app.timeline.advance_mode = match mode_id {
+                        1 => {
+                            // Initialize hold_secs for cues that don't have one
+                            for cue in &mut app.timeline.cues {
+                                if cue.hold_secs.is_none() {
+                                    cue.hold_secs = Some(4.0);
+                                }
+                            }
+                            crate::scene::types::AdvanceMode::Timer
+                        }
+                        2 => crate::scene::types::AdvanceMode::BeatSync { beats_per_cue: 4 },
+                        _ => crate::scene::types::AdvanceMode::Manual,
+                    };
+                    scene_dirty = true;
+                }
+                // Beats per cue (BeatSync)
+                let set_bpc: Option<u32> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("scene_set_beats_per_cue"))
+                });
+                if let Some(bpc) = set_bpc {
+                    if let crate::scene::types::AdvanceMode::BeatSync { ref mut beats_per_cue } = app.timeline.advance_mode {
+                        *beats_per_cue = bpc;
+                        scene_dirty = true;
+                    }
+                }
+                // Per-cue hold seconds (Timer mode)
+                let set_hold: Option<(usize, f32)> = app.egui_overlay.context().data_mut(|d| {
+                    d.remove_temp(egui::Id::new("scene_set_cue_hold_secs"))
+                });
+                if let Some((idx, hold)) = set_hold {
+                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
+                        cue.hold_secs = Some(hold);
+                        scene_dirty = true;
+                    }
+                }
+
+                // Auto-save scene after any cue/timeline mutation
+                if scene_dirty {
+                    app.autosave_scene();
                 }
 
                 // Handle media layer signals

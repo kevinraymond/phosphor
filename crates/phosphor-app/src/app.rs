@@ -1556,6 +1556,25 @@ impl App {
         log::info!("Loaded scene '{}' with {} cues", scene.name, scene.cues.len());
     }
 
+    /// Auto-save current timeline state back to the active scene on disk.
+    pub fn autosave_scene(&mut self) {
+        if let Some(idx) = self.scene_store.current_scene {
+            if let Some((name, _)) = self.scene_store.scenes.get(idx) {
+                let name = name.clone();
+                let set = crate::scene::types::SceneSet {
+                    version: 1,
+                    name: name.clone(),
+                    cues: self.timeline.cues.clone(),
+                    loop_mode: self.timeline.loop_mode,
+                    advance_mode: self.timeline.advance_mode,
+                };
+                if let Err(e) = self.scene_store.save(&name, set) {
+                    log::error!("Failed to autosave scene: {e}");
+                }
+            }
+        }
+    }
+
     /// Process a timeline event (load cue, begin transition, etc.).
     pub fn process_timeline_event(&mut self, event: TimelineEvent) {
         match event {
@@ -1712,6 +1731,7 @@ impl App {
                 preset_name: c.display_name().to_string(),
                 transition: c.transition,
                 transition_secs: c.transition_secs,
+                hold_secs: c.hold_secs,
             })
             .collect();
         crate::ui::panels::scene_panel::SceneInfo {

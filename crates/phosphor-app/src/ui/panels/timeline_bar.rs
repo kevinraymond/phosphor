@@ -107,18 +107,39 @@ pub fn draw_timeline_bar(
             }
         }
 
-        // Playhead indicator for transition
-        if let TimelineInfoState::Transitioning { from, to, progress, .. } = &timeline.state {
-            let from_center = (*from as f32 + 0.5) * block_width;
-            let to_center = (*to as f32 + 0.5) * block_width;
-            let playhead_x = from_center + (to_center - from_center) * progress;
-            let base_y = ui.min_rect().min.y;
-            let top = egui::pos2(playhead_x, base_y);
-            let bottom = egui::pos2(playhead_x, base_y + bar_height);
-            ui.painter().line_segment(
-                [top, bottom],
-                egui::Stroke::new(2.0, tc.accent),
-            );
+        // Playhead indicator
+        let base_y = ui.min_rect().min.y;
+        match &timeline.state {
+            TimelineInfoState::Transitioning { from, to, progress, .. } => {
+                let from_center = (*from as f32 + 0.5) * block_width;
+                let to_center = (*to as f32 + 0.5) * block_width;
+                let playhead_x = from_center + (to_center - from_center) * progress;
+                let top = egui::pos2(playhead_x, base_y);
+                let bottom = egui::pos2(playhead_x, base_y + bar_height);
+                ui.painter().line_segment(
+                    [top, bottom],
+                    egui::Stroke::new(2.0, tc.accent),
+                );
+            }
+            TimelineInfoState::Holding { elapsed, hold_secs } => {
+                // Static playhead at current cue center, with optional hold progress
+                let cue_x = timeline.current_cue as f32 * block_width;
+                let playhead_x = if let Some(hold) = hold_secs {
+                    // Show progress within the cue block
+                    let frac = (elapsed / hold).min(1.0);
+                    cue_x + frac * block_width
+                } else {
+                    // No hold timer — static marker at cue center
+                    cue_x + block_width * 0.5
+                };
+                let top = egui::pos2(playhead_x, base_y);
+                let bottom = egui::pos2(playhead_x, base_y + bar_height);
+                ui.painter().line_segment(
+                    [top, bottom],
+                    egui::Stroke::new(2.0, tc.accent),
+                );
+            }
+            _ => {}
         }
     });
 

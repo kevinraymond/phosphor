@@ -1,7 +1,7 @@
 use egui::{RichText, Ui};
 
 use crate::scene::timeline::{TimelineInfo, TimelineInfoState};
-use crate::scene::types::TransitionType;
+use crate::scene::types::{AdvanceMode, TransitionType};
 use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
@@ -21,6 +21,7 @@ pub struct CueDisplayInfo {
     pub preset_name: String,
     pub transition: TransitionType,
     pub transition_secs: f32,
+    pub hold_secs: Option<f32>,
 }
 
 pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
@@ -163,6 +164,55 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                 });
             });
 
+            // Advance mode selector
+            let advance_mode = &tl.advance_mode;
+            let mode_id: u32 = match advance_mode {
+                AdvanceMode::Manual => 0,
+                AdvanceMode::Timer => 1,
+                AdvanceMode::BeatSync { .. } => 2,
+            };
+            let mode_names = ["Manual", "Timer", "Beat Sync"];
+
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Advance:").size(SMALL_SIZE).color(tc.text_secondary));
+                let mut selected = mode_id;
+                egui::ComboBox::from_id_salt("advance_mode_combo")
+                    .width(100.0)
+                    .selected_text(mode_names[selected as usize])
+                    .show_ui(ui, |ui| {
+                        for (i, name) in mode_names.iter().enumerate() {
+                            ui.selectable_value(&mut selected, i as u32, *name);
+                        }
+                    });
+                if selected != mode_id {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("scene_set_advance_mode"), selected);
+                    });
+                }
+            });
+
+            // BeatSync: beats_per_cue control
+            if let AdvanceMode::BeatSync { beats_per_cue } = advance_mode {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Beats/cue:").size(SMALL_SIZE).color(tc.text_secondary));
+                    let bpc_id = egui::Id::new("beats_per_cue_val");
+                    let mut bpc: u32 = ui.ctx().data_mut(|d| {
+                        d.get_temp(bpc_id).unwrap_or(*beats_per_cue)
+                    });
+                    let drag = ui.add(
+                        egui::DragValue::new(&mut bpc)
+                            .range(1..=64)
+                            .speed(0.1),
+                    );
+                    if drag.changed() {
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(bpc_id, bpc);
+                            d.insert_temp(egui::Id::new("scene_set_beats_per_cue"), bpc);
+                        });
+                    }
+                });
+            }
+
             ui.add_space(4.0);
         }
 
@@ -236,22 +286,89 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                                     });
                                 }
 
-                                // Duration (only for non-Cut)
+                                // Editable transition duration (only for non-Cut)
                                 if cue.transition != TransitionType::Cut {
-                                    ui.label(
-                                        RichText::new(format!("{:.1}s", cue.transition_secs))
-                                            .size(SMALL_SIZE)
-                                            .color(tc.text_secondary),
+                                    let dur_id = egui::Id::new("cue_dur").with(idx);
+                                    let mut dur: f32 = ui.ctx().data_mut(|d| {
+                                        d.get_temp(dur_id).unwrap_or(cue.transition_secs)
+                                    });
+                                    let drag = ui.add(
+                                        egui::DragValue::new(&mut dur)
+                                            .range(0.1..=30.0)
+                                            .speed(0.05)
+                                            .suffix("s")
+                                            .max_decimals(1),
                                     );
+                                    if drag.changed() {
+                                        ui.ctx().data_mut(|d| {
+                                            d.insert_temp(dur_id, dur);
+                                            d.insert_temp(
+                                                egui::Id::new("scene_set_cue_transition_secs"),
+                                                (idx, dur),
+                                            );
+                                        });
+                                    }
                                 }
-                                // Transition type
+
+                                // Clickable transition type cycle button
+                                if ui
+                                    .add(egui::Button::new(
+                                        RichText::new(cue.transition.display_name())
+                                            .size(SMALL_SIZE)
+                                            .color(tc.accent),
+                                    ).frame(false))
+                                    .on_hover_text("Transition IN to this cue (click to cycle)")
+                                    .clicked()
+                                {
+                                    let next = match cue.transition {
+                                        TransitionType::Cut => TransitionType::Dissolve,
+                                        TransitionType::Dissolve => TransitionType::ParamMorph,
+                                        TransitionType::ParamMorph => TransitionType::Cut,
+                                    };
+                                    ui.ctx().data_mut(|d| {
+                                        d.insert_temp(
+                                            egui::Id::new("scene_set_cue_transition"),
+                                            (idx, next),
+                                        );
+                                    });
+                                }
+                            });
+                        });
+
+                        // Per-cue hold time (shown in Timer mode)
+                        let is_timer = info.timeline.as_ref().map_or(false, |t| {
+                            matches!(t.advance_mode, AdvanceMode::Timer)
+                        });
+                        if is_timer {
+                            ui.horizontal(|ui| {
+                                ui.add_space(16.0);
                                 ui.label(
-                                    RichText::new(cue.transition.display_name())
+                                    RichText::new("Hold:")
                                         .size(SMALL_SIZE)
                                         .color(tc.text_secondary),
                                 );
+                                let hold_id = egui::Id::new("cue_hold").with(idx);
+                                let mut hold: f32 = ui.ctx().data_mut(|d| {
+                                    d.get_temp(hold_id).unwrap_or(cue.hold_secs.unwrap_or(4.0))
+                                });
+                                let drag = ui.add(
+                                    egui::DragValue::new(&mut hold)
+                                        .range(0.5..=120.0)
+                                        .speed(0.1)
+                                        .suffix("s")
+                                        .max_decimals(1),
+                                );
+                                if drag.changed() {
+                                    ui.ctx().data_mut(|d| {
+                                        d.insert_temp(hold_id, hold);
+                                        d.insert_temp(
+                                            egui::Id::new("scene_set_cue_hold_secs"),
+                                            (idx, hold),
+                                        );
+                                    });
+                                }
                             });
-                        });
+                        }
                     });
             }
         }
