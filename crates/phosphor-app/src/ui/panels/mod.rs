@@ -136,7 +136,7 @@ pub fn draw_panels(
     };
 
     egui::SidePanel::left("left_panel")
-        .exact_width(270.0)
+        .exact_width(315.0)
         .resizable(false)
         .frame(panel_frame)
         .show(ctx, |ui| {
@@ -318,7 +318,7 @@ pub fn draw_panels(
         });
 
     egui::SidePanel::right("right_panel")
-        .exact_width(270.0)
+        .exact_width(315.0)
         .resizable(false)
         .frame(panel_frame)
         .show(ctx, |ui| {
