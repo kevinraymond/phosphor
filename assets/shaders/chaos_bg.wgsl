@@ -20,8 +20,12 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     let warped_uv = rotated_p * 0.5 + 0.5;
     let warped_prev = feedback(clamp(warped_uv, vec2f(0.001), vec2f(0.999)));
 
-    let trail = mix(prev.rgb, warped_prev.rgb, 0.3) * decay;
-    let result = min(trail, vec3f(1.5));
-    let alpha = max(result.r, max(result.g, result.b)) * 2.0;
+    var trail = mix(clamp(prev.rgb, vec3f(0.0), vec3f(1.0)), clamp(warped_prev.rgb, vec3f(0.0), vec3f(1.0)), 0.3) * decay;
+    // Hard cap — attractor trails need persistence for visualization
+    trail = min(trail, vec3f(0.60));
+    let center = uv - 0.5;
+    let vignette = 1.0 - dot(center, center) * 1.5;
+    let result = trail * max(vignette, 0.0);
+    let alpha = max(result.r, max(result.g, result.b)) * 1.5;
     return vec4f(result, clamp(alpha, 0.0, 1.0));
 }

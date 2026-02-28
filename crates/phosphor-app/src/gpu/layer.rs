@@ -248,6 +248,7 @@ impl Layer {
     pub fn resize(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         width: u32,
         height: u32,
         placeholder: &PlaceholderTexture,
@@ -255,7 +256,7 @@ impl Layer {
         match &mut self.content {
             LayerContent::Effect(e) => {
                 e.pass_executor
-                    .resize(device, width, height, &e.uniform_buffer, placeholder);
+                    .resize(device, queue, width, height, &e.uniform_buffer, placeholder);
             }
             LayerContent::Media(_) => {
                 // Media resize handled separately (needs queue for uniform upload)

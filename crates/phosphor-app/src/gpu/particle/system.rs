@@ -89,8 +89,9 @@ pub struct ParticleSystem {
     // Spatial hash grid for particle-particle interaction
     spatial_hash: Option<SpatialHashGrid>,
 
-    // Placeholder empty BGL for padding bind group layouts (contiguous group indices)
+    // Placeholder empty BGL + bind group for padding contiguous bind group indices
     empty_bgl: BindGroupLayout,
+    empty_bind_group: BindGroup,
 
     // Counter readback: staging buffer + async map state
     counter_readback: wgpu::Buffer,
@@ -113,12 +114,17 @@ impl ParticleSystem {
         hdr_format: TextureFormat,
         def: &ParticleDef,
         compute_source: &str,
+        interaction: bool,
     ) -> Result<Self, String> {
         let max_particles = def.max_count;
         let particle_size = std::mem::size_of::<Particle>() as u64;
         let buffer_size = particle_size * max_particles as u64;
 
-        // Create storage buffers (ping-pong)
+        // Create storage buffers (ping-pong) — zero-initialized to ensure all particles
+        // start dead (life=0). Without this, recycled GPU memory from a previous effect's
+        // freed buffers can contain alive particles with high brightness, causing blowout
+        // through additive blend + feedback accumulation.
+        let zeros = vec![0u8; buffer_size as usize];
         let storage_buffers = [
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("particles-a"),
@@ -133,6 +139,8 @@ impl ParticleSystem {
                 mapped_at_creation: false,
             }),
         ];
+        queue.write_buffer(&storage_buffers[0], 0, &zeros);
+        queue.write_buffer(&storage_buffers[1], 0, &zeros);
 
         // Counter buffer: 4 x u32 = 16 bytes
         // [0]=alive_count, [1]=dead_count, [2]=emit_used, [3]=reserved
@@ -325,6 +333,67 @@ impl ParticleSystem {
 
         let flow_field_bind_group = create_flow_field_bind_group(device, &flow_field_bgl, &flow_field);
 
+        // Empty BGL + bind group for padding contiguous bind group indices
+        let empty_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("empty-bgl"),
+            entries: &[],
+        });
+        let empty_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("empty-bg"),
+            layout: &empty_bgl,
+            entries: &[],
+        });
+
+        // Create trail compute BGL before pipeline if trails are needed,
+        // so the shader's @group(2) bindings validate at pipeline creation.
+        let trail_compute_bgl = if def.trail_length >= 2 {
+            Some(device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("particle-trail-compute-bgl"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            }))
+        } else {
+            None
+        };
+
+        // Create spatial hash before pipeline if interaction is enabled,
+        // so the query BGL is included in the initial compute pipeline layout.
+        let spatial_hash = if interaction {
+            Some(SpatialHashGrid::new(
+                device,
+                max_particles,
+                &storage_buffers,
+                &uniform_buffer,
+            ))
+        } else {
+            None
+        };
+
+        // Build compute pipeline layout matching compute_bind_group_layouts() logic:
+        // groups 0=core, 1=flow field, 2=trails (or empty placeholder), 3=spatial hash
+        let mut bgl_refs: Vec<&BindGroupLayout> = vec![&compute_bgl, &flow_field_bgl];
+        if spatial_hash.is_some() {
+            // Spatial hash at group 3 requires group 2 to exist (contiguous)
+            if let Some(ref trail_bgl) = trail_compute_bgl {
+                bgl_refs.push(trail_bgl);
+            } else {
+                bgl_refs.push(&empty_bgl);
+            }
+            bgl_refs.push(&spatial_hash.as_ref().unwrap().query_bgl);
+        } else if let Some(ref trail_bgl) = trail_compute_bgl {
+            bgl_refs.push(trail_bgl);
+        }
+
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("particle-compute"),
             source: wgpu::ShaderSource::Wgsl(compute_source.into()),
@@ -332,7 +401,7 @@ impl ParticleSystem {
 
         let compute_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("particle-compute-layout"),
-            bind_group_layouts: &[&compute_bgl, &flow_field_bgl],
+            bind_group_layouts: &bgl_refs,
             push_constant_ranges: &[],
         });
 
@@ -576,16 +645,14 @@ impl ParticleSystem {
             trail_render_pipeline: None,
             trail_render_bgl: None,
             trail_render_bind_groups: None,
-            trail_compute_bgl: None,
+            trail_compute_bgl,
             trail_compute_bind_group: None,
             trail_indirect_args_buffer: None,
             trail_prepare_indirect_pipeline: None,
             trail_prepare_indirect_bind_group: None,
-            spatial_hash: None,
-            empty_bgl: device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("empty-bgl"),
-                entries: &[],
-            }),
+            spatial_hash,
+            empty_bgl,
+            empty_bind_group,
             counter_readback: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("particle-counter-readback"),
                 size: 16,
@@ -782,6 +849,9 @@ impl ParticleSystem {
             pass.set_bind_group(1, &self.flow_field_bind_group, &[]);
             if let Some(trail_bg) = &self.trail_compute_bind_group {
                 pass.set_bind_group(2, trail_bg, &[]);
+            } else if self.spatial_hash.is_some() {
+                // Spatial hash at group 3 requires group 2 to exist (contiguous indices)
+                pass.set_bind_group(2, &self.empty_bind_group, &[]);
             }
             if let Some(hash) = &self.spatial_hash {
                 pass.set_bind_group(3, &hash.query_bind_group, &[]);

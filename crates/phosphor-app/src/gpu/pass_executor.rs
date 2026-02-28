@@ -37,6 +37,7 @@ impl PassExecutor {
         effect_loader: &EffectLoader,
         uniform_buffer: &UniformBuffer,
         placeholder: &PlaceholderTexture,
+        queue: &Queue,
     ) -> Result<Self, String> {
         let mut passes = Vec::new();
 
@@ -48,7 +49,12 @@ impl PassExecutor {
             let pipeline = ShaderPipeline::new(device, hdr_format, &source)
                 .map_err(|e| format!("Failed to compile shader '{}': {e}", def.shader))?;
 
-            let target = PingPongTarget::new(device, width, height, hdr_format, def.scale);
+            // Clear feedback targets to prevent NaN/garbage from uninitialized GPU memory
+            let target = if def.feedback {
+                PingPongTarget::new_cleared(device, queue, width, height, hdr_format, def.scale)
+            } else {
+                PingPongTarget::new(device, width, height, hdr_format, def.scale)
+            };
 
             let bind_groups = create_pass_bind_groups(
                 device,
@@ -167,17 +173,22 @@ impl PassExecutor {
         }
     }
 
-    /// Resize all pass targets.
+    /// Resize all pass targets (clears feedback targets to prevent NaN from uninitialized GPU memory).
     pub fn resize(
         &mut self,
         device: &Device,
+        queue: &Queue,
         width: u32,
         height: u32,
         uniform_buffer: &UniformBuffer,
         placeholder: &PlaceholderTexture,
     ) {
         for pass in &mut self.passes {
-            pass.target.resize(device, width, height);
+            if pass.has_feedback {
+                pass.target.resize_cleared(device, queue, width, height);
+            } else {
+                pass.target.resize(device, width, height);
+            }
             pass.bind_groups = create_pass_bind_groups(
                 device,
                 uniform_buffer,

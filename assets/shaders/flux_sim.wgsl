@@ -20,15 +20,16 @@ fn emit_particle(idx: u32) -> Particle {
     let r_c = abs(hue * 6.0 - 3.0) - 1.0;
     let g_c = 2.0 - abs(hue * 6.0 - 2.0);
     let b_c = 2.0 - abs(hue * 6.0 - 4.0);
-    let brightness = 0.04 + u.rms * 0.03;
+    let brightness = 0.15 + u.rms * 0.08;
     let col = clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0)) * brightness;
 
     // Stagger initial age
     let initial_age = hash(seed_base + 9.0) * u.lifetime * 0.3;
 
-    p.pos_life = vec4f(pos, 0.0, 1.0);
-    p.vel_size = vec4f(vel, 0.0, u.initial_size * (0.7 + hash(seed_base + 6.0) * 0.6));
-    p.color = vec4f(col, 0.15 + hash(seed_base + 7.0) * 0.1);
+    let init_size = u.initial_size * (0.7 + hash(seed_base + 6.0) * 0.6);
+    p.pos_life = vec4f(pos, init_size, 1.0);
+    p.vel_size = vec4f(vel, 0.0, init_size);
+    p.color = vec4f(col, 0.30 + hash(seed_base + 7.0) * 0.15);
     p.flags = vec4f(initial_age, u.lifetime, 0.0, 0.0);
     return p;
 }
@@ -102,7 +103,8 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     if new_pos.y < -1.1 { new_pos.y += 2.2; }
 
     // Size: gentle shrink over life, audio reactive
-    let base_size = mix(p.vel_size.w, u.size_end, life_frac * life_frac);
+    let init_size = p.pos_life.z;
+    let base_size = mix(init_size, u.size_end, life_frac * life_frac);
     let size = base_size * (1.0 + u.rms * 0.3);
 
     // Alpha: fade in, fade out, audio-reactive brightness
@@ -110,13 +112,10 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let fade_out = 1.0 - smoothstep(0.7, 1.0, life_frac);
     let alpha = p.color.a * fade_in * fade_out;
 
-    // Color: warm shift with age and audio
-    var col = p.color.rgb;
-    let warm_shift = life_frac * 0.3 + u.mid * 0.1;
-    col = vec3f(col.r + warm_shift * 0.2, col.g, col.b - warm_shift * 0.1);
-    col = clamp(col, vec3f(0.0), vec3f(1.0));
+    // Color: keep emitted color (was cumulative per-frame addition — caused blowout)
+    let col = p.color.rgb;
 
-    p.pos_life = vec4f(new_pos, 0.0, 1.0);
+    p.pos_life = vec4f(new_pos, init_size, 1.0);
     p.vel_size = vec4f(vel, 0.0, size);
     p.color = vec4f(col, alpha);
     p.flags.x = new_age;

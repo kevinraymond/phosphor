@@ -17,15 +17,16 @@ fn emit_particle(idx: u32) -> Particle {
     let vel = vec2f(cos(angle), sin(angle)) * speed;
 
     // Color: warm grays/whites like real starlings
-    let tone = 0.04 + hash(seed_base + 5.0) * 0.03 + u.rms * 0.02;
+    let tone = 0.12 + hash(seed_base + 5.0) * 0.05 + u.rms * 0.06;
     let hue_shift = u.centroid * 0.05;
     let col = vec3f(tone + hue_shift, tone, tone - hue_shift * 0.3);
 
     let initial_age = hash(seed_base + 9.0) * u.lifetime * 0.5;
 
-    p.pos_life = vec4f(pos, 0.0, 1.0);
-    p.vel_size = vec4f(vel, 0.0, u.initial_size * (0.7 + hash(seed_base + 6.0) * 0.6));
-    p.color = vec4f(clamp(col, vec3f(0.0), vec3f(1.0)), 0.15 + hash(seed_base + 7.0) * 0.1);
+    let init_size = u.initial_size * (0.7 + hash(seed_base + 6.0) * 0.6);
+    p.pos_life = vec4f(pos, init_size, 1.0);
+    p.vel_size = vec4f(vel, 0.0, init_size);
+    p.color = vec4f(clamp(col, vec3f(0.0), vec3f(1.0)), 0.25 + hash(seed_base + 7.0) * 0.15);
     p.flags = vec4f(initial_age, u.lifetime, angle, 0.0); // flags.z stores heading angle
     return p;
 }
@@ -139,7 +140,8 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
 
     // Size: slightly modulated by neighbor density
     let density_mod = 1.0 + f32(neighbor_count) * 0.05;
-    let base_size = mix(p.vel_size.w, u.size_end, life_frac * 0.3);
+    let init_size = p.pos_life.z;
+    let base_size = mix(init_size, u.size_end, life_frac * 0.3);
     let size = base_size * density_mod * (1.0 + u.rms * 0.2);
 
     // Alpha
@@ -147,13 +149,10 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let fade_out = 1.0 - smoothstep(0.8, 1.0, life_frac);
     let alpha = p.color.a * fade_in * fade_out;
 
-    // Color: slight warmth when ordered (many aligned neighbors)
-    var col = p.color.rgb;
-    let alignment = clamp(f32(neighbor_count) / 7.0, 0.0, 1.0);
-    col += vec3f(0.05, 0.02, -0.02) * alignment;
-    col = clamp(col, vec3f(0.0), vec3f(1.0));
+    // Color: keep emitted color (was cumulative per-frame addition — caused blowout)
+    let col = p.color.rgb;
 
-    p.pos_life = vec4f(new_pos, 0.0, 1.0);
+    p.pos_life = vec4f(new_pos, init_size, 1.0);
     p.vel_size = vec4f(vel, 0.0, size);
     p.color = vec4f(col, alpha);
     p.flags = vec4f(new_age, max_life, new_heading, 0.0);

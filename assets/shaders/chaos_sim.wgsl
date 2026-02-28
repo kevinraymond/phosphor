@@ -61,19 +61,20 @@ fn emit_particle(idx: u32) -> Particle {
     let r_c = abs(hue * 6.0 - 3.0) - 1.0;
     let g_c = 2.0 - abs(hue * 6.0 - 2.0);
     let b_c = 2.0 - abs(hue * 6.0 - 4.0);
-    let brightness = 0.03 + u.rms * 0.02;
+    let brightness = 0.15 + u.rms * 0.08;
     let col = clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0)) * brightness;
 
     // Store 3D position: xy in pos_life, z in pos_life.z (was reserved)
     // Initial velocity is zero (attractor dynamics drive motion)
     let zoom_param = 0.3 + u.emitter_radius * 0.7; // controlled by zoom param
-    let projected = project(vec3f(px, py, pz), zoom_param * 0.03);
+    let projected = project(vec3f(px, py, pz), zoom_param * 0.04);
 
     let initial_age = hash(seed_base + 9.0) * u.lifetime * 0.1;
 
-    p.pos_life = vec4f(projected, 0.0, 1.0);
-    p.vel_size = vec4f(0.0, 0.0, 0.0, u.initial_size * (0.6 + hash(seed_base + 6.0) * 0.8));
-    p.color = vec4f(col, 0.12 + hash(seed_base + 7.0) * 0.08);
+    let init_size = u.initial_size * (0.6 + hash(seed_base + 6.0) * 0.8);
+    p.pos_life = vec4f(projected, init_size, 1.0);
+    p.vel_size = vec4f(0.0, 0.0, 0.0, init_size);
+    p.color = vec4f(col, 0.25 + hash(seed_base + 7.0) * 0.15);
     // flags: x=age, y=lifetime, z=3D_x (packed), w=3D_y (packed)
     // We store 3D coords in flags.z/w and use vel_size.z for 3D_z
     p.flags = vec4f(initial_age, u.lifetime, px, py);
@@ -158,7 +159,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     pos3d = clamp(pos3d, vec3f(-80.0), vec3f(80.0));
 
     // Project to 2D with slow rotation
-    let zoom = 0.02 + u.emitter_radius * 0.02;
+    let zoom = 0.04 + u.emitter_radius * 0.04;
     let rot_speed = 0.15 + u.mid * 0.1;
     let rot_angle = u.time * rot_speed;
     let ca = cos(rot_angle);
@@ -175,22 +176,21 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let depth_norm = clamp((rotated.z + 40.0) / 80.0, 0.0, 1.0);
     let depth_mod = 0.5 + 0.5 * depth_norm; // front is brighter
 
-    let base_size = mix(p.vel_size.w, u.size_end, life_frac * 0.5);
+    let init_size = p.pos_life.z;
+    let base_size = mix(init_size, u.size_end, life_frac * 0.5);
     let size = base_size * depth_mod * (1.0 + u.rms * 0.3);
 
     let fade_in = smoothstep(0.0, 0.05, life_frac);
     let fade_out = 1.0 - smoothstep(0.8, 1.0, life_frac);
     let alpha = p.color.a * fade_in * fade_out * depth_mod;
 
-    // Color: warm shift over lifetime, audio hue shift
-    var col = p.color.rgb;
-    let warm = life_frac * 0.15 + u.centroid * 0.1;
-    col = clamp(vec3f(col.r + warm * 0.2, col.g - warm * 0.05, col.b - warm * 0.1), vec3f(0.0), vec3f(1.0));
+    // Color: keep emitted color (was cumulative per-frame addition — caused blowout)
+    let col = p.color.rgb;
 
     // Store 3D position back to flags.z/w and vel_size.z
     p.flags = vec4f(new_age, max_life, pos3d.x, pos3d.y);
     p.vel_size = vec4f(p.vel_size.xy, pos3d.z, size);
-    p.pos_life = vec4f(projected, 0.0, 1.0);
+    p.pos_life = vec4f(projected, init_size, 1.0);
     p.color = vec4f(col, alpha);
 
     particles_out[idx] = p;

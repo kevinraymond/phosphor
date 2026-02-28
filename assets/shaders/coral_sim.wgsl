@@ -50,14 +50,15 @@ fn emit_particle(idx: u32) -> Particle {
     let r_c = abs(hue * 6.0 - 3.0) - 1.0;
     let g_c = 2.0 - abs(hue * 6.0 - 2.0);
     let b_c = 2.0 - abs(hue * 6.0 - 4.0);
-    let brightness = 0.03 + u.rms * 0.03;
+    let brightness = 0.15 + u.rms * 0.08;
     let col = clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0)) * brightness;
 
     let initial_age = hash(seed_base + 9.0) * u.lifetime * 0.3;
 
-    p.pos_life = vec4f(pos, 0.0, 1.0);
-    p.vel_size = vec4f(vel, 0.0, u.initial_size * (0.7 + hash(seed_base + 6.0) * 0.6));
-    p.color = vec4f(col, 0.1 + hash(seed_base + 7.0) * 0.08);
+    let init_size = u.initial_size * (0.7 + hash(seed_base + 6.0) * 0.6);
+    p.pos_life = vec4f(pos, init_size, 1.0);
+    p.vel_size = vec4f(vel, 0.0, init_size);
+    p.color = vec4f(col, 0.25 + hash(seed_base + 7.0) * 0.15);
     p.flags = vec4f(initial_age, u.lifetime, 0.0, 0.0);
     return p;
 }
@@ -152,7 +153,8 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
 
     // Size: particles on pattern features are larger
     let on_feature = clamp(val * 0.5 + 0.5, 0.0, 1.0); // 0=trough, 1=peak
-    let base_size = mix(p.vel_size.w, u.size_end, life_frac * 0.3);
+    let init_size = p.pos_life.z;
+    let base_size = mix(init_size, u.size_end, life_frac * 0.3);
     let size = base_size * (0.6 + 0.8 * on_feature) * (1.0 + u.rms * 0.2);
 
     // Alpha: brighter on pattern features
@@ -160,13 +162,10 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let fade_out = 1.0 - smoothstep(0.8, 1.0, life_frac);
     let alpha = p.color.a * fade_in * fade_out * (0.4 + 0.6 * on_feature);
 
-    // Color: warm shift on pattern features, cool in troughs
-    var col = p.color.rgb;
-    col += vec3f(0.08, 0.04, -0.03) * on_feature;
-    col -= vec3f(0.02, 0.0, -0.04) * (1.0 - on_feature);
-    col = clamp(col, vec3f(0.0), vec3f(1.0));
+    // Color: tint based on pattern features (non-cumulative — applied to emitted base)
+    let col = p.color.rgb;
 
-    p.pos_life = vec4f(new_pos, 0.0, 1.0);
+    p.pos_life = vec4f(new_pos, init_size, 1.0);
     p.vel_size = vec4f(vel, 0.0, size);
     p.color = vec4f(col, alpha);
     p.flags.x = new_age;

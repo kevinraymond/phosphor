@@ -137,6 +137,7 @@ impl App {
                     &effect_loader,
                     &uniform_buffer,
                     &placeholder,
+                    &gpu.queue,
                 ) {
                     Ok(executor) => {
                         let sources: Vec<String> = passes
@@ -152,8 +153,8 @@ impl App {
                         log::warn!("Failed to load effect: {e}, using default shader");
                         let source = read_default_shader();
                         let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &source)?;
-                        let feedback = PingPongTarget::new(
-                            &gpu.device, gpu.surface_config.width, gpu.surface_config.height,
+                        let feedback = PingPongTarget::new_cleared(
+                            &gpu.device, &gpu.queue, gpu.surface_config.width, gpu.surface_config.height,
                             hdr_format, 1.0,
                         );
                         let executor = PassExecutor::single_pass(
@@ -166,8 +167,8 @@ impl App {
                 log::warn!("Effect '{}' has no passes, using default shader", effect.name);
                 let source = read_default_shader();
                 let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &source)?;
-                let feedback = PingPongTarget::new(
-                    &gpu.device, gpu.surface_config.width, gpu.surface_config.height,
+                let feedback = PingPongTarget::new_cleared(
+                    &gpu.device, &gpu.queue, gpu.surface_config.width, gpu.surface_config.height,
                     hdr_format, 1.0,
                 );
                 let executor = PassExecutor::single_pass(
@@ -178,8 +179,8 @@ impl App {
         } else {
             let source = read_default_shader();
             let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &source)?;
-            let feedback = PingPongTarget::new(
-                &gpu.device, gpu.surface_config.width, gpu.surface_config.height,
+            let feedback = PingPongTarget::new_cleared(
+                &gpu.device, &gpu.queue, gpu.surface_config.width, gpu.surface_config.height,
                 hdr_format, 1.0,
             );
             let executor = PassExecutor::single_pass(
@@ -212,6 +213,7 @@ impl App {
                     hdr_format,
                     pd,
                     &compute_source,
+                    pd.interaction,
                 ) {
                     Ok(mut ps) => {
                         log::info!("Particle system created: {} particles", pd.max_count);
@@ -228,7 +230,6 @@ impl App {
                             );
                         }
                         if pd.interaction {
-                            ps.setup_spatial_hash(&gpu.device);
                             log::info!("Spatial hash enabled for particle interaction");
                         }
                         pass_executor.particle_system = Some(ps);
@@ -340,7 +341,7 @@ impl App {
     pub fn resize(&mut self, width: u32, height: u32) {
         self.gpu.resize(width, height);
         for layer in &mut self.layer_stack.layers {
-            layer.resize(&self.gpu.device, width, height, &self.placeholder);
+            layer.resize(&self.gpu.device, &self.gpu.queue, width, height, &self.placeholder);
             layer.resize_media(&self.gpu.device, &self.gpu.queue, width, height);
         }
         self.compositor.resize(&self.gpu.device, width, height);
@@ -915,7 +916,7 @@ impl App {
             }
         };
 
-        match ParticleSystem::new(&self.gpu.device, &self.gpu.queue, hdr_format, particles, &compute_source) {
+        match ParticleSystem::new(&self.gpu.device, &self.gpu.queue, hdr_format, particles, &compute_source, particles.interaction) {
             Ok(mut ps) => {
                 log::info!("Particle system created: {} particles", particles.max_count);
 
@@ -988,9 +989,7 @@ impl App {
                     );
                 }
 
-                // Set up spatial hash if interaction enabled
                 if particles.interaction {
-                    ps.setup_spatial_hash(&self.gpu.device);
                     log::info!("Spatial hash enabled for particle interaction");
                 }
 
@@ -1035,8 +1034,9 @@ impl App {
         let is_media = self.layer_stack.layers[layer_idx].is_media();
         if is_media {
             let uniform_buffer = UniformBuffer::new(&self.gpu.device);
-            let feedback = PingPongTarget::new(
+            let feedback = PingPongTarget::new_cleared(
                 &self.gpu.device,
+                &self.gpu.queue,
                 self.gpu.surface_config.width,
                 self.gpu.surface_config.height,
                 hdr_format,
@@ -1077,6 +1077,7 @@ impl App {
             &self.effect_loader,
             uniform_buffer_ref,
             &self.placeholder,
+            &self.gpu.queue,
         );
 
         match executor_result {
@@ -1154,8 +1155,9 @@ impl App {
         let source = read_default_shader();
 
         let uniform_buffer = UniformBuffer::new(&self.gpu.device);
-        let feedback = PingPongTarget::new(
+        let feedback = PingPongTarget::new_cleared(
             &self.gpu.device,
+            &self.gpu.queue,
             self.gpu.surface_config.width,
             self.gpu.surface_config.height,
             hdr_format,

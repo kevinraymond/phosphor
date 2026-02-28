@@ -12,15 +12,18 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     // Upward drift in feedback — particle beams flow upward
     let drift_uv = uv + vec2f(0.0, -0.001);
     let drifted = feedback(clamp(drift_uv, vec2f(0.001), vec2f(0.999)));
-    let trail = mix(prev.rgb, drifted.rgb, 0.3) * decay;
+    var trail = mix(clamp(prev.rgb, vec3f(0.0), vec3f(1.0)), clamp(drifted.rgb, vec3f(0.0), vec3f(1.0)), 0.3) * decay;
+    trail = min(trail, vec3f(0.60));
 
-    // Subtle magnetic field line visualization (vertical streaks)
-    let field_vis = param(1u) * 0.015;
+    // Magnetic field line visualization (vertical streaks)
+    let field_vis = param(1u) * 0.15;
     let field_lines = sin(p.x * 20.0 + u.time * 0.2) * 0.5 + 0.5;
-    let field_glow = field_lines * field_vis * u.bass * exp(-abs(p.y + 0.3) * 2.0);
-    let field_color = vec3f(0.1, 0.2, 0.5) * field_glow;
+    let field_glow = field_lines * field_vis * (0.3 + u.bass * 0.7) * exp(-abs(p.y + 0.3) * 1.5);
+    let field_color = vec3f(0.15, 0.25, 0.5) * field_glow;
 
-    let result = min(trail + field_color, vec3f(1.5));
-    let alpha = max(result.r, max(result.g, result.b)) * 2.0;
+    let center = uv - 0.5;
+    let vignette = 1.0 - dot(center, center) * 1.5;
+    let result = (trail + field_color) * max(vignette, 0.0);
+    let alpha = max(result.r, max(result.g, result.b)) * 1.5;
     return vec4f(result, clamp(alpha, 0.0, 1.0));
 }

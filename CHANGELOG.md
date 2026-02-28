@@ -17,13 +17,22 @@
 - Particle UI panel: alive/max count with utilization bar, emit rate, burst, lifetime, speed, size, drag sliders, feature badges
 
 ### New Effects
-- **Flux**: 30K particles following curl noise flow field, audio-reactive flow strength and speed
+- **Flux**: 25K particles following curl noise flow field, audio-reactive flow strength and speed
 - **Ribbons**: 8K particles with flow field + 16-point trail ribbons, audio-reactive width/opacity
-- **Chaos**: 50K particles tracing Lorenz/Rossler strange attractors with RK4 integration, 3D perspective projection, audio-reactive bifurcation parameters
-- **Helix**: 20K charged particles spiraling via Lorentz force F=q(E+v×B), positive/negative charges, audio-reactive B_z and E fields
-- **Murmuration**: 80K flocking particles with Vicsek model, spatial hash neighbor query, audio-reactive order↔disorder phase transition
-- **Cymatics**: 40K particles forming Chladni nodal line patterns via gradient descent, audio frequency bands select mode numbers
-- **Coral**: 50K particles tracing Turing-like organic growth patterns, hexagonal spots morphing to labyrinthine stripes
+- **Chaos**: 40K particles tracing Lorenz/Rossler strange attractors with RK4 integration, 3D perspective projection, audio-reactive bifurcation parameters
+- **Helix**: 15K charged particles spiraling via Lorentz force F=q(E+v×B), positive/negative charges, audio-reactive B_z and E fields
+- **Murmuration**: 60K flocking particles with Vicsek model, spatial hash neighbor query, audio-reactive order↔disorder phase transition
+- **Cymatics**: 30K particles forming Chladni nodal line patterns via gradient descent, audio frequency bands select mode numbers
+- **Coral**: 40K particles tracing Turing-like organic growth patterns, hexagonal spots morphing to labyrinthine stripes
+
+### Bug Fixes
+- Fix Murmuration crash: create spatial hash before compute pipeline so shader bindings validate at pipeline creation
+- Fix particle size exponential blowout in all 6 new effects: size calculation read back previous frame's computed size (`p.vel_size.w`), compounding scale factors >1.0 each frame causing particles to grow until they fill the screen. Fix stores initial size in `pos_life.z` and uses that as base instead of the accumulated value
+- Tune bloom thresholds (0.70–0.85), reduce particle counts (4K–10K), lower feedback decay, add hard caps to bg shaders
+- Fix all 6 new effects washing out to uniform brightness: reduce particle counts 3-8x (into 4K-10K working range), raise bloom thresholds to 0.70-0.85, lower bloom intensity to 0.30-0.35, reduce HDR clamp from 1.5 to 1.0 in bg shaders, lower alpha multiplier from 2.0 to 1.5, restore per-particle brightness/alpha to visible levels, reduce feedback decay for faster trail fade
+- Fix Chaos visibility: increase projection zoom 50% so attractor shape fills screen instead of concentrating in a small region
+- Fix Helix vertical bands: widen emission spread and add oscillating horizontal E-field to create interweaving spirals
+- Tune all new effects: lower trail_decay defaults to 0.78-0.80, reduce particle counts and emit rates
 
 ## v1.1.0 — 2026-02-28
 

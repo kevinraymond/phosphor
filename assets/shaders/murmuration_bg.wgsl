@@ -6,13 +6,16 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
 
     let decay = param(0u);
     let prev = feedback(uv);
-    let trail = prev.rgb * decay;
+    var trail = clamp(prev.rgb, vec3f(0.0), vec3f(1.0)) * decay;
+    trail = min(trail, vec3f(0.40));
 
-    // Very subtle dark blue ambient — twilight sky
+    // Dark blue ambient — twilight sky
     let p = uv * 2.0 - 1.0;
-    let sky = vec3f(0.01, 0.015, 0.03) * (1.0 - abs(p.y) * 0.3);
+    let sky = vec3f(0.02, 0.03, 0.06) * (1.0 - abs(p.y) * 0.3);
 
-    let result = min(trail + sky, vec3f(1.5));
-    let alpha = max(result.r, max(result.g, result.b)) * 2.0;
+    let center = uv - 0.5;
+    let vignette = 1.0 - dot(center, center) * 1.5;
+    let result = (trail + sky) * max(vignette, 0.0);
+    let alpha = max(result.r, max(result.g, result.b)) * 1.5;
     return vec4f(result, clamp(alpha, 0.0, 1.0));
 }
