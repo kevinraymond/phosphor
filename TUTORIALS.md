@@ -12,12 +12,13 @@ A comprehensive guide to using Phosphor — a real-time particle and shader engi
 4. [Parameters](#parameters)
 5. [Layers](#layers)
 6. [Presets](#presets)
-7. [Post-Processing](#post-processing)
-8. [MIDI](#midi)
-9. [OSC](#osc)
-10. [Web Control Surface](#web-control-surface)
-11. [Outputs](#outputs)
-12. [Global](#global)
+7. [Scenes](#scenes)
+8. [Post-Processing](#post-processing)
+9. [MIDI](#midi)
+10. [OSC](#osc)
+11. [Web Control Surface](#web-control-surface)
+12. [Outputs](#outputs)
+13. [Global](#global)
 
 ---
 
@@ -453,6 +454,106 @@ Presets are stored as JSON files in `~/.config/phosphor/presets/`. You can share
 
 ---
 
+## Scenes
+
+Scenes let you sequence presets into a cue list with timed or beat-synced transitions — turning a collection of presets into an automated show.
+
+### Quick Start
+
+1. Open the **Scenes** panel in the left sidebar
+2. Click **+ New Scene** and enter a name
+3. Add cues by clicking **+ Cue** — each cue references a saved preset
+4. Set transition type and duration for each cue
+5. Press **Space** or click the play button to start the timeline
+6. Press **T** to toggle the timeline on/off
+
+### Cue List
+
+Each cue in a scene references a preset and defines how to transition to it:
+
+- **Preset** — Which saved preset to load (selected from your preset list)
+- **Transition** — How to get there: Cut, Dissolve, or Morph
+- **Transition duration** — How long the transition takes (in seconds, ignored for Cut)
+- **Hold time** — How long to stay on this cue before advancing (used in Timer mode)
+- **Label** — Optional display name override
+
+Cues can be reordered, edited, and deleted from the scene panel. Changes are auto-saved.
+
+### Transitions
+
+| Type | Description |
+|------|-------------|
+| **Cut** | Instant switch — no transition, immediately loads the next preset |
+| **Dissolve** | GPU crossfade between outgoing and incoming visuals over the transition duration |
+| **Morph** | Interpolates all parameters and layer opacities smoothly over the transition duration |
+
+**Dissolve** creates a true visual crossfade — both the old and new states render simultaneously and blend together. **Morph** keeps the current effects running and smoothly slides their parameters toward the target preset's values, which works best when consecutive cues use the same effects with different parameter settings.
+
+### Advance Modes
+
+| Mode | Behavior |
+|------|----------|
+| **Manual** | Cues advance only when you press Space, a MIDI trigger, or an OSC message |
+| **Timer** | Automatically advances after each cue's hold time elapses |
+| **Beat Sync** | Advances every N beats, using MIDI clock when available or the audio beat detector as fallback |
+
+Set the advance mode in the scene panel. In Beat Sync mode, you can configure the number of beats per cue.
+
+### MIDI Clock Sync
+
+When a MIDI controller or DAW sends MIDI clock, Phosphor follows the external transport automatically:
+
+- **Start/Continue** (MIDI 0xFA/0xFB) — starts the timeline if it has cues but is idle
+- **Stop** (MIDI 0xFC) — stops the timeline if it is active
+- **Timing ticks** (MIDI 0xF8, 24 per quarter note) — used for BPM and beat-phase tracking
+
+In **Beat Sync** advance mode, MIDI clock beats take priority over the internal audio beat detector. If MIDI clock is not playing, Beat Sync falls back to audio-detected beats.
+
+### OSC Scene Control
+
+Scenes can be controlled via OSC (default RX port 9000):
+
+**Scene-specific addresses:**
+
+| Address | Arg | Description |
+|---------|-----|-------------|
+| `/phosphor/scene/goto_cue` | int | Jump directly to a cue by index (0-based) |
+| `/phosphor/scene/load` | string | Load a scene by name |
+| `/phosphor/scene/load` | int | Load a scene by index (0-based) |
+| `/phosphor/scene/loop_mode` | float | Set loop mode (> 0.5 = on) |
+| `/phosphor/scene/advance_mode` | int | 0 = Manual, 1 = Timer, 2 = Beat Sync |
+
+**Trigger actions** (via `/phosphor/trigger/{action}`):
+- `scene_go_next` — advance to the next cue
+- `scene_go_prev` — go to the previous cue
+- `toggle_timeline` — start/stop the timeline
+
+**Outbound timeline state** (TX, sent at the configured rate when TX is enabled):
+
+| Address | Type | Description |
+|---------|------|-------------|
+| `/phosphor/state/timeline/active` | int (0/1) | Whether the timeline is playing |
+| `/phosphor/state/timeline/cue_index` | int | Current cue index (0-based) |
+| `/phosphor/state/timeline/cue_count` | int | Total number of cues |
+| `/phosphor/state/timeline/transition_progress` | float (0–1) | Transition progress (0.0 when idle) |
+
+### Timeline Bar
+
+When the timeline is active, a visual timeline bar appears showing all cues as equal-width blocks:
+
+- The **current cue** is highlighted
+- A **playhead** line shows the current position
+- During transitions, a **progress overlay** fills the target cue block
+- **Dissolve** transitions show in the accent color; **Morph** shows in green
+- A label displays the transition type and progress percentage (e.g., "Dissolve 47%")
+- **Click any cue block** to jump directly to that cue
+
+### Storage
+
+Scenes are stored as JSON files in `~/.config/phosphor/scenes/`. You can share scenes by copying these files. Scene names follow the same sanitization rules as presets (no `/\\.`, max 64 chars).
+
+---
+
 ## Post-Processing
 
 Post-processing applies screen-space effects after all layers are composited.
@@ -538,6 +639,9 @@ Map MIDI buttons to these actions:
 | **Prev Layer** | Select the previous layer |
 | **Toggle Post-Process** | Enable/disable post-processing |
 | **Toggle Overlay** | Show/hide the UI |
+| **Scene Next** | Advance to the next scene cue |
+| **Scene Prev** | Go to the previous scene cue |
+| **Toggle Timeline** | Start/stop the scene timeline |
 
 Triggers use rising-edge detection (CC crosses from < 64 to ≥ 64) to fire once per press.
 
@@ -577,7 +681,16 @@ Default: **port 9000** on all interfaces (0.0.0.0)
 | `/phosphor/postprocess/enabled` | int | Post-processing toggle |
 | `/phosphor/trigger/{action}` | float | Fire a trigger action |
 
-Trigger action names: `next_effect`, `prev_effect`, `toggle_postprocess`, `toggle_overlay`, `next_preset`, `prev_preset`, `next_layer`, `prev_layer`
+Trigger action names: `next_effect`, `prev_effect`, `toggle_postprocess`, `toggle_overlay`, `next_preset`, `prev_preset`, `next_layer`, `prev_layer`, `scene_go_next`, `scene_go_prev`, `toggle_timeline`
+
+**Scene control addresses:**
+
+| Address | Arg | Description |
+|---------|-----|-------------|
+| `/phosphor/scene/goto_cue` | int | Jump to cue by index (0-based) |
+| `/phosphor/scene/load` | string/int | Load scene by name or index |
+| `/phosphor/scene/loop_mode` | float | Set loop mode (> 0.5 = on) |
+| `/phosphor/scene/advance_mode` | int | 0 = Manual, 1 = Timer, 2 = Beat Sync |
 
 ### OSC Learn
 
@@ -592,8 +705,16 @@ Similar to MIDI learn:
 When TX is enabled, Phosphor broadcasts at 30 Hz (configurable):
 - Audio features: all 7 bands, RMS, kick, onset, beat, etc.
 - State: active layer index, current effect name
+- Timeline state (when a scene is active):
 
-This is useful for driving other software (lighting, video) from Phosphor's audio analysis.
+| Address | Type | Description |
+|---------|------|-------------|
+| `/phosphor/state/timeline/active` | int (0/1) | Whether the timeline is playing |
+| `/phosphor/state/timeline/cue_index` | int | Current cue index (0-based) |
+| `/phosphor/state/timeline/cue_count` | int | Total number of cues |
+| `/phosphor/state/timeline/transition_progress` | float (0–1) | Transition progress (0.0 when idle) |
+
+This is useful for driving other software (lighting, video) from Phosphor's audio analysis and timeline state.
 
 ### Testing with Command Line
 
@@ -687,6 +808,8 @@ NDI (Network Device Interface) lets you send Phosphor's output to other software
 | **Esc** | Quit (with confirmation dialog) |
 | **[** | Previous layer |
 | **]** | Next layer |
+| **Space** | Next cue (when timeline has cues) |
+| **T** | Toggle timeline play/stop |
 | **Tab** | Cycle UI widgets |
 
 ### Themes
@@ -705,6 +828,7 @@ All configuration is stored in `~/.config/phosphor/`:
 | `web.json` | WebSocket port, enabled flag |
 | `ndi.json` | NDI source name, resolution, enabled |
 | `presets/*.json` | Saved presets |
+| `scenes/*.json` | Saved scenes |
 | `effects/*.pfx` | User-created effects |
 | `effects/*.wgsl` | User-created shaders |
 
@@ -724,6 +848,7 @@ cargo run --features webcam        # Webcam input
 The bottom status bar shows at a glance:
 - **Shader errors** (with dismiss button) or keyboard hints
 - **BPM** with beat flash indicator
+- **SCN** — Scene indicator with cue counter (e.g., "2/5") when a scene is active
 - **PTL** — Particle count (when active)
 - **MIDI** — Green dot when receiving
 - **OSC** — Green dot when receiving
