@@ -95,18 +95,17 @@ impl PresetLoader {
         };
 
         if let Some(ref tx) = self.request_tx {
-            // Use try_send + drain pattern: if channel full, the thread is busy
-            // with old work. It will pick up the new request after checking cancellation.
-            // We drain and re-send to ensure latest request is queued.
-            while tx.try_send(request).is_err() {
-                // Drain stale result if any
-                let _ = self.result_rx.try_recv();
-                // Brief yield to let decode thread check its channel
-                thread::yield_now();
-                break;
+            match tx.try_send(request) {
+                Ok(()) => {}
+                Err(err) => {
+                    // Channel full — drain stale result and yield to let decode thread proceed
+                    let _ = self.result_rx.try_recv();
+                    thread::yield_now();
+                    // Retry with the recovered request; if still full, generation counter
+                    // ensures the stale request will be discarded by the decode thread.
+                    let _ = tx.try_send(err.into_inner());
+                }
             }
-            // If the first try_send failed and we broke out, try once more
-            // (the thread should have picked up the old request by now or we overwrite)
         }
     }
 
