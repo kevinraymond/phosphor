@@ -10,6 +10,7 @@
 
 ### Documentation
 - Add comprehensive TUTORIALS.md covering all features
+- Quick Start now leads with binary downloads, build-from-source in collapsible details
 
 ## v1.0.0 — 2026-02-27
 

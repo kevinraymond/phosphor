@@ -34,14 +34,27 @@ Phosphor turns your audio input into layered, beat-synced visuals using GPU shad
 
 ## Quick Start
 
-**Prerequisites:** Rust 1.90+, an audio input device, a Vulkan-capable GPU. Optional: [ffmpeg](https://ffmpeg.org/) on PATH for video layer support.
+### Download
+
+Grab the latest release for your platform from [**GitHub Releases**](https://github.com/kevinraymond/phosphor/releases/latest):
+
+- **macOS** — download the `.dmg`, open it, drag Phosphor to Applications (signed & notarized)
+- **Windows** — download the `.zip`, extract, run `phosphor.exe`
+- **Linux** — download the `.tar.gz`, extract, run `./phosphor`
+
+<details>
+<summary><strong>Build from source</strong></summary>
+
+**Prerequisites:** Rust 1.90+, a Vulkan-capable GPU. Optional: [ffmpeg](https://ffmpeg.org/) on PATH for video layer support.
 
 ```bash
 git clone https://github.com/kevinraymond/phosphor.git
 cd phosphor
-cargo run --release                # standard build
+cargo run --release                   # standard build
 cargo run --release --features video  # with video layer support (requires ffmpeg)
 ```
+
+</details>
 
 On first launch: the UI fades in automatically after a couple seconds (or press **D** to show it immediately). Pick an effect from the browser and press **F** for fullscreen. Audio reactivity works immediately from your default input device.
 
