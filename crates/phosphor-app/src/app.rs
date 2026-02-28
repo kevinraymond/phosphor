@@ -78,9 +78,11 @@ pub struct App {
     /// When a dissolve begins, render() captures the outgoing frame then loads this preset.
     pub dissolve_capture_pending: Option<usize>,
     pub midi_clock: MidiClock,
-    /// Morph transition state: from-params per layer (layer_idx → param_name → value).
+    /// Morph transition state: from/to params per layer (layer_idx → param_name → value).
     pub morph_from_params: Option<Vec<std::collections::HashMap<String, ParamValue>>>,
+    pub morph_to_params: Option<Vec<std::collections::HashMap<String, ParamValue>>>,
     pub morph_from_opacities: Option<Vec<f32>>,
+    pub morph_to_opacities: Option<Vec<f32>>,
     // Shader editor
     pub shader_editor: ShaderEditorState,
     // Quit confirmation
@@ -289,7 +291,9 @@ impl App {
             dissolve_capture_pending: None,
             midi_clock: MidiClock::new(),
             morph_from_params: None,
+            morph_to_params: None,
             morph_from_opacities: None,
+            morph_to_opacities: None,
             settings,
             egui_overlay,
             effect_loader,
@@ -1621,7 +1625,7 @@ impl App {
                         self.dissolve_capture_pending = preset_idx;
                     }
                     crate::scene::types::TransitionType::ParamMorph => {
-                        // Snapshot current params for interpolation
+                        // Snapshot current (outgoing) params
                         let from_params: Vec<std::collections::HashMap<String, ParamValue>> = self
                             .layer_stack
                             .layers
@@ -1637,7 +1641,7 @@ impl App {
                         self.morph_from_params = Some(from_params);
                         self.morph_from_opacities = Some(from_opacities);
 
-                        // Load target preset (params will be overridden by interpolation)
+                        // Load target preset
                         if let Some(cue) = self.timeline.cues.get(to_cue) {
                             let preset_name = cue.preset_name.clone();
                             let preset_idx = self
@@ -1646,10 +1650,25 @@ impl App {
                                 .iter()
                                 .position(|(name, _)| name == &preset_name);
                             if let Some(idx) = preset_idx {
-                                // Load the target preset but immediately start morphing
                                 self.load_preset(idx);
                             }
                         }
+
+                        // Snapshot target (incoming) params after preset load
+                        let to_params: Vec<std::collections::HashMap<String, ParamValue>> = self
+                            .layer_stack
+                            .layers
+                            .iter()
+                            .map(|l| l.param_store.values.clone())
+                            .collect();
+                        let to_opacities: Vec<f32> = self
+                            .layer_stack
+                            .layers
+                            .iter()
+                            .map(|l| l.opacity)
+                            .collect();
+                        self.morph_to_params = Some(to_params);
+                        self.morph_to_opacities = Some(to_opacities);
                     }
                     crate::scene::types::TransitionType::Cut => {
                         // Handled by LoadCue
@@ -1663,36 +1682,41 @@ impl App {
             TimelineEvent::TransitionComplete { cue_index: _ } => {
                 // Clear morph state
                 self.morph_from_params = None;
+                self.morph_to_params = None;
                 self.morph_from_opacities = None;
+                self.morph_to_opacities = None;
             }
         }
     }
 
-    /// Apply morph interpolation between saved params and current (target) params.
+    /// Apply morph interpolation between saved from/to param snapshots.
     fn apply_morph_interpolation(&mut self, progress: f32) {
         let from_params = match &self.morph_from_params {
             Some(p) => p,
             None => return,
         };
-        let from_opacities = self.morph_from_opacities.as_ref();
+        let to_params = match &self.morph_to_params {
+            Some(p) => p,
+            None => return,
+        };
 
         for (i, layer) in self.layer_stack.layers.iter_mut().enumerate() {
-            // Interpolate params
-            if let Some(from_layer_params) = from_params.get(i) {
-                let target_values = layer.param_store.values.clone();
-                for (name, target_val) in &target_values {
-                    if let Some(from_val) = from_layer_params.get(name) {
-                        let interpolated = from_val.lerp(target_val, progress);
+            // Interpolate params using saved from/to snapshots
+            if let (Some(from_layer), Some(to_layer)) = (from_params.get(i), to_params.get(i)) {
+                for (name, to_val) in to_layer {
+                    if let Some(from_val) = from_layer.get(name) {
+                        let interpolated = from_val.lerp(to_val, progress);
                         layer.param_store.set(name, interpolated);
                     }
                 }
             }
 
-            // Interpolate opacity
-            if let Some(opacities) = from_opacities {
-                if let Some(&from_opacity) = opacities.get(i) {
-                    let target_opacity = layer.opacity;
-                    layer.opacity = from_opacity + (target_opacity - from_opacity) * progress;
+            // Interpolate opacity using saved from/to snapshots
+            if let (Some(from_op), Some(to_op)) =
+                (self.morph_from_opacities.as_ref(), self.morph_to_opacities.as_ref())
+            {
+                if let (Some(&from_o), Some(&to_o)) = (from_op.get(i), to_op.get(i)) {
+                    layer.opacity = from_o + (to_o - from_o) * progress;
                 }
             }
         }
