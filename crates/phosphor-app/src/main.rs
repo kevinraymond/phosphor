@@ -27,12 +27,15 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Fullscreen, Icon, Window, WindowAttributes, WindowId};
 
 use app::App;
+use effect::loader::EffectLoader;
 use gpu::layer::BlendMode;
 
 struct PhosphorApp {
     app: Option<App>,
     window: Option<Arc<Window>>,
     file_dialog_rx: Option<Receiver<PathBuf>>,
+    /// Debounced param save: (effect_index, last_change_time)
+    param_save_pending: Option<(usize, std::time::Instant)>,
 }
 
 impl PhosphorApp {
@@ -41,6 +44,7 @@ impl PhosphorApp {
             app: None,
             window: None,
             file_dialog_rx: None,
+            param_save_pending: None,
         }
     }
 }
@@ -445,6 +449,7 @@ impl ApplicationHandler for PhosphorApp {
                     d.remove_temp(egui::Id::new("shader_editor_save"))
                 });
                 if save_editor.is_some() {
+                    // Save the active tab
                     if let Some(ref path) = app.shader_editor.file_path {
                         match std::fs::write(path, &app.shader_editor.code) {
                             Ok(()) => {
@@ -454,6 +459,22 @@ impl ApplicationHandler for PhosphorApp {
                             Err(e) => {
                                 log::error!("Failed to save shader: {e}");
                                 app.status_error = Some((format!("Save failed: {e}"), std::time::Instant::now()));
+                            }
+                        }
+                    }
+                    // Also save the paired tab if it has unsaved changes
+                    if app.shader_editor.paired_is_dirty() {
+                        if let Some(ref paired_path) = app.shader_editor.paired_path {
+                            match std::fs::write(paired_path, &app.shader_editor.paired_content) {
+                                Ok(()) => {
+                                    app.shader_editor.paired_disk_content =
+                                        app.shader_editor.paired_content.clone();
+                                    log::info!("Saved paired file: {}", paired_path.display());
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to save paired file: {e}");
+                                    app.status_error = Some((format!("Save failed: {e}"), std::time::Instant::now()));
+                                }
                             }
                         }
                     }
@@ -1036,11 +1057,13 @@ impl ApplicationHandler for PhosphorApp {
                     let size: Option<f32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_size")));
                     let drag: Option<f32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_drag")));
 
+                    let mut particle_save_info: Option<(usize, gpu::particle::types::ParticleDef)> = None;
                     if emit_rate.is_some() || burst.is_some() || lifetime.is_some()
                         || speed.is_some() || size.is_some() || drag.is_some()
                     {
                         if let Some(layer) = app.layer_stack.active_mut() {
                             if let Some(effect) = layer.as_effect_mut() {
+                                let eidx = effect.effect_index;
                                 if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
                                     if let Some(v) = emit_rate { ps.emit_rate = v; ps.def.emit_rate = v; }
                                     if let Some(v) = burst { ps.burst_on_beat = v; ps.def.burst_on_beat = v; }
@@ -1048,6 +1071,23 @@ impl ApplicationHandler for PhosphorApp {
                                     if let Some(v) = speed { ps.def.initial_speed = v; }
                                     if let Some(v) = size { ps.def.initial_size = v; }
                                     if let Some(v) = drag { ps.def.drag = v; }
+                                    if let Some(idx) = eidx {
+                                        particle_save_info = Some((idx, ps.def.clone()));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Persist particle changes to effect loader + disk for user effects
+                    if let Some((idx, updated_def)) = particle_save_info {
+                        if let Some(effect) = app.effect_loader.effects.get_mut(idx) {
+                            effect.particles = Some(updated_def);
+                            if !EffectLoader::is_builtin(effect) {
+                                if let Some(ref path) = effect.source_path {
+                                    if let Ok(json) = serde_json::to_string_pretty(effect) {
+                                        let _ = std::fs::write(path, json);
+                                    }
                                 }
                             }
                         }
@@ -1172,11 +1212,59 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
 
-                // Check if active layer params changed (marks preset dirty)
+                // Check if active layer params changed (marks preset dirty + schedules .pfx save)
                 if let Some(layer) = app.layer_stack.active_mut() {
                     if layer.param_store.changed {
                         layer.param_store.changed = false;
                         app.preset_store.mark_dirty();
+
+                        // Schedule debounced save for user effects (avoid writing on every slider frame)
+                        if let Some(eidx) = layer.effect_index() {
+                            if let Some(effect) = app.effect_loader.effects.get(eidx) {
+                                if !EffectLoader::is_builtin(effect) {
+                                    self.param_save_pending = Some((eidx, std::time::Instant::now()));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Flush debounced param save after 500ms of no changes
+                if let Some((eidx, last_change)) = self.param_save_pending {
+                    if last_change.elapsed() >= std::time::Duration::from_millis(500) {
+                        self.param_save_pending = None;
+                        // Gather current values from the layer using this effect
+                        let values: Option<std::collections::HashMap<String, crate::params::types::ParamValue>> =
+                            app.layer_stack.layers.iter().find_map(|l| {
+                                if l.effect_index() == Some(eidx) {
+                                    Some(l.param_store.values.clone())
+                                } else {
+                                    None
+                                }
+                            });
+                        if let (Some(values), Some(effect)) = (values, app.effect_loader.effects.get_mut(eidx)) {
+                            for input in &mut effect.inputs {
+                                if let Some(val) = values.get(input.name()) {
+                                    input.set_default(val);
+                                }
+                            }
+                            if let Some(ref path) = effect.source_path {
+                                if let Ok(json) = serde_json::to_string_pretty(effect) {
+                                    let _ = std::fs::write(path, &json);
+                                    // Update editor paired content if showing this .pfx
+                                    if app.shader_editor.open {
+                                        let pfx_canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+                                        if let Some(ref paired) = app.shader_editor.paired_path {
+                                            let paired_canonical = paired.canonicalize().unwrap_or_else(|_| paired.clone());
+                                            if paired_canonical == pfx_canonical {
+                                                app.shader_editor.paired_content = json.clone();
+                                                app.shader_editor.paired_disk_content = json;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 

@@ -43,6 +43,17 @@ impl ParamDef {
             ParamDef::Point2D { default, .. } => ParamValue::Point2D(*default),
         }
     }
+
+    /// Update the default value from a ParamValue. Type must match (ignored otherwise).
+    pub fn set_default(&mut self, value: &ParamValue) {
+        match (self, value) {
+            (ParamDef::Float { default, .. }, ParamValue::Float(v)) => *default = *v,
+            (ParamDef::Color { default, .. }, ParamValue::Color(v)) => *default = *v,
+            (ParamDef::Bool { default, .. }, ParamValue::Bool(v)) => *default = *v,
+            (ParamDef::Point2D { default, .. }, ParamValue::Point2D(v)) => *default = *v,
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -301,6 +312,38 @@ mod tests {
         match a.lerp(&b, 0.5) {
             ParamValue::Float(v) => assert!(approx_eq(v, 0.5, 1e-6)),
             _ => panic!("expected Float (self)"),
+        }
+    }
+
+    // ---- set_default tests ----
+
+    #[test]
+    fn set_default_float() {
+        let mut def = ParamDef::Float { name: "x".into(), default: 0.5, min: 0.0, max: 1.0 };
+        def.set_default(&ParamValue::Float(0.8));
+        match def.default_value() {
+            ParamValue::Float(v) => assert!(approx_eq(v, 0.8, 1e-6)),
+            _ => panic!("expected Float"),
+        }
+    }
+
+    #[test]
+    fn set_default_color() {
+        let mut def = ParamDef::Color { name: "c".into(), default: [0.0; 4] };
+        def.set_default(&ParamValue::Color([0.1, 0.2, 0.3, 0.4]));
+        match def.default_value() {
+            ParamValue::Color(v) => assert!(approx_eq(v[2], 0.3, 1e-6)),
+            _ => panic!("expected Color"),
+        }
+    }
+
+    #[test]
+    fn set_default_type_mismatch_ignored() {
+        let mut def = ParamDef::Float { name: "x".into(), default: 0.5, min: 0.0, max: 1.0 };
+        def.set_default(&ParamValue::Bool(true)); // wrong type — should be no-op
+        match def.default_value() {
+            ParamValue::Float(v) => assert!(approx_eq(v, 0.5, 1e-6)),
+            _ => panic!("expected Float unchanged"),
         }
     }
 }

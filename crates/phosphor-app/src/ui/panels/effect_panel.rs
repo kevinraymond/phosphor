@@ -219,6 +219,16 @@ fn draw_effect_grid(
 
                 let response = ui.add_sized(Vec2::new(btn_width, btn_height), btn);
 
+                // Particle badge: small dot in top-right corner for effects with particles
+                if effect.particles.is_some() {
+                    let r = 3.0;
+                    let center = egui::pos2(
+                        response.rect.right() - r - 2.0,
+                        response.rect.top() + r + 2.0,
+                    );
+                    ui.painter().circle_filled(center, r, tc.accent);
+                }
+
                 // Left click: load effect (also clears pending delete)
                 if response.clicked() && !is_current {
                     *new_pending = None;
@@ -239,20 +249,31 @@ fn draw_effect_grid(
                     }
                 }
 
-                // Hover text
+                // Hover text (includes particle count for particle effects)
+                let particle_suffix = effect.particles.as_ref().map(|p| {
+                    format!(" [{}]", format_count_short(p.max_count))
+                });
                 let hover_text = if is_armed {
                     "Right-click again to DELETE".to_string()
                 } else if is_builtin_section {
-                    if effect.description.is_empty() {
-                        effect.name.clone()
+                    let base = if effect.description.is_empty() {
+                        &effect.name
                     } else {
-                        effect.description.clone()
+                        &effect.description
+                    };
+                    match &particle_suffix {
+                        Some(s) => format!("{base}{s}"),
+                        None => base.to_string(),
                     }
                 } else {
-                    if effect.description.is_empty() {
-                        format!("{} (right-click to delete)", effect.name)
+                    let base = if effect.description.is_empty() {
+                        &effect.name
                     } else {
-                        format!("{} (right-click to delete)", effect.description)
+                        &effect.description
+                    };
+                    match &particle_suffix {
+                        Some(s) => format!("{base}{s} (right-click to delete)"),
+                        None => format!("{base} (right-click to delete)"),
                     }
                 };
                 response.on_hover_text(hover_text);
@@ -266,5 +287,26 @@ fn truncate_name(name: &str, max_len: usize) -> String {
         name.to_string()
     } else {
         format!("{}\u{2026}", &name[..max_len - 1])
+    }
+}
+
+/// Format a particle count for display: 1000 → "1K", 70000 → "70K", 1000000 → "1M".
+fn format_count_short(count: u32) -> String {
+    if count >= 1_000_000 {
+        let m = count as f32 / 1_000_000.0;
+        if (m - m.round()).abs() < 0.05 {
+            format!("{}M particles", m.round() as u32)
+        } else {
+            format!("{m:.1}M particles")
+        }
+    } else if count >= 1_000 {
+        let k = count as f32 / 1_000.0;
+        if (k - k.round()).abs() < 0.05 {
+            format!("{}K particles", k.round() as u32)
+        } else {
+            format!("{k:.1}K particles")
+        }
+    } else {
+        format!("{count} particles")
     }
 }

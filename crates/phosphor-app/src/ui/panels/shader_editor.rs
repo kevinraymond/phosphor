@@ -428,7 +428,7 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);
 
-                    let save_enabled = state.is_dirty();
+                    let save_enabled = state.is_dirty() || state.paired_is_dirty();
                     let save_btn = ui.add_enabled(
                         save_enabled,
                         egui::Button::new(
@@ -628,7 +628,7 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
     let ctrl_s = ctx.input(|i| {
         i.key_pressed(Key::S) && i.modifiers.matches_exact(Modifiers::COMMAND)
     });
-    if ctrl_s && state.is_dirty() {
+    if ctrl_s && (state.is_dirty() || state.paired_is_dirty()) {
         ctx.data_mut(|d| {
             d.insert_temp(Id::new("shader_editor_save"), true);
         });

@@ -5,6 +5,24 @@
 
 ## Unreleased
 
+### Particle System Hardening for 1M Support
+- **GPU-side buffer zero-init**: replaced CPU `vec![0u8; 128MB]` + `write_buffer` with `encoder.clear_buffer()` — eliminates 128MB+ CPU allocation at 1M particles
+- **Device limits validation**: `max_count` clamped to device `max_storage_buffer_binding_size` with log warning
+- **Bitonic sort auto-cap**: depth sort auto-disabled above 65K particles (would require 210 dispatches/frame at 1M)
+- **Trail buffer safety**: trails disabled above 500K particles; trail length capped to fit device binding limit
+
+### Parameter Persistence
+- **Slider values persist to .pfx**: adjusting parameters in the Parameters panel now updates the `default` values in the .pfx file for user effects, so values survive effect reload and app restart
+- Debounced 500ms save — writes only after slider stops moving, not on every frame
+- Editor's Effect tab stays in sync when params are saved from UI
+
+### Shader Editor
+- **Fix: Save now persists both tabs**: Save (Ctrl+S) writes both the active and paired file when either has unsaved changes — previously only saved the currently active tab, losing edits to the other file
+
+### Effect Browser
+- **Particle badge**: small accent-colored dot in top-right corner of effect buttons that use particles
+- **Particle count in hover**: hover text shows particle count (e.g. "70K particles", "1M particles")
+
 ### Veil Effect
 - Fix feedback blowout on loud audio: particle brightness now decreases with volume, stronger loudness dampening on alpha, audio-reactive decay, lowered feedback clamp
 

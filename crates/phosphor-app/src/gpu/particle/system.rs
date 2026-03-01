@@ -126,15 +126,29 @@ impl ParticleSystem {
         compute_source: &str,
         interaction: bool,
     ) -> Result<Self, String> {
-        let max_particles = def.max_count;
+        // Clamp max_count to device storage buffer binding limit
+        let max_storage = device.limits().max_storage_buffer_binding_size as u64;
         let particle_size = std::mem::size_of::<Particle>() as u64;
+        let device_max_particles = (max_storage / particle_size) as u32;
+        let max_particles = if def.max_count > device_max_particles {
+            log::warn!(
+                "Particle max_count {} exceeds device limit ({} particles @ {}MB max binding). Clamped to {}.",
+                def.max_count,
+                device_max_particles,
+                max_storage / (1024 * 1024),
+                device_max_particles,
+            );
+            device_max_particles
+        } else {
+            def.max_count
+        };
+
         let buffer_size = particle_size * max_particles as u64;
 
-        // Create storage buffers (ping-pong) — zero-initialized to ensure all particles
+        // Create storage buffers (ping-pong) — GPU-cleared to zero to ensure all particles
         // start dead (life=0). Without this, recycled GPU memory from a previous effect's
         // freed buffers can contain alive particles with high brightness, causing blowout
         // through additive blend + feedback accumulation.
-        let zeros = vec![0u8; buffer_size as usize];
         let storage_buffers = [
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("particles-a"),
@@ -149,8 +163,13 @@ impl ParticleSystem {
                 mapped_at_creation: false,
             }),
         ];
-        queue.write_buffer(&storage_buffers[0], 0, &zeros);
-        queue.write_buffer(&storage_buffers[1], 0, &zeros);
+        // GPU-side zero-init — avoids allocating 2×buffer_size on CPU (128MB+ at 1M particles)
+        let mut init_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("particle-init-clear"),
+        });
+        init_encoder.clear_buffer(&storage_buffers[0], 0, None);
+        init_encoder.clear_buffer(&storage_buffers[1], 0, None);
+        queue.submit(std::iter::once(init_encoder.finish()));
 
         // Counter buffer: 4 x u32 = 16 bytes
         // [0]=alive_count, [1]=dead_count, [2]=emit_used, [3]=reserved
@@ -618,6 +637,24 @@ impl ParticleSystem {
         );
 
         // --- Depth sort (optional) ---
+        // Auto-disable above 65K: bitonic sort is O(n log²n) dispatches — at 1M (2^20)
+        // that's 210 dispatches/frame which is too expensive.
+        const MAX_SORT_PARTICLES: u32 = 65536;
+        let depth_sort_enabled = if def.depth_sort && max_particles > MAX_SORT_PARTICLES {
+            log::warn!(
+                "Depth sort auto-disabled: {} particles exceeds {} limit (would need {} dispatches/frame)",
+                max_particles,
+                MAX_SORT_PARTICLES,
+                {
+                    let n = next_power_of_2(max_particles);
+                    let log_n = (n as f32).log2() as u32;
+                    log_n * (log_n + 1) / 2
+                },
+            );
+            false
+        } else {
+            def.depth_sort
+        };
         let (
             sort_key_buffer,
             sort_params_buffer,
@@ -627,7 +664,7 @@ impl ParticleSystem {
             sort_bind_groups,
             sort_passes,
             sort_n,
-        ) = if def.depth_sort {
+        ) = if depth_sort_enabled {
             create_sort_resources(
                 device,
                 max_particles,
@@ -1251,11 +1288,59 @@ impl ParticleSystem {
             return;
         }
 
-        self.trail_length = trail_length;
+        // Cap trail length to stay within device storage buffer binding limit.
+        // Trail buffer = max_particles × trail_length × 16 bytes.
+        // Disable trails entirely above 500K particles to avoid massive allocations.
+        const MAX_TRAIL_PARTICLES: u32 = 500_000;
+        if self.max_particles > MAX_TRAIL_PARTICLES {
+            log::warn!(
+                "Trails disabled: {} particles exceeds {} limit for trail rendering",
+                self.max_particles,
+                MAX_TRAIL_PARTICLES,
+            );
+            self.trail_buffer = None;
+            self.trail_length = 0;
+            self.trail_render_pipeline = None;
+            self.trail_render_bgl = None;
+            self.trail_render_bind_groups = None;
+            self.trail_compute_bgl = None;
+            self.trail_compute_bind_group = None;
+            return;
+        }
+
+        let max_trail_buf: u64 = device.limits().max_storage_buffer_binding_size as u64;
+        let effective_trail_length = {
+            let max_len = max_trail_buf / (self.max_particles as u64 * 16);
+            let capped = trail_length.min(max_len as u32);
+            if capped < trail_length {
+                log::warn!(
+                    "Trail length capped from {} to {} ({}×{}×16 would exceed {}MB binding limit)",
+                    trail_length,
+                    capped,
+                    self.max_particles,
+                    trail_length,
+                    max_trail_buf / (1024 * 1024),
+                );
+            }
+            if capped < 2 {
+                log::warn!("Trail length too short after capping — trails disabled");
+                self.trail_buffer = None;
+                self.trail_length = 0;
+                self.trail_render_pipeline = None;
+                self.trail_render_bgl = None;
+                self.trail_render_bind_groups = None;
+                self.trail_compute_bgl = None;
+                self.trail_compute_bind_group = None;
+                return;
+            }
+            capped
+        };
+
+        self.trail_length = effective_trail_length;
         self.trail_width = trail_width;
 
         // Trail buffer: max_particles * trail_length * 16 bytes (vec4f per point: xy=pos, z=size, w=alpha)
-        let trail_buf_size = self.max_particles as u64 * trail_length as u64 * 16;
+        let trail_buf_size = self.max_particles as u64 * effective_trail_length as u64 * 16;
         let trail_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("particle-trail-buffer"),
             size: trail_buf_size,
