@@ -1,26 +1,39 @@
-// Helix particle simulation — Lorentz force electromagnetic field.
-// F = q(E + v x B) produces helical spiraling trajectories.
-// In 2D+: F_x = q * (E_x + v_y * B_z), F_y = q * (E_y - v_x * B_z)
-// Mixed positive/negative charges create interweaving spirals (DNA-like).
+// Helix particle simulation — particles follow magnetic dipole field lines
+// with helical oscillation. Charge determines helix direction (CW vs CCW).
+// Dipole at (0, -0.7): center particles go straight up, edge particles curve
+// outward and downward, tracing the classic iron-filings pattern.
 // Structs, bindings, and helpers are in particle_lib.wgsl (auto-prepended).
+
+fn dipole_field(pos: vec2f) -> vec2f {
+    let dp = pos - vec2f(0.0, -0.7);
+    let r2 = dot(dp, dp) + 0.02;
+    let r4 = r2 * r2;
+    return vec2f(
+        2.0 * dp.x * dp.y / r4,
+        (dp.y * dp.y - dp.x * dp.x) / r4
+    );
+}
 
 fn emit_particle(idx: u32) -> Particle {
     var p: Particle;
     let seed_base = u.seed + f32(idx) * 13.37;
 
-    // Line emitter at lower area
+    // Line emitter — wide spread to hit outer field lines
     let t = hash(seed_base) * 2.0 - 1.0;
     let pos = u.emitter_pos + vec2f(t * u.emitter_radius, 0.0);
 
-    // Initial velocity: strong upward with some spread
-    let spread = 0.25 + hash(seed_base + 1.0) * 0.4;
-    let angle = 1.5708 + (hash(seed_base + 2.0) - 0.5) * spread;
+    // Initial velocity along local field direction
+    let b = dipole_field(pos);
+    let b_mag = length(b) + 0.001;
+    let b_dir = b / b_mag;
+    // Small upward bias so edge particles launch outward rather than straight down
+    let emit_dir = normalize(b_dir + vec2f(0.0, 0.2));
     let speed = u.initial_speed * (0.8 + 0.4 * hash(seed_base + 3.0));
-    let vel = vec2f(cos(angle), sin(angle)) * speed;
+    let vel = emit_dir * speed;
 
-    // Charge: 50/50 positive/negative
+    // Charge: 50/50 positive/negative — determines helix direction
     let charge = select(-1.0, 1.0, hash(seed_base + 4.0) > 0.5);
-    let mass = 0.6 + hash(seed_base + 5.0) * 0.8;
+    let mass = 0.5 + hash(seed_base + 5.0) * 0.6;
 
     // Color from gradient or charge-based
     var col: vec3f;
@@ -43,7 +56,7 @@ fn emit_particle(idx: u32) -> Particle {
             col = clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0));
         }
     }
-    let brightness = 0.22 + u.rms * 0.10;
+    let brightness = 1.5 + u.rms * 0.5;
     col *= brightness;
 
     let initial_age = hash(seed_base + 9.0) * u.lifetime * 0.05;
@@ -51,7 +64,7 @@ fn emit_particle(idx: u32) -> Particle {
 
     p.pos_life = vec4f(pos, init_size, 1.0);
     p.vel_size = vec4f(vel, 0.0, init_size);
-    p.color = vec4f(col, 0.30 + hash(seed_base + 7.0) * 0.15);
+    p.color = vec4f(col, 0.80 + hash(seed_base + 7.0) * 0.20);
     p.flags = vec4f(initial_age, u.lifetime, charge, mass);
     return p;
 }
@@ -92,49 +105,58 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     var vel = p.vel_size.xy;
     var pos = p.pos_life.xy;
 
-    // Magnetic field B_z — reduced base for wider spirals
-    let b_z = (1.5 + u.bass * 4.0) * (1.0 + u.mid * 0.2);
+    // Local dipole field — NO upward clamp, follow true field geometry
+    let b = dipole_field(pos);
+    let b_mag = length(b) + 0.001;
+    let flow_dir = b / b_mag;
+    let flow_perp = vec2f(-flow_dir.y, flow_dir.x);
 
-    // Electric field E — strong upward drift + oscillating horizontal
-    var e_field = vec2f(sin(u.time * 0.5) * 0.04, 0.20);
+    // Decompose velocity along/across field line
+    let v_along = dot(vel, flow_dir);
+    let v_across = dot(vel, flow_perp);
 
-    // Beat: upward levitation pulse
+    // Target drift speed along field line
+    var target_speed = 0.50 + u.rms * 0.15;
+
+    // Beat: burst of speed
     if u.beat > 0.5 {
-        e_field.y += 0.25;
-        // Also add outward radial push for visual flourish
-        let dir = normalize(pos + vec2f(0.001, 0.001));
-        e_field += dir * 0.15;
+        target_speed += 0.30;
     }
 
-    // Onset: lateral perturbation
+    // Guide particle along field line
+    let guidance = 3.5;
+    let along_accel = (target_speed - v_along) * guidance;
+
+    // Helical oscillation perpendicular to field line
+    let helix_freq = 8.0 + u.bass * 4.0;
+    let helix_amp = 1.0 * (1.0 - u.bass * 0.3);
+    let phase = new_age * helix_freq + charge * 3.14159 + hash(f32(idx) * 7.13) * 6.283;
+    let helix_force = sin(phase) * helix_amp;
+
+    // Cross-field: damping + helix
+    let cross_accel = -v_across * 2.0 + helix_force;
+
+    // Onset: lateral scatter
+    var perturb = vec2f(0.0);
     if u.onset > 0.3 {
-        e_field += vec2f(
-            (hash(f32(idx) * 0.1 + u.time) - 0.5) * u.onset * 0.3,
-            u.onset * 0.1
-        );
+        perturb = flow_perp * (hash(f32(idx) * 0.1 + u.time) - 0.5) * u.onset * 0.4;
     }
 
-    // RMS: slight additional upward drift during loud passages
-    e_field.y += u.rms * 0.08;
-
-    // Lorentz force: F = q(E + v x B) / m
-    let lorentz_x = charge * (e_field.x + vel.y * b_z) / mass;
-    let lorentz_y = charge * (e_field.y - vel.x * b_z) / mass;
-    vel += vec2f(lorentz_x, lorentz_y) * dt;
+    vel += (flow_dir * along_accel + flow_perp * cross_accel + perturb) * dt;
 
     // Light drag
     vel *= 1.0 - (1.0 - u.drag) * dt * 60.0;
 
     let new_pos = pos + vel * dt;
 
-    // Kill if off screen
-    if new_pos.y > 1.3 || abs(new_pos.x) > 1.3 {
+    // Kill if off screen (wide bounds for curving trajectories)
+    if abs(new_pos.y) > 1.3 || abs(new_pos.x) > 2.0 {
         p.pos_life.w = 0.0;
         particles_out[idx] = p;
         return;
     }
 
-    // Size: height-modulated with curve
+    // Size with curve
     let height_frac = clamp((new_pos.y + 1.0) * 0.5, 0.0, 1.0);
     let init_size = p.pos_life.z;
     let base_size = mix(init_size, u.size_end, life_frac * 0.4);
