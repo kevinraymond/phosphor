@@ -292,6 +292,11 @@ impl EffectLoader {
                 shader_files.push(pass.shader.clone());
             }
         }
+        if let Some(ref particles) = effect.particles {
+            if !particles.compute_shader.is_empty() && !shader_files.contains(&particles.compute_shader) {
+                shader_files.push(particles.compute_shader.clone());
+            }
+        }
         for shader_rel in &shader_files {
             let path = self.resolve_shader_path(shader_rel);
             if path.exists() {
