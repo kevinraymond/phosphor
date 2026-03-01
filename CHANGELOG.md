@@ -5,6 +5,15 @@
 
 ## Unreleased
 
+### Chaos Effect Overhaul
+- **Visible Lorenz butterfly**: fixed base rho from 22 (below chaos threshold) to 28 (canonical chaotic regime); particles now trace the iconic butterfly attractor pattern
+- **XZ butterfly projection**: replaced Y-axis rotation with XZ plane view (the classic Lorenz butterfly orientation) plus gentle ±8° tilt oscillation for 3D depth feel
+- **Stable attractor dynamics**: reduced audio modulation of sigma/rho/beta to subtle range (was dramatically reshaping the attractor every frame); fixed `time * audio-varying` rotation bug that caused violent camera jumps
+- **Trail-based visualization**: dim particles (alpha × 0.2) with high trail persistence (decay 0.92) accumulate into visible trajectory lines; clean feedback without twist distortion preserves tight attractor lines
+- **Density increase**: 20K particles at 500/s emit (was 6K at 80/s) for dense attractor coverage
+- **Removed dead params**: attractor_mix, zoom, speed inputs were not wired to compute shader (compute shaders cannot access `param()`)
+- **Brightness fixes**: removed × 0.18 fallback color dim, raised initial alpha 0.3→1.0, unclamped color from 0.5→1.0 max
+
 ### Particle Effect Review & Enhancement
 - **Murmuration** (hero effect): full Boids flocking model with separation, cohesion, and alignment; angular heading smoothing eliminates jitter; alpha blend for opaque bird silhouettes; twilight sky gradient background; depth-based sizing; 15K particles; audio: beat→cohesion spike, bass→disorder, onset→flock split
 - **Coral** (fix): replaced numerical central-difference gradient with analytical derivative of Turing cosine waves; added soft exponential boundary repulsion (no more hard clamp collapse); FBM curl noise for organic diffusion; reduced attraction_strength 2.5→1.2; aspect ratio correction; color gradient and size curve

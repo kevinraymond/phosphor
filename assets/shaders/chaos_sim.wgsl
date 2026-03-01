@@ -1,7 +1,7 @@
 // Chaos particle simulation — Lorenz and Rossler strange attractors.
 // Particles trace attractor trajectories using RK4 integration.
 // 3D position stored in: flags.zw = (x, y), vel_size.z = z
-// Audio-reactive attractor parameters create dramatic bifurcation transitions.
+// Audio-reactive visuals with stable attractor dynamics.
 // Structs, bindings, and helpers are in particle_lib.wgsl (auto-prepended).
 
 // Lorenz attractor: dx/dt = sigma*(y-x), dy/dt = x*(rho-z)-y, dz/dt = x*y - beta*z
@@ -38,25 +38,40 @@ fn rk4_rossler(p: vec3f, dt: f32, a: f32, b: f32, c: f32) -> vec3f {
     return p + (k1 + k2 * 2.0 + k3 * 2.0 + k4) * dt / 6.0;
 }
 
-// 3D projection with Y-axis rotation
-fn project_rotated(p: vec3f, angle: f32, zoom: f32) -> vec2f {
-    let ca = cos(angle);
-    let sa = sin(angle);
-    let rotated = vec3f(p.x * ca + p.z * sa, p.y, -p.x * sa + p.z * ca);
-    // Centered perspective: Lorenz attractor center is roughly (0, 0, rho)
-    let centered = rotated - vec3f(0.0, 0.0, 27.0);
-    let depth = 1.0 / max(1.0 + centered.z * 0.015, 0.3);
-    return vec2f(centered.x, centered.y) * zoom * depth;
+// XZ butterfly projection with slow turntable rotation around screen Y (Lorenz Z).
+// Rotation mixes X and Y while Z stays as screen vertical.
+fn project_butterfly(p: vec3f, rot_angle: f32, tilt: f32, zoom: f32) -> vec2f {
+    // Center on attractor: z≈27 for rho=28
+    let cz = p.z - 27.0;
+
+    // Rotate X-Y plane around Z axis (turntable around screen vertical)
+    let ca = cos(rot_angle);
+    let sa = sin(rot_angle);
+    let rx = p.x * ca - p.y * sa;
+    let ry = p.x * sa + p.y * ca;
+
+    // Gentle tilt around X-axis for depth feel
+    let ct = cos(tilt);
+    let st = sin(tilt);
+    let screen_x = rx;
+    let screen_y = cz * ct - ry * st;
+
+    // Depth from rotated Y component
+    let y_depth = ry * ct + cz * st;
+    let depth = 1.0 / max(1.0 + y_depth * 0.003, 0.7);
+
+    return vec2f(screen_x, screen_y) * zoom * depth;
 }
 
 fn emit_particle(idx: u32) -> Particle {
     var p: Particle;
     let seed_base = u.seed + f32(idx) * 13.37;
 
-    // Start near the Lorenz attractor basin: perturbed from a known point on the attractor
-    let px = (hash(seed_base) - 0.5) * 20.0;
-    let py = (hash(seed_base + 1.0) - 0.5) * 20.0;
-    let pz = hash(seed_base + 2.0) * 30.0 + 10.0;
+    // Start spread across the attractor basin — particles converge onto the butterfly
+    // within a few orbits. Wide spread gets instant coverage of both wings.
+    let px = (hash(seed_base + 1.0) - 0.5) * 30.0;
+    let py = (hash(seed_base + 2.0) - 0.5) * 30.0;
+    let pz = hash(seed_base + 3.0) * 40.0 + 5.0;
 
     // Color from gradient or default warm spectrum
     var col: vec3f;
@@ -69,19 +84,20 @@ fn emit_particle(idx: u32) -> Particle {
         let r_c = abs(hue * 6.0 - 3.0) - 1.0;
         let g_c = 2.0 - abs(hue * 6.0 - 2.0);
         let b_c = 2.0 - abs(hue * 6.0 - 4.0);
-        col = clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0)) * 0.18;
+        col = clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0));
     }
 
     let initial_age = hash(seed_base + 9.0) * u.lifetime * 0.1;
     let init_size = u.initial_size * (0.6 + hash(seed_base + 6.0) * 0.8);
 
-    let rot_angle = u.time * 0.15;
-    let zoom = 0.035 + u.emitter_radius * 0.04;
-    let projected = project_rotated(vec3f(px, py, pz), rot_angle, zoom);
+    let rot_angle = u.time * 0.1;
+    let tilt = sin(u.time * 0.06) * 0.15;
+    let zoom = 0.028;
+    let projected = project_butterfly(vec3f(px, py, pz), rot_angle, tilt, zoom);
 
     p.pos_life = vec4f(projected, init_size, 1.0);
     p.vel_size = vec4f(0.0, 0.0, pz, init_size);
-    p.color = vec4f(col, 0.3);
+    p.color = vec4f(col, 1.0);
     p.flags = vec4f(initial_age, u.lifetime, px, py);
     return p;
 }
@@ -127,15 +143,16 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         return;
     }
 
-    // Audio-reactive Lorenz parameters
-    let sigma = 10.0 + u.centroid * 5.0;
-    let rho = 22.0 + u.bass * 12.0 + u.mid * 4.0;
-    let beta = 2.667 + u.mid * 0.5;
+    // Lorenz parameters — keep close to canonical (10, 28, 8/3) for stable butterfly.
+    // Audio makes subtle modulations, not dramatic shape changes.
+    let sigma = 10.0 + u.centroid * 1.0;
+    let rho = 28.0 + u.bass * 2.0;
+    let beta = 2.667;
 
     // Rossler parameters (only used when mix > 0)
     let rossler_a = 0.2 + u.centroid * 0.1;
     let rossler_b = 0.2;
-    let rossler_c = 5.7 + u.bass * 2.0;
+    let rossler_c = 5.7 + u.bass * 1.0;
 
     let mix_param = u.attraction_strength;
 
@@ -162,14 +179,14 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         }
     }
 
-    // Onset perturbation
-    if u.onset > 0.3 {
+    // Subtle onset perturbation — small nudge, not explosion
+    if u.onset > 0.5 {
         let kick = vec3f(
-            (hash(f32(idx) * 0.1 + u.time) - 0.5) * 3.0,
-            (hash(f32(idx) * 0.2 + u.time) - 0.5) * 3.0,
-            (hash(f32(idx) * 0.3 + u.time) - 0.5) * 3.0
+            (hash(f32(idx) * 0.1 + u.time) - 0.5),
+            (hash(f32(idx) * 0.2 + u.time) - 0.5),
+            (hash(f32(idx) * 0.3 + u.time) - 0.5)
         );
-        pos3d += kick * u.onset * 0.2;
+        pos3d += kick * u.onset * 0.3;
     }
 
     // Soft clamp with damping near boundaries
@@ -182,32 +199,31 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     }
     pos3d = clamp(pos3d, vec3f(-limit), vec3f(limit));
 
-    // Project to 2D with camera rotation
-    let zoom = 0.035 + u.emitter_radius * 0.04;
-    let rot_speed = 0.12 + u.mid * 0.08;
-    let rot_angle = u.time * rot_speed;
-    let projected = project_rotated(pos3d, rot_angle, zoom);
+    // XZ butterfly projection with turntable rotation + gentle tilt
+    let zoom = 0.028;
+    let rot_angle = u.time * 0.1; // ~63s per full rotation
+    let tilt = sin(u.time * 0.06) * 0.15; // ±8° slow rock
+    let projected = project_butterfly(pos3d, rot_angle, tilt, zoom);
 
-    // Depth-based size modulation
-    let ca = cos(rot_angle);
-    let sa = sin(rot_angle);
-    let rotated_z = -pos3d.x * sa + pos3d.z * ca;
-    let depth_norm = clamp((rotated_z + 40.0) / 80.0, 0.0, 1.0);
-    let depth_mod = 0.5 + 0.5 * depth_norm;
+    // Depth-based size modulation (Y-axis is depth in butterfly view)
+    let depth_norm = clamp((pos3d.y + 25.0) / 50.0, 0.0, 1.0);
+    let depth_mod = 0.7 + 0.3 * depth_norm;
 
     let init_size = p.pos_life.z;
     let base_size = mix(init_size, u.size_end, life_frac * 0.4);
-    let size = base_size * depth_mod * eval_size_curve(life_frac) * (1.0 + u.rms * 0.3);
+    let size = base_size * depth_mod * eval_size_curve(life_frac) * (1.0 + u.rms * 0.5);
 
     let fade_in = smoothstep(0.0, 0.05, life_frac);
-    let fade_out = 1.0 - smoothstep(0.8, 1.0, life_frac);
-    let alpha = p.color.a * fade_in * fade_out * depth_mod * eval_opacity_curve(life_frac);
+    let fade_out = 1.0 - smoothstep(0.85, 1.0, life_frac);
+    // Low alpha per particle — trail feedback accumulates into visible lines
+    let alpha = fade_in * fade_out * eval_opacity_curve(life_frac) * 0.2;
 
-    // Color: temperature-based — use z-position for heat coloring
+    // Color: full saturation preserved, trails blend into color
     var col = p.color.rgb;
     let temp = clamp(pos3d.z / 50.0, 0.0, 1.0);
-    col *= 0.7 + temp * 0.6;
-    col = clamp(col, vec3f(0.0), vec3f(0.5));
+    col *= 0.8 + temp * 0.3;
+    col *= 1.0 + u.rms * 0.3;
+    col = clamp(col, vec3f(0.0), vec3f(1.0));
 
     p.flags = vec4f(new_age, max_life, pos3d.x, pos3d.y);
     p.vel_size = vec4f(0.0, 0.0, pos3d.z, size);
