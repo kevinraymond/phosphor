@@ -5,6 +5,18 @@
 
 ## Unreleased
 
+### Veil Effect
+- Fix feedback blowout on loud audio: particle brightness now decreases with volume, stronger loudness dampening on alpha, audio-reactive decay, lowered feedback clamp
+
+### Helix Effect Overhaul
+- **Dipole field-guided particles**: replaced uniform B_z Lorentz force with magnetic dipole field — particles follow curved field lines from emitter, creating visible force field pattern through trails
+- **Helical oscillation**: perpendicular oscillation around field lines (charge-dependent CW/CCW), bass tightens helix frequency
+- **Feedback warps along field**: particle trails flow along magnetic field direction with chromatic aberration, creating persistent field line visualization
+- **Dark background**: replaced overpowering painted field lines with near-black background + very subtle dipole hints; particles are the main visual
+- **Bright particles**: brightness 0.22→0.70, alpha 0.30→0.55, particle size 0.010→0.018; emit rate 100→200 for dense field coverage
+- **Beat burst**: speed pulse along field lines on beat detection; onset scatters particles laterally off field lines
+- **Tuned post-processing**: bloom threshold 0.50→0.35, bloom intensity 0.45→0.60 for force-field glow; brighter saturated color gradient
+
 ### Chaos Effect Overhaul
 - **Visible Lorenz butterfly**: fixed base rho from 22 (below chaos threshold) to 28 (canonical chaotic regime); particles now trace the iconic butterfly attractor pattern
 - **XZ butterfly projection**: replaced Y-axis rotation with XZ plane view (the classic Lorenz butterfly orientation) plus gentle ±8° tilt oscillation for 3D depth feel

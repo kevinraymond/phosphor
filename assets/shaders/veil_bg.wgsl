@@ -19,13 +19,16 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     let prev = feedback(warped_uv);
 
     // Decay from param (trail_decay = param(1))
-    let decay = param(1u);
+    // Faster decay when loud to prevent accumulation blowout
+    let base_decay = param(1u);
+    let loudness = u.rms + u.bass * 0.5;
+    let decay = base_decay * (1.0 - loudness * 0.15);
 
     // Apply decay
     var col = prev.rgb * decay;
 
-    // Raised cap for richer fabric appearance (bloom_threshold handles peak control)
-    col = min(col, vec3f(0.6));
+    // Cap prevents feedback saturation (additive particles fill the screen)
+    col = min(col, vec3f(0.4));
 
     // Gentle horizontal gradient tint based on color_shift param
     let color_shift = param(3u);
