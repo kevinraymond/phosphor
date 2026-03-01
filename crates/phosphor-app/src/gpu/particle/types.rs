@@ -17,39 +17,39 @@ pub struct Particle {
     pub flags: [f32; 4],
 }
 
-/// Particle simulation uniforms: 128 bytes.
+/// Particle simulation uniforms: 384 bytes.
 /// Separate from the main 256-byte ShaderUniforms.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct ParticleUniforms {
-    // Simulation params (16 bytes)
+    // Simulation params (16 bytes) [0..15]
     pub delta_time: f32,
     pub time: f32,
     pub max_particles: u32,
     pub emit_count: u32,
 
-    // Emitter config (16 bytes)
+    // Emitter config (16 bytes) [16..31]
     pub emitter_pos: [f32; 2],
     pub emitter_radius: f32,
-    pub emitter_shape: u32, // 0=point, 1=ring, 2=line, 3=screen
+    pub emitter_shape: u32, // 0=point, 1=ring, 2=line, 3=screen, 4=image, 5=disc, 6=cone
 
-    // Particle defaults (16 bytes)
+    // Particle defaults (16 bytes) [32..47]
     pub lifetime: f32,
     pub initial_speed: f32,
     pub initial_size: f32,
     pub size_end: f32,
 
-    // Forces (16 bytes)
+    // Forces (16 bytes) [48..63]
     pub gravity: [f32; 2],
     pub drag: f32,
     pub turbulence: f32,
 
-    // Attraction (16 bytes)
+    // Attraction (16 bytes) [64..79]
     pub attraction_point: [f32; 2],
     pub attraction_strength: f32,
     pub seed: f32,
 
-    // Audio features (40 bytes = 10 floats)
+    // Audio features (40 bytes = 10 floats) [80..119]
     pub sub_bass: f32,
     pub bass: f32,
     pub mid: f32,
@@ -61,24 +61,63 @@ pub struct ParticleUniforms {
     pub beat: f32,
     pub beat_phase: f32,
 
-    // Resolution (8 bytes) — needed for aspect ratio correction in orbital mechanics
+    // Resolution (8 bytes) [120..127]
     pub resolution: [f32; 2],
     // --- 128 bytes above ---
 
-    // Flow field params (16 bytes)
+    // Flow field params (16 bytes) [128..143]
     pub flow_strength: f32,
     pub flow_scale: f32,
     pub flow_speed: f32,
     pub flow_enabled: f32, // 0.0 or 1.0 (bool as float for GPU)
 
-    // Trail params (16 bytes) — reserved for Phase 1B
+    // Trail params (16 bytes) [144..159]
     pub trail_length: u32,
     pub trail_width: f32,
-    pub _reserved_trail: [f32; 2],
+    pub prev_emitter_pos: [f32; 2], // previous frame emitter position for velocity inheritance
 
-    // Padding to 192 bytes (32 bytes)
-    pub _pad192: [f32; 8],
-    // Total = 192 bytes
+    // --- 160 bytes above ---
+
+    // Wind + vortex (32 bytes) [160..191]
+    pub wind: [f32; 2],
+    pub vortex_center: [f32; 2],
+    pub vortex_strength: f32,
+    pub vortex_radius: f32,
+    pub ground_y: f32,
+    pub ground_bounce: f32,
+
+    // Noise params (16 bytes) [192..207]
+    pub noise_octaves: u32,
+    pub noise_lacunarity: f32,
+    pub noise_persistence: f32,
+    pub noise_mode: u32, // 0=turbulence(abs), 1=curl
+
+    // Emitter enhancements (32 bytes) [208..239]
+    pub emitter_angle: f32,
+    pub emitter_spread: f32,
+    pub speed_variance: f32,
+    pub life_variance: f32,
+    pub size_variance: f32,
+    pub velocity_inherit: f32,
+    pub noise_speed: f32,
+    pub _pad_p2: f32,
+
+    // Lifetime curves (64 bytes) [240..303]
+    pub size_curve: [f32; 8],    // 8-point LUT for size over lifetime
+    pub opacity_curve: [f32; 8], // 8-point LUT for opacity over lifetime
+
+    // Color gradient (32 bytes) [304..335]
+    pub color_gradient: [u32; 8], // up to 8 packed RGBA colors
+
+    // Spin + curve config (16 bytes) [336..351]
+    pub spin_speed: f32,
+    pub gradient_count: u32,
+    pub curve_flags: u32, // bit 0 = size curve, bit 1 = opacity curve
+    pub depth_sort: u32,
+
+    // Padding to 384 bytes (32 bytes) [352..383]
+    pub _pad384: [f32; 8],
+    // Total = 384 bytes
 }
 
 /// Auxiliary particle data: 16 bytes (1 x vec4f).
@@ -213,6 +252,80 @@ pub struct ParticleDef {
     /// Enable spatial hash grid for particle-particle interaction
     #[serde(default)]
     pub interaction: bool,
+
+    // --- Phase 1: Forces ---
+    /// Directional wind force [x, y]
+    #[serde(default)]
+    pub wind: [f32; 2],
+    /// Vortex field center position [x, y]
+    #[serde(default)]
+    pub vortex_center: [f32; 2],
+    /// Vortex rotation strength
+    #[serde(default)]
+    pub vortex_strength: f32,
+    /// Vortex falloff radius
+    #[serde(default = "default_vortex_radius")]
+    pub vortex_radius: f32,
+    /// Ground plane y-level for bounce
+    #[serde(default = "default_ground_y")]
+    pub ground_y: f32,
+    /// Ground bounce restitution (0=passthrough, 1=elastic)
+    #[serde(default)]
+    pub ground_bounce: f32,
+    /// FBM noise octaves (0=legacy hash turbulence)
+    #[serde(default)]
+    pub noise_octaves: u32,
+    /// FBM frequency multiplier per octave
+    #[serde(default = "default_noise_lacunarity")]
+    pub noise_lacunarity: f32,
+    /// FBM amplitude decay per octave
+    #[serde(default = "default_noise_persistence")]
+    pub noise_persistence: f32,
+    /// Noise mode: 0=turbulence(abs), 1=curl
+    #[serde(default)]
+    pub noise_mode: u32,
+    /// Noise animation speed
+    #[serde(default = "default_noise_speed")]
+    pub noise_speed: f32,
+
+    // --- Phase 2: Emitter enhancements ---
+    /// Cone emission direction (radians)
+    #[serde(default)]
+    pub emitter_angle: f32,
+    /// Cone emission half-angle spread (0=omnidirectional)
+    #[serde(default)]
+    pub emitter_spread: f32,
+    /// Speed randomness (0-1)
+    #[serde(default)]
+    pub speed_variance: f32,
+    /// Lifetime randomness (0-1)
+    #[serde(default)]
+    pub life_variance: f32,
+    /// Size randomness (0-1)
+    #[serde(default)]
+    pub size_variance: f32,
+    /// Emitter motion inheritance (0-1)
+    #[serde(default)]
+    pub velocity_inherit: f32,
+
+    // --- Phase 3: Curves + Spin + Color ---
+    /// Size over lifetime curve (8 uniformly-spaced samples, 0-1)
+    #[serde(default)]
+    pub size_curve: Vec<f32>,
+    /// Opacity over lifetime curve (8 uniformly-spaced samples, 0-1)
+    #[serde(default)]
+    pub opacity_curve: Vec<f32>,
+    /// Color gradient over lifetime (hex strings: "#RRGGBB" or "#RRGGBBAA")
+    #[serde(default)]
+    pub color_gradient: Vec<String>,
+    /// Particle spin speed (radians/sec)
+    #[serde(default)]
+    pub spin_speed: f32,
+
+    // --- Phase 4: Sort ---
+    /// Enable depth sorting (only meaningful with blend="alpha")
+    #[serde(default)]
+    pub depth_sort: bool,
 }
 
 fn default_blend() -> String {
@@ -249,6 +362,44 @@ fn default_flow_speed() -> f32 {
 fn default_trail_width() -> f32 {
     0.005
 }
+fn default_vortex_radius() -> f32 {
+    1.0
+}
+fn default_ground_y() -> f32 {
+    -2.0
+}
+fn default_noise_lacunarity() -> f32 {
+    2.0
+}
+fn default_noise_persistence() -> f32 {
+    0.5
+}
+fn default_noise_speed() -> f32 {
+    0.5
+}
+
+/// Parse a hex color string to packed RGBA u32.
+/// Supports "#RRGGBB" (alpha defaults to 0xFF) and "#RRGGBBAA".
+pub fn parse_hex_color(s: &str) -> u32 {
+    let s = s.trim_start_matches('#');
+    let (r, g, b, a) = match s.len() {
+        6 => {
+            let r = u8::from_str_radix(&s[0..2], 16).unwrap_or(0);
+            let g = u8::from_str_radix(&s[2..4], 16).unwrap_or(0);
+            let b = u8::from_str_radix(&s[4..6], 16).unwrap_or(0);
+            (r, g, b, 0xFF)
+        }
+        8 => {
+            let r = u8::from_str_radix(&s[0..2], 16).unwrap_or(0);
+            let g = u8::from_str_radix(&s[2..4], 16).unwrap_or(0);
+            let b = u8::from_str_radix(&s[4..6], 16).unwrap_or(0);
+            let a = u8::from_str_radix(&s[6..8], 16).unwrap_or(0xFF);
+            (r, g, b, a)
+        }
+        _ => (0, 0, 0, 0xFF),
+    };
+    (r as u32) << 24 | (g as u32) << 16 | (b as u32) << 8 | a as u32
+}
 
 #[cfg(test)]
 mod tests {
@@ -260,8 +411,8 @@ mod tests {
     }
 
     #[test]
-    fn particle_uniforms_size_192() {
-        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 192);
+    fn particle_uniforms_size_384() {
+        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 384);
     }
 
     #[test]
@@ -282,5 +433,82 @@ mod tests {
         assert_eq!(def.blend, "additive");
         assert!(def.sprite.is_none());
         assert!(def.image_sample.is_none());
+        // New fields default to disabled
+        assert_eq!(def.wind, [0.0, 0.0]);
+        assert_eq!(def.vortex_strength, 0.0);
+        assert!((def.vortex_radius - 1.0).abs() < 1e-6);
+        assert_eq!(def.ground_bounce, 0.0);
+        assert!((def.ground_y - (-2.0)).abs() < 1e-6);
+        assert_eq!(def.noise_octaves, 0);
+        assert!((def.noise_lacunarity - 2.0).abs() < 1e-6);
+        assert!((def.noise_persistence - 0.5).abs() < 1e-6);
+        assert_eq!(def.noise_mode, 0);
+        assert_eq!(def.emitter_spread, 0.0);
+        assert_eq!(def.speed_variance, 0.0);
+        assert_eq!(def.velocity_inherit, 0.0);
+        assert!(def.size_curve.is_empty());
+        assert!(def.opacity_curve.is_empty());
+        assert!(def.color_gradient.is_empty());
+        assert_eq!(def.spin_speed, 0.0);
+        assert!(!def.depth_sort);
+    }
+
+    #[test]
+    fn particle_def_serde_roundtrip_with_new_fields() {
+        let json = r##"{
+            "emitter": {},
+            "wind": [0.3, 0.0],
+            "vortex_strength": 2.0,
+            "vortex_radius": 0.8,
+            "ground_y": -0.5,
+            "ground_bounce": 0.6,
+            "noise_octaves": 4,
+            "noise_mode": 1,
+            "emitter_spread": 0.5,
+            "speed_variance": 0.3,
+            "size_curve": [1.0, 1.0, 0.8, 0.5, 0.3, 0.1, 0.05, 0.0],
+            "color_gradient": ["#FF4400", "#00AAFF"],
+            "spin_speed": 3.0,
+            "depth_sort": true
+        }"##;
+        let def: ParticleDef = serde_json::from_str(json).unwrap();
+        assert_eq!(def.wind, [0.3, 0.0]);
+        assert!((def.vortex_strength - 2.0).abs() < 1e-6);
+        assert!((def.vortex_radius - 0.8).abs() < 1e-6);
+        assert!((def.ground_y - (-0.5)).abs() < 1e-6);
+        assert!((def.ground_bounce - 0.6).abs() < 1e-6);
+        assert_eq!(def.noise_octaves, 4);
+        assert_eq!(def.noise_mode, 1);
+        assert!((def.emitter_spread - 0.5).abs() < 1e-6);
+        assert_eq!(def.size_curve.len(), 8);
+        assert_eq!(def.color_gradient.len(), 2);
+        assert!((def.spin_speed - 3.0).abs() < 1e-6);
+        assert!(def.depth_sort);
+
+        // Roundtrip
+        let serialized = serde_json::to_string(&def).unwrap();
+        let def2: ParticleDef = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(def, def2);
+    }
+
+    #[test]
+    fn parse_hex_color_rgb() {
+        assert_eq!(parse_hex_color("#FF0000"), 0xFF0000FF);
+        assert_eq!(parse_hex_color("#00FF00"), 0x00FF00FF);
+        assert_eq!(parse_hex_color("#0000FF"), 0x0000FFFF);
+        assert_eq!(parse_hex_color("#FFFFFF"), 0xFFFFFFFF);
+        assert_eq!(parse_hex_color("#000000"), 0x000000FF);
+    }
+
+    #[test]
+    fn parse_hex_color_rgba() {
+        assert_eq!(parse_hex_color("#00FF0080"), 0x00FF0080);
+        assert_eq!(parse_hex_color("#FF000000"), 0xFF000000);
+        assert_eq!(parse_hex_color("#FFFFFFFF"), 0xFFFFFFFF);
+    }
+
+    #[test]
+    fn parse_hex_color_no_hash() {
+        assert_eq!(parse_hex_color("FF0000"), 0xFF0000FF);
     }
 }

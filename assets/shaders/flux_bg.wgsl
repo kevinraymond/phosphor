@@ -21,7 +21,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
 
     // Blend warped and straight feedback for smoother trails
     var trail = mix(clamp(prev.rgb, vec3f(0.0), vec3f(1.0)), clamp(warped_prev.rgb, vec3f(0.0), vec3f(1.0)), 0.6) * decay;
-    trail = min(trail, vec3f(0.50));
+    trail = min(trail, vec3f(0.80));
 
     // Ambient smoke glow based on audio
     let density_param = param(3u);

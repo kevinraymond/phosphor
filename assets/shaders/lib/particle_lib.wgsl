@@ -43,14 +43,51 @@ struct ParticleUniforms {
     flow_speed: f32,
     flow_enabled: f32,
 
-    // Trail params (reserved for Phase 1B)
+    // Trail params
     trail_length: u32,
     trail_width: f32,
-    _reserved_trail: vec2f,
+    prev_emitter_pos: vec2f,
 
-    // Padding to 192 bytes
-    _pad192a: vec4f,
-    _pad192b: vec4f,
+    // Wind + vortex + ground
+    wind: vec2f,
+    vortex_center: vec2f,
+    vortex_strength: f32,
+    vortex_radius: f32,
+    ground_y: f32,
+    ground_bounce: f32,
+
+    // Noise params
+    noise_octaves: u32,
+    noise_lacunarity: f32,
+    noise_persistence: f32,
+    noise_mode: u32,
+
+    // Emitter enhancements
+    emitter_angle: f32,
+    emitter_spread: f32,
+    speed_variance: f32,
+    life_variance: f32,
+    size_variance: f32,
+    velocity_inherit: f32,
+    noise_speed: f32,
+    _pad_p2: f32,
+
+    // Lifetime curves (8-point LUTs)
+    size_curve: array<vec4f, 2>,
+    opacity_curve: array<vec4f, 2>,
+
+    // Color gradient (packed RGBA u32)
+    color_gradient: array<vec4u, 2>,
+
+    // Spin + curve config
+    spin_speed: f32,
+    gradient_count: u32,
+    curve_flags: u32,
+    depth_sort: u32,
+
+    // Padding to 384 bytes
+    _pad384a: vec4f,
+    _pad384b: vec4f,
 }
 
 struct Particle {
@@ -186,4 +223,195 @@ fn emit_claim() -> u32 {
 fn mark_alive(idx: u32) {
     let pos = atomicAdd(&counters[0], 1u);
     alive_indices_out[pos] = idx;
+}
+
+// --- FBM noise + curl noise ---
+
+// 2D curl noise: rotated gradient of scalar noise field.
+// Returns divergence-free velocity from phosphor_noise2 (auto-prepended).
+fn curl_noise_2d(p: vec2f) -> vec2f {
+    let eps = 0.01;
+    let dx = phosphor_noise2(p + vec2f(eps, 0.0)) - phosphor_noise2(p - vec2f(eps, 0.0));
+    let dy = phosphor_noise2(p + vec2f(0.0, eps)) - phosphor_noise2(p - vec2f(0.0, eps));
+    return vec2f(dy, -dx) / (2.0 * eps);
+}
+
+// FBM curl noise with configurable octaves.
+fn fbm_curl_2d(p: vec2f, octaves: u32, lacunarity: f32, persistence: f32) -> vec2f {
+    var result = vec2f(0.0);
+    var freq = 1.0;
+    var amp = 1.0;
+    var total_amp = 0.0;
+    for (var i = 0u; i < octaves; i++) {
+        result += curl_noise_2d(p * freq) * amp;
+        total_amp += amp;
+        freq *= lacunarity;
+        amp *= persistence;
+    }
+    return result / max(total_amp, 0.001);
+}
+
+// FBM turbulence (absolute value noise) with configurable octaves.
+fn fbm_turbulence_2d(p: vec2f, octaves: u32, lacunarity: f32, persistence: f32) -> vec2f {
+    var result = vec2f(0.0);
+    var freq = 1.0;
+    var amp = 1.0;
+    var total_amp = 0.0;
+    for (var i = 0u; i < octaves; i++) {
+        let n1 = abs(phosphor_noise2(p * freq)) * 2.0 - 1.0;
+        let n2 = abs(phosphor_noise2(p * freq + vec2f(31.7, 47.3))) * 2.0 - 1.0;
+        result += vec2f(n1, n2) * amp;
+        total_amp += amp;
+        freq *= lacunarity;
+        amp *= persistence;
+    }
+    return result / max(total_amp, 0.001);
+}
+
+// Apply all builtin forces to a velocity. Call from simulation shaders.
+// Applies: gravity → wind → drag → noise (FBM or legacy hash) → attraction → vortex → flow field.
+fn apply_builtin_forces(pos: vec2f, vel: vec2f, dt: f32) -> vec2f {
+    var v = vel;
+
+    // Gravity
+    v += u.gravity * dt;
+
+    // Wind
+    v += u.wind * dt;
+
+    // Drag
+    v *= pow(u.drag, dt * 60.0);
+
+    // Noise-based turbulence
+    if u.noise_octaves > 0u {
+        let noise_pos = pos * 3.0 + vec2f(u.time * u.noise_speed);
+        if u.noise_mode == 1u {
+            // Curl noise (divergence-free)
+            v += fbm_curl_2d(noise_pos, u.noise_octaves, u.noise_lacunarity, u.noise_persistence) * u.turbulence * dt;
+        } else {
+            // Turbulence (abs noise)
+            v += fbm_turbulence_2d(noise_pos, u.noise_octaves, u.noise_lacunarity, u.noise_persistence) * u.turbulence * dt;
+        }
+    } else if u.turbulence > 0.0 {
+        // Legacy hash turbulence (backward compat)
+        let turb_seed = pos * 3.0 + vec2f(u.time * 0.5);
+        let turb = vec2f(
+            hash2(turb_seed) - 0.5,
+            hash2(turb_seed + vec2f(17.0)) - 0.5
+        ) * u.turbulence * dt;
+        v += turb;
+    }
+
+    // Attraction to point
+    if u.attraction_strength != 0.0 {
+        let to_target = u.attraction_point - pos;
+        let dist = length(to_target);
+        if dist > 0.001 {
+            v += normalize(to_target) * u.attraction_strength * dt;
+        }
+    }
+
+    // Vortex field
+    if u.vortex_strength != 0.0 {
+        let to_center = pos - u.vortex_center;
+        let dist = length(to_center);
+        if dist > 0.001 {
+            let falloff = smoothstep(u.vortex_radius, 0.0, dist);
+            let tangent = vec2f(-to_center.y, to_center.x) / dist;
+            v += tangent * u.vortex_strength * falloff * dt;
+        }
+    }
+
+    // Flow field (3D texture)
+    v += sample_flow_field(pos);
+
+    return v;
+}
+
+// Apply ground bounce. Returns vec4f(pos.xy, vel.xy).
+fn apply_ground_bounce(pos: vec2f, vel: vec2f) -> vec4f {
+    var p = pos;
+    var v = vel;
+    if p.y < u.ground_y && v.y < 0.0 {
+        p.y = u.ground_y + (u.ground_y - p.y) * u.ground_bounce;
+        v.y = -v.y * u.ground_bounce;
+        v.x *= 0.95; // friction on bounce
+    }
+    return vec4f(p, v);
+}
+
+// --- Lifetime curve helpers ---
+
+// Sample an 8-point LUT stored across two vec4f values.
+fn sample_curve_lut(t: f32, lut_a: vec4f, lut_b: vec4f) -> f32 {
+    let tc = clamp(t, 0.0, 0.999);
+    let idx_f = tc * 7.0;
+    let idx = u32(idx_f);
+    let frac = idx_f - f32(idx);
+
+    // Read values from the two vec4f (indices 0-3 in lut_a, 4-7 in lut_b)
+    var v0: f32;
+    var v1: f32;
+    switch idx {
+        case 0u: { v0 = lut_a.x; v1 = lut_a.y; }
+        case 1u: { v0 = lut_a.y; v1 = lut_a.z; }
+        case 2u: { v0 = lut_a.z; v1 = lut_a.w; }
+        case 3u: { v0 = lut_a.w; v1 = lut_b.x; }
+        case 4u: { v0 = lut_b.x; v1 = lut_b.y; }
+        case 5u: { v0 = lut_b.y; v1 = lut_b.z; }
+        case 6u: { v0 = lut_b.z; v1 = lut_b.w; }
+        default: { v0 = lut_b.w; v1 = lut_b.w; }
+    }
+    return mix(v0, v1, frac);
+}
+
+// Evaluate size curve. Returns 1.0 if disabled (neutral multiplier).
+fn eval_size_curve(life_frac: f32) -> f32 {
+    if (u.curve_flags & 1u) == 0u { return 1.0; }
+    return sample_curve_lut(life_frac, u.size_curve[0], u.size_curve[1]);
+}
+
+// Evaluate opacity curve. Returns 1.0 if disabled (neutral multiplier).
+fn eval_opacity_curve(life_frac: f32) -> f32 {
+    if (u.curve_flags & 2u) == 0u { return 1.0; }
+    return sample_curve_lut(life_frac, u.opacity_curve[0], u.opacity_curve[1]);
+}
+
+// Unpack a packed RGBA u32 to vec4f (0-1 range).
+fn unpack_color(packed: u32) -> vec4f {
+    let r = f32((packed >> 24u) & 0xFFu) / 255.0;
+    let g = f32((packed >> 16u) & 0xFFu) / 255.0;
+    let b = f32((packed >> 8u) & 0xFFu) / 255.0;
+    let a = f32(packed & 0xFFu) / 255.0;
+    return vec4f(r, g, b, a);
+}
+
+// Sample color gradient over lifetime. Returns original color if no gradient defined.
+fn eval_color_gradient(life_frac: f32) -> vec4f {
+    if u.gradient_count <= 0u { return vec4f(1.0); }
+    if u.gradient_count == 1u { return unpack_color(u.color_gradient[0].x); }
+
+    let tc = clamp(life_frac, 0.0, 0.999);
+    let max_idx = f32(u.gradient_count - 1u);
+    let idx_f = tc * max_idx;
+    let idx = u32(idx_f);
+    let frac = idx_f - f32(idx);
+
+    // Read packed colors from array<vec4u, 2> (indices 0-3 in [0], 4-7 in [1])
+    let c0 = unpack_color(read_gradient(idx));
+    let c1 = unpack_color(read_gradient(min(idx + 1u, u.gradient_count - 1u)));
+    return mix(c0, c1, frac);
+}
+
+// Read gradient color at index from packed array<vec4u, 2>.
+fn read_gradient(idx: u32) -> u32 {
+    let vec_idx = idx / 4u;
+    let comp_idx = idx % 4u;
+    let v = u.color_gradient[vec_idx];
+    switch comp_idx {
+        case 0u: { return v.x; }
+        case 1u: { return v.y; }
+        case 2u: { return v.z; }
+        default: { return v.w; }
+    }
 }

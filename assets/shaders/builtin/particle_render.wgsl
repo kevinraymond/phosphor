@@ -64,7 +64,20 @@ fn vs_main(
     let size = p.vel_size.w;
     // Correct aspect ratio so particles are circular
     let aspect = ru.resolution.x / ru.resolution.y;
-    let offset = corner * size * vec2f(1.0 / aspect, 1.0);
+
+    // Spin rotation: pos_life.z holds accumulated spin angle
+    var rotated_corner = corner;
+    let spin_angle = p.pos_life.z;
+    if spin_angle != 0.0 {
+        let ca = cos(spin_angle);
+        let sa = sin(spin_angle);
+        rotated_corner = vec2f(
+            corner.x * ca - corner.y * sa,
+            corner.x * sa + corner.y * ca
+        );
+    }
+
+    let offset = rotated_corner * size * vec2f(1.0 / aspect, 1.0);
 
     let pos = p.pos_life.xy + offset;
     out.position = vec4f(pos, 0.0, 1.0);

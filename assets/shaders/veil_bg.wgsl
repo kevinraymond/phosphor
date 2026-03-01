@@ -24,8 +24,8 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     // Apply decay
     var col = prev.rgb * decay;
 
-    // Hard cap — very tight for 6000 additive particles covering the whole screen
-    col = min(col, vec3f(0.2));
+    // Raised cap for richer fabric appearance (bloom_threshold handles peak control)
+    col = min(col, vec3f(0.6));
 
     // Gentle horizontal gradient tint based on color_shift param
     let color_shift = param(3u);

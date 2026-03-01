@@ -19,7 +19,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     let warped_prev = feedback(clamp(warped_uv, vec2f(0.001), vec2f(0.999)));
 
     let trail = mix(prev.rgb, warped_prev.rgb, 0.4) * decay;
-    let result = min(trail, vec3f(1.5));
+    let result = min(trail, vec3f(0.8));
     let alpha = max(result.r, max(result.g, result.b)) * 2.0;
     return vec4f(result, clamp(alpha, 0.0, 1.0));
 }

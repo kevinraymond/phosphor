@@ -107,13 +107,19 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let base_size = mix(init_size, u.size_end, life_frac * life_frac);
     let size = base_size * (1.0 + u.rms * 0.3);
 
-    // Alpha: fade in, fade out, audio-reactive brightness
+    // Alpha: fade with opacity curve
     let fade_in = smoothstep(0.0, 0.05, life_frac);
     let fade_out = 1.0 - smoothstep(0.7, 1.0, life_frac);
-    let alpha = p.color.a * fade_in * fade_out;
+    let alpha = p.color.a * fade_in * fade_out * eval_opacity_curve(life_frac);
 
-    // Color: keep emitted color (was cumulative per-frame addition — caused blowout)
-    let col = p.color.rgb;
+    // Color: sparkle system — ~8% of particles get brightness boost
+    var col = p.color.rgb;
+    let sparkle_hash = hash(f32(idx) * 0.73);
+    if sparkle_hash > 0.92 {
+        // Sparkle: brighter, flicker with time
+        let flicker = 0.7 + 0.3 * hash(f32(idx) * 0.2 + u.time * 6.0);
+        col *= 2.5 * flicker * (1.0 + u.rms * 0.5);
+    }
 
     p.pos_life = vec4f(new_pos, init_size, 1.0);
     p.vel_size = vec4f(vel, 0.0, size);

@@ -89,6 +89,16 @@ pub struct ParticleSystem {
     // Spatial hash grid for particle-particle interaction
     spatial_hash: Option<SpatialHashGrid>,
 
+    // Depth sort (bitonic merge sort on alive indices by particle size)
+    sort_key_buffer: Option<wgpu::Buffer>,
+    sort_params_buffer: Option<wgpu::Buffer>,
+    sort_keygen_pipeline: Option<ComputePipeline>,
+    sort_keygen_bind_groups: Option<[BindGroup; 2]>,
+    sort_pipeline: Option<ComputePipeline>,
+    sort_bind_groups: Option<[BindGroup; 2]>,
+    sort_passes: Vec<(u32, u32)>, // (block_size, sub_block_size) per pass
+    sort_n: u32,                   // next power of 2 >= max_particles
+
     // Placeholder empty BGL + bind group for padding contiguous bind group indices
     empty_bgl: BindGroupLayout,
     empty_bind_group: BindGroup,
@@ -607,6 +617,28 @@ impl ParticleSystem {
             &alive_index_buffers,
         );
 
+        // --- Depth sort (optional) ---
+        let (
+            sort_key_buffer,
+            sort_params_buffer,
+            sort_keygen_pipeline,
+            sort_keygen_bind_groups,
+            sort_pipeline,
+            sort_bind_groups,
+            sort_passes,
+            sort_n,
+        ) = if def.depth_sort {
+            create_sort_resources(
+                device,
+                max_particles,
+                &counter_buffer,
+                &storage_buffers,
+                &alive_index_buffers,
+            )
+        } else {
+            (None, None, None, None, None, None, Vec::new(), 0)
+        };
+
         Ok(Self {
             max_particles,
             uniforms: bytemuck::Zeroable::zeroed(),
@@ -651,6 +683,14 @@ impl ParticleSystem {
             trail_prepare_indirect_pipeline: None,
             trail_prepare_indirect_bind_group: None,
             spatial_hash,
+            sort_key_buffer,
+            sort_params_buffer,
+            sort_keygen_pipeline,
+            sort_keygen_bind_groups,
+            sort_pipeline,
+            sort_bind_groups,
+            sort_passes,
+            sort_n,
             empty_bgl,
             empty_bind_group,
             counter_readback: device.create_buffer(&wgpu::BufferDescriptor {
@@ -759,6 +799,9 @@ impl ParticleSystem {
         self.uniforms.max_particles = self.max_particles;
         self.uniforms.emit_count = emit_count;
 
+        // Track previous emitter position for velocity inheritance
+        self.uniforms.prev_emitter_pos = self.uniforms.emitter_pos;
+
         // Emitter config from def
         self.uniforms.emitter_pos = self.def.emitter.position;
         self.uniforms.emitter_radius = self.def.emitter.radius;
@@ -788,6 +831,53 @@ impl ParticleSystem {
         // Trail params
         self.uniforms.trail_length = self.trail_length;
         self.uniforms.trail_width = self.trail_width;
+
+        // Wind + vortex + ground
+        self.uniforms.wind = self.def.wind;
+        self.uniforms.vortex_center = self.def.vortex_center;
+        self.uniforms.vortex_strength = self.def.vortex_strength;
+        self.uniforms.vortex_radius = self.def.vortex_radius;
+        self.uniforms.ground_y = self.def.ground_y;
+        self.uniforms.ground_bounce = self.def.ground_bounce;
+
+        // Noise params
+        self.uniforms.noise_octaves = self.def.noise_octaves;
+        self.uniforms.noise_lacunarity = self.def.noise_lacunarity;
+        self.uniforms.noise_persistence = self.def.noise_persistence;
+        self.uniforms.noise_mode = self.def.noise_mode;
+        self.uniforms.noise_speed = self.def.noise_speed;
+
+        // Emitter enhancements
+        self.uniforms.emitter_angle = self.def.emitter_angle;
+        self.uniforms.emitter_spread = self.def.emitter_spread;
+        self.uniforms.speed_variance = self.def.speed_variance;
+        self.uniforms.life_variance = self.def.life_variance;
+        self.uniforms.size_variance = self.def.size_variance;
+        self.uniforms.velocity_inherit = self.def.velocity_inherit;
+
+        // Lifetime curves (pack Vec<f32> into [f32; 8] LUTs)
+        self.uniforms.size_curve = pack_curve_lut(&self.def.size_curve);
+        self.uniforms.opacity_curve = pack_curve_lut(&self.def.opacity_curve);
+        self.uniforms.curve_flags = 0;
+        if !self.def.size_curve.is_empty() {
+            self.uniforms.curve_flags |= 1;
+        }
+        if !self.def.opacity_curve.is_empty() {
+            self.uniforms.curve_flags |= 2;
+        }
+
+        // Color gradient (pack hex strings into [u32; 8])
+        self.uniforms.gradient_count = self.def.color_gradient.len().min(8) as u32;
+        self.uniforms.color_gradient = [0u32; 8];
+        for (i, hex) in self.def.color_gradient.iter().take(8).enumerate() {
+            self.uniforms.color_gradient[i] = super::types::parse_hex_color(hex);
+        }
+
+        // Spin
+        self.uniforms.spin_speed = self.def.spin_speed;
+
+        // Depth sort
+        self.uniforms.depth_sort = if self.def.depth_sort { 1 } else { 0 };
 
         self.render_uniforms.resolution = resolution;
         self.render_uniforms.time = time;
@@ -857,6 +947,54 @@ impl ParticleSystem {
                 pass.set_bind_group(3, &hash.query_bind_group, &[]);
             }
             pass.dispatch_workgroups(workgroups, 1, 1);
+        }
+
+        // 1b. Depth sort (if enabled): keygen then bitonic sort passes
+        if let (
+            Some(keygen_pipeline),
+            Some(keygen_bgs),
+            Some(sort_pl),
+            Some(sort_bgs),
+            Some(params_buf),
+        ) = (
+            &self.sort_keygen_pipeline,
+            &self.sort_keygen_bind_groups,
+            &self.sort_pipeline,
+            &self.sort_bind_groups,
+            &self.sort_params_buffer,
+        ) {
+            let sort_workgroups = (self.sort_n + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            let min_align = 256u64;
+
+            // Write all sort pass parameters (static data, could cache but tiny)
+            for (i, &(block_size, sub_block_size)) in self.sort_passes.iter().enumerate() {
+                let offset = i as u64 * min_align;
+                let params: [u32; 4] = [block_size, sub_block_size, self.sort_n, 0];
+                queue.write_buffer(params_buf, offset, bytemuck::cast_slice(&params));
+            }
+
+            // Key generation pass
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("particle-sort-keygen"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(keygen_pipeline);
+                pass.set_bind_group(0, &keygen_bgs[self.current], &[]);
+                pass.dispatch_workgroups(sort_workgroups, 1, 1);
+            }
+
+            // Bitonic sort passes (each reads from pre-computed params buffer at dynamic offset)
+            for (i, _) in self.sort_passes.iter().enumerate() {
+                let offset = (i as u64 * min_align) as u32;
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("particle-sort-step"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(sort_pl);
+                pass.set_bind_group(0, &sort_bgs[self.current], &[offset]);
+                pass.dispatch_workgroups(sort_workgroups, 1, 1);
+            }
         }
 
         // 2. Prepare indirect draw args (reads alive_count from counters, writes DrawIndirectArgs)
@@ -1507,6 +1645,29 @@ fn create_sprite_bind_group(
     })
 }
 
+/// Pack a variable-length curve into a fixed [f32; 8] LUT.
+/// Empty input → all zeros. Shorter input is stretched, longer is truncated.
+fn pack_curve_lut(values: &[f32]) -> [f32; 8] {
+    if values.is_empty() {
+        return [0.0; 8];
+    }
+    let mut lut = [0.0f32; 8];
+    if values.len() == 1 {
+        lut.fill(values[0]);
+        return lut;
+    }
+    // Resample to 8 points via linear interpolation
+    for i in 0..8 {
+        let t = i as f32 / 7.0;
+        let src_idx = t * (values.len() - 1) as f32;
+        let lo = (src_idx as usize).min(values.len() - 1);
+        let hi = (lo + 1).min(values.len() - 1);
+        let frac = src_idx - lo as f32;
+        lut[i] = values[lo] * (1.0 - frac) + values[hi] * frac;
+    }
+    lut
+}
+
 fn create_flow_field_bind_group(
     device: &Device,
     layout: &BindGroupLayout,
@@ -1733,4 +1894,285 @@ fn cs_main() {{
     });
 
     (pipeline, bg)
+}
+
+/// Compute bitonic sort pass parameters: (block_size, sub_block_size) for each step.
+fn bitonic_sort_passes(n: u32) -> Vec<(u32, u32)> {
+    let mut passes = Vec::new();
+    let mut k = 2u32;
+    while k <= n {
+        let mut j = k / 2;
+        while j > 0 {
+            passes.push((k, j));
+            j /= 2;
+        }
+        k *= 2;
+    }
+    passes
+}
+
+/// Next power of 2 >= n.
+fn next_power_of_2(n: u32) -> u32 {
+    if n <= 1 {
+        return 1;
+    }
+    1u32 << (32 - (n - 1).leading_zeros())
+}
+
+/// Create all GPU resources for depth-sorted particle rendering.
+#[allow(clippy::type_complexity)]
+fn create_sort_resources(
+    device: &Device,
+    max_particles: u32,
+    counter_buffer: &wgpu::Buffer,
+    storage_buffers: &[wgpu::Buffer; 2],
+    alive_index_buffers: &[wgpu::Buffer; 2],
+) -> (
+    Option<wgpu::Buffer>,          // sort_key_buffer
+    Option<wgpu::Buffer>,          // sort_params_buffer
+    Option<ComputePipeline>,       // sort_keygen_pipeline
+    Option<[BindGroup; 2]>,        // sort_keygen_bind_groups
+    Option<ComputePipeline>,       // sort_pipeline
+    Option<[BindGroup; 2]>,        // sort_bind_groups
+    Vec<(u32, u32)>,               // sort_passes
+    u32,                           // sort_n
+) {
+    let sort_n = next_power_of_2(max_particles);
+    let passes = bitonic_sort_passes(sort_n);
+
+    // Sort key buffer: f32 per slot (padded to sort_n)
+    let sort_key_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("particle-sort-keys"),
+        size: sort_n as u64 * 4,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    // Sort params buffer: one 16-byte entry per pass, 256-byte aligned for dynamic offsets
+    let min_align = 256u64;
+    let params_buffer_size = passes.len() as u64 * min_align;
+    let sort_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("particle-sort-params"),
+        size: params_buffer_size.max(min_align), // at least one entry
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    // Write all pass parameters at creation time
+    {
+        let mut data = vec![0u8; params_buffer_size as usize];
+        for (i, &(block_size, sub_block_size)) in passes.iter().enumerate() {
+            let offset = i * min_align as usize;
+            let params: [u32; 4] = [block_size, sub_block_size, sort_n, 0];
+            data[offset..offset + 16].copy_from_slice(bytemuck::cast_slice(&params));
+        }
+        // Note: buffer write happens via queue in dispatch, but we can init here via mapped_at_creation
+        // Actually, we'll write in the dispatch path. Skip for now — the buffer is zero-initialized.
+        // We write all params once in the calling code after creation.
+        // For simplicity, store the data and write it later.
+        // Actually, we need queue here. Let's defer writing to the first dispatch.
+        // Instead, store passes for CPU-side reference and write per-frame.
+        // UPDATE: Actually, the params are static — we can write them at creation if we have the queue.
+        // Since we don't have queue in this function, we'll handle it differently.
+        let _ = data; // Params written at first dispatch
+    }
+
+    // --- Keygen pipeline ---
+    let keygen_source = include_str!("../../../../../assets/shaders/builtin/particle_sort_keygen.wgsl");
+    let keygen_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("particle-sort-keygen-shader"),
+        source: wgpu::ShaderSource::Wgsl(keygen_source.into()),
+    });
+
+    let keygen_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: Some("sort-keygen-bgl"),
+        entries: &[
+            BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 1,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 2,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 3,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ],
+    });
+
+    let keygen_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("particle-sort-keygen"),
+        layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("sort-keygen-layout"),
+            bind_group_layouts: &[&keygen_bgl],
+            push_constant_ranges: &[],
+        })),
+        module: &keygen_shader,
+        entry_point: Some("cs_main"),
+        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        cache: None,
+    });
+
+    // Keygen bind groups: one per ping-pong state
+    // After sim, output particles are in storage_buffers[1-current], alive_indices in alive_index_buffers[1-current]
+    // But keygen runs before flip, so output = [1-current]
+    // bg[0] is for when current=0 (output in buffers[1])
+    // bg[1] is for when current=1 (output in buffers[0])
+    let keygen_bind_groups = [
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some("sort-keygen-bg-0"),
+            layout: &keygen_bgl,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: counter_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 1, resource: storage_buffers[1].as_entire_binding() },
+                BindGroupEntry { binding: 2, resource: alive_index_buffers[1].as_entire_binding() },
+                BindGroupEntry { binding: 3, resource: sort_key_buffer.as_entire_binding() },
+            ],
+        }),
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some("sort-keygen-bg-1"),
+            layout: &keygen_bgl,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: counter_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 1, resource: storage_buffers[0].as_entire_binding() },
+                BindGroupEntry { binding: 2, resource: alive_index_buffers[0].as_entire_binding() },
+                BindGroupEntry { binding: 3, resource: sort_key_buffer.as_entire_binding() },
+            ],
+        }),
+    ];
+
+    // --- Sort pipeline ---
+    let sort_source = include_str!("../../../../../assets/shaders/builtin/particle_sort.wgsl");
+    let sort_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("particle-sort-shader"),
+        source: wgpu::ShaderSource::Wgsl(sort_source.into()),
+    });
+
+    let sort_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: Some("sort-bgl"),
+        entries: &[
+            BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: wgpu::BufferSize::new(16),
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 1,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 2,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ],
+    });
+
+    let sort_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("particle-sort"),
+        layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("sort-layout"),
+            bind_group_layouts: &[&sort_bgl],
+            push_constant_ranges: &[],
+        })),
+        module: &sort_shader,
+        entry_point: Some("cs_main"),
+        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        cache: None,
+    });
+
+    // Sort bind groups: one per alive_index buffer
+    // bg[0] is for when current=0 (alive_indices output in buffers[1])
+    // bg[1] is for when current=1 (alive_indices output in buffers[0])
+    let sort_bind_groups = [
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some("sort-bg-0"),
+            layout: &sort_bgl,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &sort_params_buffer,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(16),
+                    }),
+                },
+                BindGroupEntry { binding: 1, resource: sort_key_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 2, resource: alive_index_buffers[1].as_entire_binding() },
+            ],
+        }),
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some("sort-bg-1"),
+            layout: &sort_bgl,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &sort_params_buffer,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(16),
+                    }),
+                },
+                BindGroupEntry { binding: 1, resource: sort_key_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 2, resource: alive_index_buffers[0].as_entire_binding() },
+            ],
+        }),
+    ];
+
+    (
+        Some(sort_key_buffer),
+        Some(sort_params_buffer),
+        Some(keygen_pipeline),
+        Some(keygen_bind_groups),
+        Some(sort_pipeline),
+        Some(sort_bind_groups),
+        passes,
+        sort_n,
+    )
 }

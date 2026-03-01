@@ -89,8 +89,8 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let displacement = dist - orbit_radius;
     screen_vel += dir_to_center * displacement * 12.0 * dt;
 
-    // 2. Heavy radial damping — kill oscillation immediately
-    screen_vel -= dir_to_center * radial_vel * 8.0 * dt;
+    // 2. Moderate radial damping — allows wider excursions
+    screen_vel -= dir_to_center * radial_vel * 4.5 * dt;
 
     // 3. Drive tangential speed toward orbital speed (preserve direction)
     let orbital_speed = u.initial_speed * (1.0 + u.mid * 0.3);
@@ -105,9 +105,9 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     if u.onset > 0.3 {
         screen_vel -= dir_to_center * u.onset * 0.1;
     }
-    // Extra kick punch on beat
+    // Beat: orbit expansion burst
     if u.beat > 0.5 {
-        screen_vel -= dir_to_center * 0.15;
+        screen_vel -= dir_to_center * 0.2;
     }
 
     // Subtle turbulence

@@ -8,8 +8,8 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     let decay = param(0u);
     let prev = feedback(uv);
     var trail = clamp(prev.rgb, vec3f(0.0), vec3f(1.0)) * decay;
-    // Hard cap — prevents additive accumulation blowout with screen emitter
-    trail = min(trail, vec3f(0.50));
+    // Raised cap for brighter pattern visibility
+    trail = min(trail, vec3f(0.85));
 
     // Visualization of Chladni nodal line pattern
     let scale_param = param(1u);
@@ -18,7 +18,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     let pi = 3.14159;
     let chladni = cos(n * pi * p.x) * cos(m * pi * p.y) - cos(m * pi * p.x) * cos(n * pi * p.y);
     let line_dist = abs(chladni);
-    let line_glow = exp(-line_dist * 12.0) * (0.12 + 0.15 * scale_param) * (0.5 + u.rms * 1.0);
+    let line_glow = exp(-line_dist * 18.0) * (0.15 + 0.18 * scale_param) * (0.5 + u.rms * 1.0);
     let bg_color = vec3f(0.15, 0.2, 0.35) * line_glow;
 
     let center = uv - 0.5;

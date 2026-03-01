@@ -1,4 +1,4 @@
-// Vortex background pass — gravitational lensing UV distortion + dark void at center.
+// Vortex background pass — gravitational lensing with chromatic aberration + dark void.
 // Particles render on top via LoadOp::Load.
 
 @fragment
@@ -7,47 +7,57 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     let uv = frag_coord.xy / res;
     let aspect = res.x / res.y;
 
-    // Center-relative coordinates (aspect-corrected)
     let centered = (uv - 0.5) * vec2f(aspect, 1.0);
     let dist = length(centered);
     let dir = select(normalize(centered), vec2f(0.0, 1.0), dist < 0.001);
 
-    // Lensing param
     let lensing = param(4u);
-    let event_horizon = param(2u) * 0.15; // scaled to reasonable screen radius
+    let event_horizon = param(2u) * 0.15;
 
-    // Radial pull: warp UVs toward center (stronger near center)
+    // Radial pull and tangential twist
     let radial_strength = lensing * 0.02 / (dist + 0.1);
-    // Tangential twist: rotate UVs around center
     let tangent = vec2f(-dir.y, dir.x);
     let tangential_strength = lensing * 0.01 / (dist + 0.15);
 
-    let warp = (dir * radial_strength + tangent * tangential_strength) * vec2f(1.0 / aspect, 1.0);
-    let warped_uv = uv + warp;
+    let base_warp = dir * radial_strength + tangent * tangential_strength;
+    let warp_scale = vec2f(1.0 / aspect, 1.0);
 
-    // Read previous frame with lensed UVs
-    let prev = feedback(warped_uv);
+    // Chromatic aberration: separate R/G/B offsets near center
+    let ca_strength = lensing * 0.003 / (dist + 0.15);
+    let ca_offset = dir * ca_strength * warp_scale;
 
-    // Decay from param (trail_decay = param(0))
+    let warp_r = uv + (base_warp * 1.08) * warp_scale + ca_offset;
+    let warp_g = uv + base_warp * warp_scale;
+    let warp_b = uv + (base_warp * 0.92) * warp_scale - ca_offset;
+
+    // Sample each channel separately for chromatic split
+    let prev_r = feedback(warp_r).r;
+    let prev_g = feedback(warp_g).g;
+    let prev_b = feedback(warp_b).b;
+
     let decay = param(0u);
-
-    // Apply decay
-    var col = prev.rgb * decay;
-
-    // Hard cap to prevent feedback runaway
+    var col = vec3f(prev_r, prev_g, prev_b) * decay;
     col = min(col, vec3f(1.5));
 
-    // Dark void at center — event horizon swallows light
+    // Dark void at center
     let void_mask = smoothstep(event_horizon * 0.5, event_horizon * 1.5, dist);
     col *= void_mask;
 
-    // Subtle accretion disk glow at mid-range
-    let disk_glow = smoothstep(event_horizon * 1.2, event_horizon * 2.0, dist)
-                  * (1.0 - smoothstep(event_horizon * 2.0, event_horizon * 5.0, dist));
-    let disk_color = vec3f(0.3, 0.15, 0.6) * disk_glow * 0.02 * u.rms;
-    col += disk_color;
+    // Accretion disk glow: bright ring just outside event horizon
+    let inner = event_horizon * 1.2;
+    let outer = event_horizon * 3.5;
+    let disk_ring = smoothstep(inner, inner + 0.02, dist) * (1.0 - smoothstep(outer - 0.02, outer, dist));
+    // Temperature coloring: white-hot inner → orange → red outer
+    let temp = 1.0 - smoothstep(inner, outer, dist);
+    let disk_col = mix(vec3f(0.8, 0.2, 0.05), vec3f(0.5, 0.6, 1.0), temp * temp);
+    col += disk_col * disk_ring * 0.04 * (u.rms + 0.15);
 
-    // Vignette
+    // Beat flash near event horizon
+    if u.beat > 0.5 {
+        let flash_ring = smoothstep(inner, inner + 0.01, dist) * (1.0 - smoothstep(inner + 0.01, inner + 0.04, dist));
+        col += vec3f(0.6, 0.7, 1.0) * flash_ring * 0.15;
+    }
+
     let vig_center = uv - 0.5;
     let vignette = 1.0 - dot(vig_center, vig_center) * 1.8;
     col *= max(vignette, 0.0);

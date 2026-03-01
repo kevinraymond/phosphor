@@ -7,28 +7,25 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     let uv = frag_coord.xy / res;
 
     // Shift feedback UVs slightly downward for "dripping" trail effect
-    let drip_amount = 0.002 + param(1u) * 0.001; // gravity_strength influences drip
+    let drip_amount = 0.002 + param(1u) * 0.001;
     let drip_uv = uv + vec2f(0.0, drip_amount);
-
-    // Read previous frame with drip offset
     let prev = feedback(drip_uv);
-
-    // Decay from param (trail_decay = param(0))
     let decay = param(0u);
-
-    // Apply decay
     var col = prev.rgb * decay;
-
-    // Hard cap to prevent feedback runaway
     col = min(col, vec3f(1.5));
 
-    // Ground glow — warm light pooling at screen bottom from fallen sparks
-    let ground_y = 1.0 - uv.y; // 0 at top, 1 at bottom
-    let ground_glow = smoothstep(0.7, 1.0, ground_y) * 0.03;
-    let glow_color = vec3f(1.0, 0.6, 0.2) * ground_glow * u.rms;
+    // Ground glow — warm light pooling at screen bottom from bouncing sparks
+    let ground_y = 1.0 - uv.y;
+    let ground_glow = smoothstep(0.65, 1.0, ground_y) * 0.06;
+    let glow_pulse = 1.0 + u.beat * 0.5;
+    let glow_color = vec3f(1.0, 0.55, 0.15) * ground_glow * (u.rms + 0.1) * glow_pulse;
     col += glow_color;
 
-    // Subtle sparkle noise overlay
+    // Sky ambient — very faint to frame the fireworks
+    let sky_fade = smoothstep(0.6, 0.0, uv.y);
+    col += vec3f(0.005, 0.003, 0.01) * sky_fade;
+
+    // Sparkle overlay
     let sparkle_param = param(3u);
     let sparkle_n = phosphor_hash2(uv * 800.0 + vec2f(u.time * 10.0, 0.0));
     let sparkle = step(1.0 - sparkle_param * 0.005, sparkle_n) * 0.02;

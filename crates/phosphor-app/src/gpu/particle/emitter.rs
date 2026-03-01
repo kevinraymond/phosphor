@@ -38,6 +38,8 @@ impl EmitterDef {
             "line" => 2,
             "screen" => 3,
             "image" => 4,
+            "disc" => 5,
+            "cone" => 6,
             _ => 0,
         }
     }
@@ -55,6 +57,8 @@ mod tests {
             ("line", 2),
             ("screen", 3),
             ("image", 4),
+            ("disc", 5),
+            ("cone", 6),
             ("unknown", 0),
         ];
         for (shape, expected) in cases {

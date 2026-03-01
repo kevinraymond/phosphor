@@ -107,7 +107,7 @@ fn emit_particle(idx: u32) -> Particle {
         col = vec3f(1.0, 0.75, 0.25) * brightness;
     }
     if is_sparkle {
-        col = mix(col, vec3f(1.2, 1.1, 0.95), 0.55) * 1.6;
+        col = mix(col, vec3f(1.1, 1.05, 0.95), 0.3) * 1.2;
     }
 
     let base_alpha = select(0.55, 0.80, is_sparkle) * (0.45 + 0.55 * depth_mod);
@@ -170,9 +170,9 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         vel += dir * u.onset * 0.006 * dt;
     }
 
-    // Beat: brief inward pull
+    // Beat: inward contraction pulse
     if u.beat > 0.5 {
-        vel -= p.pos_life.xy * 0.02 * dt;
+        vel -= p.pos_life.xy * 0.06 * dt;
     }
 
     // Drag

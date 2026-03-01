@@ -154,14 +154,25 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let fade = 1.0 - smoothstep(0.6, 1.0, life_frac);
     let alpha = select(0.4, 0.6, is_jet > 0.5) * fade;
 
-    // Color: disk particles blueshift toward center
+    // Color: temperature-based disk coloring via gradient or fallback
     var col = p.color.rgb;
     if is_jet < 0.5 {
         let screen_pos = to_screen(new_pos);
         let dist_to_center = length(screen_pos);
-        let blue_amount = smoothstep(0.4, 0.05, dist_to_center);
-        let blue_tint = vec3f(0.3, 0.5, 1.0) * 0.2;
-        col = mix(col, blue_tint, blue_amount * 0.5);
+        // Use color gradient as temperature map (inner = hot start, outer = cool end)
+        if u.gradient_count > 0u {
+            let temp_t = clamp(1.0 - dist_to_center / 0.6, 0.0, 1.0);
+            let grad = eval_color_gradient(temp_t);
+            col = grad.rgb * (0.15 + u.rms * 0.1);
+        } else {
+            let blue_amount = smoothstep(0.4, 0.05, dist_to_center);
+            let blue_tint = vec3f(0.3, 0.5, 1.0) * 0.2;
+            col = mix(col, blue_tint, blue_amount * 0.5);
+        }
+        // Accretion glow flash just before event horizon kill
+        let eh_radius = 0.06 + u.sub_bass * 0.02;
+        let glow_zone = smoothstep(eh_radius * 3.0, eh_radius * 1.5, dist_to_center);
+        col += vec3f(0.3, 0.4, 1.0) * glow_zone * 0.15;
     }
 
     p.pos_life = vec4f(new_pos, 0.0, 1.0);

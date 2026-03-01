@@ -384,31 +384,9 @@ mod tests {
     fn diff_detects_particles_change() {
         let a = make_effect("test", "t.wgsl");
         let mut b = make_effect("test", "t.wgsl");
-        b.particles = Some(crate::gpu::particle::types::ParticleDef {
-            max_count: 1000,
-            compute_shader: String::new(),
-            emitter: Default::default(),
-            lifetime: 3.0,
-            initial_speed: 0.3,
-            initial_size: 0.02,
-            size_end: 0.0,
-            gravity: [0.0, 0.0],
-            drag: 0.98,
-            turbulence: 0.0,
-            attraction_strength: 0.0,
-            emit_rate: 100.0,
-            burst_on_beat: 0,
-            sprite: None,
-            image_sample: None,
-            blend: "additive".into(),
-            flow_field: false,
-            flow_strength: 1.0,
-            flow_scale: 1.0,
-            flow_speed: 0.5,
-            trail_length: 0,
-            trail_width: 0.005,
-            interaction: false,
-        });
+        b.particles = Some(
+            serde_json::from_str(r#"{"max_count": 1000}"#).unwrap(),
+        );
         let diff = a.diff(&b);
         assert!(diff.particles_changed);
         assert!(diff.needs_rebuild());

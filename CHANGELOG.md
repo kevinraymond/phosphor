@@ -5,6 +5,38 @@
 
 ## Unreleased
 
+### Particle Effect Review & Enhancement
+- **Murmuration** (hero effect): full Boids flocking model with separation, cohesion, and alignment; angular heading smoothing eliminates jitter; alpha blend for opaque bird silhouettes; twilight sky gradient background; depth-based sizing; 15K particles; audio: beat→cohesion spike, bass→disorder, onset→flock split
+- **Coral** (fix): replaced numerical central-difference gradient with analytical derivative of Turing cosine waves; added soft exponential boundary repulsion (no more hard clamp collapse); FBM curl noise for organic diffusion; reduced attraction_strength 2.5→1.2; aspect ratio correction; color gradient and size curve
+- **Chaos** (fix): adaptive sub-stepping (4 steps) prevents divergence; NaN/divergence detection auto-kills bad particles; proper Rossler scaling (native scale then rescale); centered perspective projection around attractor center; color gradient for temperature-based trajectory coloring; size/opacity curves
+- **Helix** (fix): increased E-field upward from 0.05→0.20; reduced B_z from 3.0→1.5 base (wider spirals that actually rise); beat adds upward levitation pulse; moved emitter from y=-0.6 to y=-0.4; RMS-reactive upward drift; two-strand DNA color gradient; size/opacity curves
+- **Nova** (overhaul): color gradient lifecycle (white-hot→vivid→orange→dim red); size/opacity lifetime curves; ground bounce for trailing sparks (restitution 0.3); speed/size/life variance for natural variation; 15→85% shell/spark ratio; staggered burst emission; stronger ground glow with beat pulse
+- **Phosphor** (polish): reduced sparkle overbright (mix 0.55→0.3, mult 1.6→1.2); tightened feedback decay 0.88→0.84; stronger beat inward pull 0.02→0.06; size/opacity curves for crisp particle falloff; reduced bloom intensity 1.2→1.1
+- **Veil** (bloom fix): raised background cap 0.2→0.6 for richer fabric; lowered bloom_threshold 0.9→0.7
+- **Ribbons** (bloom fix): raised bloom_threshold 0.4→0.60; reduced bloom_intensity 0.6→0.40; reduced trail_width 0.008→0.005; capped feedback at 0.8
+- **Cymatics** (polish): analytical Chladni gradient (no numerical eps); smooth bilinear mode crossfade between integer modes; raised background cap 0.5→0.85; sharper nodal line glow (exp factor 12→18); soft boundary repulsion; color gradient and size curve
+- **Vortex**: chromatic aberration in gravitational lensing (R/G/B channel separation); accretion glow flash near event horizon on beat; temperature-based color gradient for disk coloring
+- **Swarm**: wider orbit radius 0.3→0.5; reduced radial damping 8.0→4.5; stronger beat orbit expansion
+- **Flux**: sparkle system (8% of particles get 2.5x brightness with flicker); opacity curve for gentle fade-out; raised background cap 0.5→0.8
+
+### Advanced Particle Forces
+- ParticleUniforms extended from 192 to 384 bytes with new force, emitter, curve, and sort fields
+- FBM noise forces: configurable octaves, lacunarity, persistence with turbulence and curl noise modes
+- Wind force: constant directional force via `wind: [x, y]`
+- Vortex field: rotational force with center, strength, and falloff radius
+- Ground bounce: configurable y-level and restitution coefficient
+- New emitter shapes: disc (uniform area fill), cone (directional spread with angle control)
+- Emitter velocity inheritance: particles inherit emitter motion for trailing effects
+- Speed, lifetime, and size variance: per-particle randomization (0-1 range)
+- Lifetime curves: 8-point LUT for size and opacity over particle lifetime
+- Color gradient: up to 8 hex colors interpolated over lifetime
+- Particle spin: per-particle rotation with configurable speed, rendered via vertex rotation
+- `apply_builtin_forces()` helper in `particle_lib.wgsl`: single call applies all forces (gravity, wind, drag, noise, attraction, vortex, flow field)
+- Curve/gradient evaluation helpers: `eval_size_curve()`, `eval_opacity_curve()`, `eval_color_gradient()`
+- Bitonic depth sort: optional GPU merge-sort on alive indices for correct alpha-blended rendering
+- `parse_hex_color()` utility for `#RRGGBB` / `#RRGGBBAA` to packed u32
+- All new fields default to zero/disabled — existing .pfx files and custom shaders work unchanged
+
 ### PFX Hot-Reload + Editor Integration
 - `.pfx` file hot-reload: editing effect metadata (params, postprocess, passes, particles) live-updates without restarting
 - Differential updates: param-only or postprocess-only changes skip GPU pipeline rebuilds

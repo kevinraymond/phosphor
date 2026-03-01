@@ -50,15 +50,20 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - Vertex-pulling instanced rendering: 6 vertices per particle, no vertex buffer needed
 - Additive blending (SrcAlpha + One) — particles glow and stack
 - Particles render INTO the HDR target with `LoadOp::Load` — bloom, feedback, post-processing all apply automatically
-- Configurable emitter shapes: point, ring, line, screen
+- Configurable emitter shapes: point, ring, line, screen, disc, cone
 - Audio-reactive: beat burst emission, RMS/centroid-driven color and size
 - Custom compute shaders per effect via `compute_shader` field in .pfx
 - Compute shader hot-reload: edit simulation code while running (content-change detection prevents spam)
-- 128-byte `ParticleUniforms` (includes resolution for aspect ratio correction) separate from main 256-byte `ShaderUniforms`
+- 384-byte `ParticleUniforms` (forces, emitters, curves, sort) separate from main 256-byte `ShaderUniforms`
 - Aspect-ratio-corrected orbital physics: all distance/force calculations in screen space
 - Particle count shown in status bar when active
 - Feedback + particles requires HDR clamp in background shader (`min(col, vec3f(1.5))`) to prevent runaway accumulation
 - Advanced particles: sprite atlas textures (dual render pipelines: additive/alpha), image decomposition (grid/threshold/random sampling), ParticleAux buffer (binding 4, per-particle home positions + packed RGBA)
+- Advanced forces: FBM noise (turbulence + curl), wind, vortex field, ground bounce — all via `apply_builtin_forces()` helper
+- Emitter enhancements: disc/cone shapes, velocity inheritance, speed/life/size variance, cone angle/spread
+- Lifetime curves: 8-point LUT for size and opacity over lifetime, color gradient (up to 8 hex colors)
+- Particle spin: accumulated angle in `pos_life.z`, vertex rotation in render shader
+- Bitonic depth sort: optional GPU merge-sort for correct alpha-blended rendering (`depth_sort: true`)
 
 #### Media Layers
 - Load PNG/JPEG/GIF/WebP as compositing layers via `rfd::FileDialog` ("+ Media" button in layer panel)
@@ -109,7 +114,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - 7-band frequency visualization in audio panel
 - `treble` → `presence` + `brilliance`, `phase` → `beat_phase` in all shaders
 - ShaderUniforms: 256 bytes with 20 audio fields + params + feedback uniforms
-- ParticleUniforms: 128 bytes with 10 most useful audio fields (sub_bass, bass, mid, rms, kick, onset, centroid, flux, beat, beat_phase)
+- ParticleUniforms: 384 bytes with 10 audio fields + forces (wind, vortex, ground) + noise (FBM octaves, curl mode) + emitter enhancements (cone, variance, velocity inherit) + lifetime curves (size, opacity, color gradient) + spin + depth sort
 
 #### MIDI Input
 - midir 0.10 integration: callback thread → crossbeam bounded(64) channel → main thread drain in `App::update()`
@@ -273,8 +278,12 @@ egui Overlay → Surface
 - Feedback bind group uses 3 entries: uniform buffer (binding 0), prev_frame texture (binding 1), prev_sampler (binding 2). Effects that don't use feedback get a 1x1 placeholder texture bound.
 - Bloom operates at quarter resolution for performance. Post-processing uses separate uniform buffers per stage.
 - Particle storage buffers use ping-pong pattern (read from A, write to B, flip). Compute bind groups pre-created for both states.
-- Particle Struct is 64 bytes (4 x vec4f): pos_life, vel_size, color, flags. Size chosen for GPU cache-line friendliness.
-- Particle render uses vertex-pulling (no vertex buffer) — 6 vertices per instance expand to screen-space quads with aspect ratio correction.
+- Particle Struct is 64 bytes (4 x vec4f): pos_life, vel_size, color, flags. Size chosen for GPU cache-line friendliness. `pos_life.z` stores spin angle (accumulated each frame when `spin_speed != 0`); chaos_sim uses it for 3D depth (spin gated by spin_speed check).
+- Particle render uses vertex-pulling (no vertex buffer) — 6 vertices per instance expand to screen-space quads with aspect ratio correction. Spin rotation applied to corner offsets in vs_main when `pos_life.z != 0`.
+- Bitonic depth sort: optional GPU merge-sort on alive indices by particle size. Key generation pass + `log2(N)*(log2(N)+1)/2` swap passes using dynamic uniform buffer offsets. Only created when `depth_sort: true` in .pfx.
+- `apply_builtin_forces()` in particle_lib.wgsl: single call for all forces. Custom compute shaders can call it or ignore it. Falls back to legacy hash turbulence when `noise_octaves=0`.
+- Lifetime curves: 8-point LUTs packed as `array<vec4f, 2>` in WGSL. `pack_curve_lut()` in Rust resamples variable-length input to 8 points via linear interpolation. `curve_flags` bitmask gates evaluation (bit 0=size, bit 1=opacity).
+- Color gradient: up to 8 packed RGBA u32 in `array<vec4u, 2>`. `parse_hex_color()` converts "#RRGGBB"/"#RRGGBBAA" to `(R<<24|G<<16|B<<8|A)`. `gradient_count` gates evaluation. `read_gradient()` indexes into the vec4u pair.
 - midir 0.10: `MidiInputConnection<()>` is RAII — drop closes the port. No explicit close needed.
 - Presets stored at `~/.config/phosphor/presets/{name}.json`. `PresetStore` re-scans after every save/delete.
 - Preset loading: `load_preset()` scans for media layers → if none, `apply_preset_immediately()` (sync); if media found, `PresetLoader::request_load()` → background thread decodes via `decoder::load_media()` → `update()` drains result → `apply_preset_immediately()` with pre-decoded `MediaSource` HashMap (GPU resources created on main thread). Generation counter for cancellation, `MediaSource` moved (not cloned) via `HashMap::remove()`.
@@ -321,7 +330,7 @@ RUST_LOG=phosphor_app=debug cargo run  # verbose logging
 ```
 
 ### Test Coverage
-~251 unit tests covering pure logic, parsing, serde, and data transforms across 17 modules:
+~320 unit tests covering pure logic, parsing, serde, and data transforms across 17 modules:
 - **Audio**: beat detection pipeline (onset → tempo → scheduler), adaptive normalization, BPM convergence
 - **Params**: ParamDef/ParamValue types, ParamStore CRUD, pack_to_buffer with all types
 - **Effect loader**: `is_builtin`, `prepend_library` (with/without existing uniforms)
@@ -341,7 +350,7 @@ RUST_LOG=phosphor_app=debug cargo run  # verbose logging
 - File I/O in config load/save (tested implicitly via serde roundtrips)
 
 ```bash
-cargo test                         # run all tests (~251)
+cargo test                         # run all tests (~320)
 cargo test --features ndi          # include NDI tests
 cargo tarpaulin --features ndi     # line coverage report
 ```

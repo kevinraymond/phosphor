@@ -1,50 +1,54 @@
 // Helix particle simulation — Lorentz force electromagnetic field.
-// F = q(E + v × B) produces helical spiraling trajectories.
+// F = q(E + v x B) produces helical spiraling trajectories.
 // In 2D+: F_x = q * (E_x + v_y * B_z), F_y = q * (E_y - v_x * B_z)
-// Mixed positive/negative charges create interweaving spirals.
+// Mixed positive/negative charges create interweaving spirals (DNA-like).
 // Structs, bindings, and helpers are in particle_lib.wgsl (auto-prepended).
 
 fn emit_particle(idx: u32) -> Particle {
     var p: Particle;
     let seed_base = u.seed + f32(idx) * 13.37;
 
-    // Line emitter at bottom
+    // Line emitter at lower area
     let t = hash(seed_base) * 2.0 - 1.0;
     let pos = u.emitter_pos + vec2f(t * u.emitter_radius, 0.0);
 
-    // Initial velocity: mostly upward with some spread
-    let spread = 0.3 + hash(seed_base + 1.0) * 0.5;
-    let angle = 1.5708 + (hash(seed_base + 2.0) - 0.5) * spread; // ~90 degrees (up) ± spread
-    let speed = u.initial_speed * (0.7 + 0.6 * hash(seed_base + 3.0));
+    // Initial velocity: strong upward with some spread
+    let spread = 0.25 + hash(seed_base + 1.0) * 0.4;
+    let angle = 1.5708 + (hash(seed_base + 2.0) - 0.5) * spread;
+    let speed = u.initial_speed * (0.8 + 0.4 * hash(seed_base + 3.0));
     let vel = vec2f(cos(angle), sin(angle)) * speed;
 
-    // Charge: 50/50 positive/negative, stored in flags.z
+    // Charge: 50/50 positive/negative
     let charge = select(-1.0, 1.0, hash(seed_base + 4.0) > 0.5);
-    // Mass variation: stored in flags.w (affects spiral radius)
-    let mass = 0.5 + hash(seed_base + 5.0) * 1.0;
+    let mass = 0.6 + hash(seed_base + 5.0) * 0.8;
 
-    // Color: positive = blue/cyan, negative = red/orange
+    // Color from gradient or charge-based
     var col: vec3f;
-    let color_mode = hash(seed_base + 8.0);
-    if charge > 0.0 {
-        let hue = 0.55 + color_mode * 0.15; // blue-cyan range
-        let r_c = abs(hue * 6.0 - 3.0) - 1.0;
-        let g_c = 2.0 - abs(hue * 6.0 - 2.0);
-        let b_c = 2.0 - abs(hue * 6.0 - 4.0);
-        col = clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0));
+    if u.gradient_count > 0u {
+        let t_grad = select(0.0, 0.5, charge > 0.0) + hash(seed_base + 8.0) * 0.4;
+        let grad = eval_color_gradient(clamp(t_grad, 0.0, 1.0));
+        col = grad.rgb;
     } else {
-        let hue = 0.0 + color_mode * 0.1; // red-orange range
-        let r_c = abs(hue * 6.0 - 3.0) - 1.0;
-        let g_c = 2.0 - abs(hue * 6.0 - 2.0);
-        let b_c = 2.0 - abs(hue * 6.0 - 4.0);
-        col = clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0));
+        if charge > 0.0 {
+            let hue = 0.55 + hash(seed_base + 8.0) * 0.15;
+            let r_c = abs(hue * 6.0 - 3.0) - 1.0;
+            let g_c = 2.0 - abs(hue * 6.0 - 2.0);
+            let b_c = 2.0 - abs(hue * 6.0 - 4.0);
+            col = clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0));
+        } else {
+            let hue = 0.0 + hash(seed_base + 8.0) * 0.1;
+            let r_c = abs(hue * 6.0 - 3.0) - 1.0;
+            let g_c = 2.0 - abs(hue * 6.0 - 2.0);
+            let b_c = 2.0 - abs(hue * 6.0 - 4.0);
+            col = clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0));
+        }
     }
-    let brightness = 0.20 + u.rms * 0.10;
+    let brightness = 0.22 + u.rms * 0.10;
     col *= brightness;
 
     let initial_age = hash(seed_base + 9.0) * u.lifetime * 0.05;
-
     let init_size = u.initial_size * (0.6 + hash(seed_base + 6.0) * 0.8);
+
     p.pos_life = vec4f(pos, init_size, 1.0);
     p.vel_size = vec4f(vel, 0.0, init_size);
     p.color = vec4f(col, 0.30 + hash(seed_base + 7.0) * 0.15);
@@ -55,9 +59,7 @@ fn emit_particle(idx: u32) -> Particle {
 @compute @workgroup_size(256)
 fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let idx = gid.x;
-    if idx >= u.max_particles {
-        return;
-    }
+    if idx >= u.max_particles { return; }
 
     var p = particles_in[idx];
     let life = p.pos_life.w;
@@ -90,57 +92,59 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     var vel = p.vel_size.xy;
     var pos = p.pos_life.xy;
 
-    // Magnetic field B_z — perpendicular to screen, audio-reactive
-    // Higher bass = tighter spirals
-    let b_z = (3.0 + u.bass * 8.0) * (1.0 + u.mid * 0.3);
+    // Magnetic field B_z — reduced base for wider spirals
+    let b_z = (1.5 + u.bass * 4.0) * (1.0 + u.mid * 0.2);
 
-    // Electric field E — primarily upward with beat-driven radial component
-    var e_field = vec2f(sin(u.time * 0.5) * 0.03, 0.05); // oscillating horizontal + upward drift
+    // Electric field E — strong upward drift + oscillating horizontal
+    var e_field = vec2f(sin(u.time * 0.5) * 0.04, 0.20);
+
+    // Beat: upward levitation pulse
     if u.beat > 0.5 {
-        // Beat pulse: radial E field (outward)
+        e_field.y += 0.25;
+        // Also add outward radial push for visual flourish
         let dir = normalize(pos + vec2f(0.001, 0.001));
-        e_field += dir * 0.3;
+        e_field += dir * 0.15;
     }
+
     // Onset: lateral perturbation
     if u.onset > 0.3 {
         e_field += vec2f(
-            (hash(f32(idx) * 0.1 + u.time) - 0.5) * u.onset * 0.4,
-            0.0
+            (hash(f32(idx) * 0.1 + u.time) - 0.5) * u.onset * 0.3,
+            u.onset * 0.1
         );
     }
 
-    // Lorentz force: F = q(E + v × B)
-    // In 2D with B along z: v × B = (v_y * B_z, -v_x * B_z)
+    // RMS: slight additional upward drift during loud passages
+    e_field.y += u.rms * 0.08;
+
+    // Lorentz force: F = q(E + v x B) / m
     let lorentz_x = charge * (e_field.x + vel.y * b_z) / mass;
     let lorentz_y = charge * (e_field.y - vel.x * b_z) / mass;
-
     vel += vec2f(lorentz_x, lorentz_y) * dt;
 
     // Light drag
     vel *= 1.0 - (1.0 - u.drag) * dt * 60.0;
 
-    // Integrate position
     let new_pos = pos + vel * dt;
 
-    // Kill if off screen (top, sides)
+    // Kill if off screen
     if new_pos.y > 1.3 || abs(new_pos.x) > 1.3 {
         p.pos_life.w = 0.0;
         particles_out[idx] = p;
         return;
     }
 
-    // Size: depth/height modulated
-    let height_frac = (new_pos.y + 1.0) * 0.5; // 0 at bottom, 1 at top
+    // Size: height-modulated with curve
+    let height_frac = clamp((new_pos.y + 1.0) * 0.5, 0.0, 1.0);
     let init_size = p.pos_life.z;
-    let base_size = mix(init_size, u.size_end, life_frac * 0.5);
-    let size = base_size * (1.0 + u.rms * 0.2) * (0.7 + 0.3 * height_frac);
+    let base_size = mix(init_size, u.size_end, life_frac * 0.4);
+    let size = base_size * (0.7 + 0.3 * height_frac) * eval_size_curve(life_frac) * (1.0 + u.rms * 0.2);
 
-    // Alpha: fade at death, height-based brightening
+    // Alpha with curves
     let fade_in = smoothstep(0.0, 0.05, life_frac);
     let fade_out = 1.0 - smoothstep(0.7, 1.0, life_frac);
-    let alpha = p.color.a * fade_in * fade_out;
+    let alpha = p.color.a * fade_in * fade_out * eval_opacity_curve(life_frac);
 
-    // Color: keep emitted color (was cumulative per-frame addition — caused blowout)
     let col = p.color.rgb;
 
     p.pos_life = vec4f(new_pos, init_size, 1.0);
