@@ -20,8 +20,11 @@ fn emit_particle(idx: u32) -> Particle {
     let r_c = abs(hue * 6.0 - 3.0) - 1.0;
     let g_c = 2.0 - abs(hue * 6.0 - 2.0);
     let b_c = 2.0 - abs(hue * 6.0 - 4.0);
-    let brightness = 0.15 + u.rms * 0.08;
-    let col = clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0)) * brightness;
+    let brightness = 0.04 + u.rms * 0.03;
+    // Burst particles flash bright near-white on beats/onsets
+    let hit = max(u.onset, u.beat);
+    let base_col = clamp(vec3f(r_c, g_c, b_c), vec3f(0.0), vec3f(1.0)) * brightness;
+    let col = mix(base_col, vec3f(0.6 + hit * 0.4), hit * hit);
 
     // Stagger initial age
     let initial_age = hash(seed_base + 9.0) * u.lifetime * 0.3;
@@ -29,7 +32,7 @@ fn emit_particle(idx: u32) -> Particle {
     let init_size = u.initial_size * (0.7 + hash(seed_base + 6.0) * 0.6);
     p.pos_life = vec4f(pos, init_size, 1.0);
     p.vel_size = vec4f(vel, 0.0, init_size);
-    p.color = vec4f(col, 0.30 + hash(seed_base + 7.0) * 0.15);
+    p.color = vec4f(col, 0.15 + hash(seed_base + 7.0) * 0.1);
     p.flags = vec4f(initial_age, u.lifetime, 0.0, 0.0);
     return p;
 }
@@ -107,19 +110,16 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let base_size = mix(init_size, u.size_end, life_frac * life_frac);
     let size = base_size * (1.0 + u.rms * 0.3);
 
-    // Alpha: fade with opacity curve
+    // Alpha: fade in, fade out, audio-reactive brightness
     let fade_in = smoothstep(0.0, 0.05, life_frac);
     let fade_out = 1.0 - smoothstep(0.7, 1.0, life_frac);
-    let alpha = p.color.a * fade_in * fade_out * eval_opacity_curve(life_frac);
+    let alpha = p.color.a * fade_in * fade_out;
 
-    // Color: sparkle system — ~8% of particles get brightness boost
+    // Color: warm shift with age and audio
     var col = p.color.rgb;
-    let sparkle_hash = hash(f32(idx) * 0.73);
-    if sparkle_hash > 0.92 {
-        // Sparkle: brighter, flicker with time
-        let flicker = 0.7 + 0.3 * hash(f32(idx) * 0.2 + u.time * 6.0);
-        col *= 2.5 * flicker * (1.0 + u.rms * 0.5);
-    }
+    let warm_shift = life_frac * 0.3 + u.mid * 0.1;
+    col = vec3f(col.r + warm_shift * 0.2, col.g, col.b - warm_shift * 0.1);
+    col = clamp(col, vec3f(0.0), vec3f(1.0));
 
     p.pos_life = vec4f(new_pos, init_size, 1.0);
     p.vel_size = vec4f(vel, 0.0, size);
