@@ -18,6 +18,7 @@
 - **Background loading**: all particle source loading (image, GIF, video) happens on a background thread via `ParticleSourceLoader` — no UI freeze during decode
 - **EmitterDef `video` field**: `.pfx` files can specify `"video": "clip.mp4"` or `"video": "webcam"` for built-in video/webcam source at effect load time
 - Video decode reuses existing `media/video.rs` infrastructure (ffmpeg pre-decode to RAM, 60s max)
+- **Morph-safe preset loading**: when a preset layer has the same effect already loaded, skip the full effect reload — keeps particle systems alive so morph transitions interpolate params smoothly instead of destroying and rebuilding all particles
 - 12 new tests: `sample_rgba_buffer` (5), `ParticleImageSource` (2), `SourceTransition` (3), `LayerPreset` serde (3), `EmitterDef` serde with video (2)
 
 ### Raster Effect (New)

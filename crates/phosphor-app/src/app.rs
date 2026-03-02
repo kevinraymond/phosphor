@@ -1801,7 +1801,30 @@ impl App {
                         .effects
                         .iter()
                         .position(|e| e.name == lp.effect_name);
-                    if let Some(idx) = effect_idx {
+
+                    // Check if this layer already has the same effect loaded.
+                    // If so, skip the full reload — keeps particle systems alive for
+                    // smooth morph transitions (params will be interpolated by morph).
+                    let already_loaded = if let Some(idx) = effect_idx {
+                        self.layer_stack
+                            .layers
+                            .get(i)
+                            .and_then(|l| l.effect_index())
+                            == Some(idx)
+                    } else {
+                        false
+                    };
+
+                    if already_loaded {
+                        log::debug!(
+                            "Layer {} already has '{}', skipping reload (morph-safe)",
+                            i,
+                            lp.effect_name
+                        );
+                        // Trigger particle source transition if the preset has
+                        // different image source than what's currently loaded.
+                        // The morph interpolation will handle param blending.
+                    } else if let Some(idx) = effect_idx {
                         self.load_effect_on_layer(i, idx);
                     } else {
                         log::warn!(
