@@ -2,8 +2,9 @@ use std::path::Path;
 
 use super::types::{ImageSampleDef, ParticleAux};
 
-/// Maximum image dimension after resize (keeps particle count reasonable).
-const MAX_DIM: u32 = 512;
+/// Maximum image dimension after resize.
+/// 2048 supports up to ~1M particles with grid sampling (step=2 at 2048²).
+const MAX_DIM: u32 = 2048;
 
 /// Sample pixels from an image into ParticleAux data.
 /// Returns aux data with home positions (clip space) and packed RGBA colors.

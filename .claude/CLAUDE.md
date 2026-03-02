@@ -197,7 +197,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - `MidiSystem::update_triggers_only()`: drains MIDI but skips CC→param when active layer is locked
 
 #### Effect Set
-15 curated audio-reactive effects designed for compositing across layers:
+16 curated audio-reactive effects designed for compositing across layers:
 
 **Shader-only effects:**
 1. **Aurora** (`aurora.wgsl`) — 7 frequency bands as horizontal flowing northern light curtains. Params: curtain_speed, band_spread, glow_width. No feedback.
@@ -216,7 +216,8 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 12. **Murmur** (`murmur_bg.wgsl` + `murmur_sim.wgsl`) — Starling murmuration with full Boids flocking (separation, cohesion, alignment). 40K dark bird silhouettes against twilight sky, no feedback trails. Params: order, flock_speed, color_mode. Uses particles (alpha blend, spatial hash).
 13. **Ribbons** (`ribbons_bg.wgsl` + `ribbons_sim.wgsl`) — Sweeping ribbons with curl noise flow field and 16-point trail strips. Params: trail_decay, flow_intensity, color_mode, ribbon_width. Uses feedback + particles (trails).
 14. **Spirograph** (`spirograph_bg.wgsl` + `spirograph_sim.wgsl`) — Multi-pattern hypotrochoid curves. 5 arms with distinct k-ratios trace evolving petal patterns, drifting centers. Params: trail_decay, draw_speed, pattern_scale, complexity, drift, color_spread. Uses feedback + particles.
-15. **Veil** (`veil_bg.wgsl` + `veil_sim.wgsl`) — Flowing silk curtain with 5000 particles on screen emitter. Multi-layer displacement field (bass billow + mid ripple + noise flutter) with spring-return physics for coherent sheet motion. Params: flow_speed, trail_decay, wind_strength, color_shift, density. Uses feedback + particles.
+15. **Raster** (`raster_bg.wgsl` + `raster_sim.wgsl`) — Video wall with 500K particles mapped to image pixel positions. Audio displacement: bass=radial push, mids=sinusoidal wave, highs=scatter, beat=burst impulse. Spring-return physics, luminance-based sizing. Params: trail_decay, spring_k, bass_push, mid_wave, high_scatter, burst_force, depth_scale, wave_freq. Uses feedback + particles (alpha blend, image emitter).
+16. **Veil** (`veil_bg.wgsl` + `veil_sim.wgsl`) — Flowing silk curtain with 5000 particles on screen emitter. Multi-layer displacement field (bass billow + mid ripple + noise flutter) with spring-return physics for coherent sheet motion. Params: flow_speed, trail_decay, wind_strength, color_shift, density. Uses feedback + particles.
 
 **Bundled preset**: "Crucible" (`~/.config/phosphor/presets/Crucible.json`) — all 8 layers composited with tuned blend modes, opacities, and params.
 

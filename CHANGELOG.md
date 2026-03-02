@@ -5,6 +5,19 @@
 
 ## Unreleased
 
+### Raster Effect (New)
+- **Raster** (video wall): 500K particles map to image pixel positions, colored by source image
+- Voronoi shard fragmentation: 32 seed points create irregular fragments with per-shard rotation, translation, and depth variation
+- Frayed edges: particles near Voronoi cell boundaries break free with individual jitter
+- Three bass displacement modes via `bass_mode` param: shards (default), tangential swirl, radial push
+- 2D sinusoidal wave displacement from mids, onset-driven per-particle scatter from highs
+- Spring-return physics pull particles back to displaced home positions (sustained audio holds displacement)
+- Beat onset impulse with shard-coherent burst direction
+- Luminance-based particle sizing: brighter pixels render larger for visual depth
+- 8 exposed params: trail_decay, spring_k, bass_strength, mid_wave, high_scatter, burst_force, depth_scale, bass_mode
+- Optional feedback trails via trail_decay for motion blur during scatter
+- Image source `MAX_DIM` raised from 512 to 2048 for higher-resolution sampling
+
 ### Particle Effects Overhaul
 - **Delete 4 effects**: removed Coral, Helix, Nova, Vortex (low quality, never worked well)
 - **Murmuration → Murmur**: renamed, removed feedback trails (root cause of "sperm" look), brighter sky for contrast, larger/darker/more opaque particles (0.014 size, 0.9 alpha), reduced count 70K→40K
