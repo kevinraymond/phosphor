@@ -90,7 +90,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         return;
     }
 
-    var p = particles_in[idx];
+    var p = read_particle(idx);
     let life = p.pos_life.w;
     let age = p.flags.x;
     let max_life = p.flags.y;
@@ -100,10 +100,10 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         let slot = emit_claim();
         if slot < u.emit_count {
             p = emit_particle(idx);
-            particles_out[idx] = p;
+            write_particle(idx, p);
             mark_alive(idx);
         } else {
-            particles_out[idx] = p;
+            write_particle(idx, p);
         }
         return;
     }
@@ -113,7 +113,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     if new_age >= max_life {
         // Kill it
         p.pos_life.w = 0.0;
-        particles_out[idx] = p;
+        write_particle(idx, p);
         return;
     }
 
@@ -158,6 +158,6 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     p.color = vec4f(col, alpha);
     p.flags.x = new_age;
 
-    particles_out[idx] = p;
+    write_particle(idx, p);
     mark_alive(idx);
 }

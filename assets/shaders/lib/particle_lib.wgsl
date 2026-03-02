@@ -110,16 +110,35 @@ struct ParticleAux {
     home: vec4f,  // xy=home position, z=packed RGBA (bitcast u32->f32), w=sprite_index
 }
 
-// --- Bindings (group 0) ---
+// --- Bindings (group 0) — SoA layout ---
 
 @group(0) @binding(0) var<uniform> u: ParticleUniforms;
-@group(0) @binding(1) var<storage, read> particles_in: array<Particle>;
-@group(0) @binding(2) var<storage, read_write> particles_out: array<Particle>;
+@group(0) @binding(1) var<storage, read> pos_life_in: array<vec4f>;
+@group(0) @binding(2) var<storage, read> vel_size_in: array<vec4f>;
+@group(0) @binding(3) var<storage, read> color_in: array<vec4f>;
+@group(0) @binding(4) var<storage, read> flags_in: array<vec4f>;
+@group(0) @binding(5) var<storage, read_write> pos_life_out: array<vec4f>;
+@group(0) @binding(6) var<storage, read_write> vel_size_out: array<vec4f>;
+@group(0) @binding(7) var<storage, read_write> color_out: array<vec4f>;
+@group(0) @binding(8) var<storage, read_write> flags_out: array<vec4f>;
 // counters: [0]=alive_count, [1]=dead_count, [2]=emit_used, [3]=reserved
-@group(0) @binding(3) var<storage, read_write> counters: array<atomic<u32>, 4>;
-@group(0) @binding(4) var<storage, read> aux: array<ParticleAux>;
-@group(0) @binding(5) var<storage, read> dead_indices: array<u32>;
-@group(0) @binding(6) var<storage, read_write> alive_indices_out: array<u32>;
+@group(0) @binding(9) var<storage, read_write> counters: array<atomic<u32>, 4>;
+@group(0) @binding(10) var<storage, read> aux: array<ParticleAux>;
+@group(0) @binding(11) var<storage, read> dead_indices: array<u32>;
+@group(0) @binding(12) var<storage, read_write> alive_indices_out: array<u32>;
+
+// Read a particle from the SoA input arrays into a Particle struct.
+fn read_particle(idx: u32) -> Particle {
+    return Particle(pos_life_in[idx], vel_size_in[idx], color_in[idx], flags_in[idx]);
+}
+
+// Write a Particle struct to the SoA output arrays.
+fn write_particle(idx: u32, p: Particle) {
+    pos_life_out[idx] = p.pos_life;
+    vel_size_out[idx] = p.vel_size;
+    color_out[idx] = p.color;
+    flags_out[idx] = p.flags;
+}
 
 // --- Flow field bindings (group 1) ---
 

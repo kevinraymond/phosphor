@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use super::emitter::EmitterDef;
 use crate::media::types::DecodedFrame;
 
+/// Size of a single SoA component buffer element (one vec4f = 16 bytes).
+pub const PARTICLE_COMPONENT_STRIDE: u64 = 16;
+
 /// GPU particle: 64 bytes (4 x vec4f).
 /// pos_life: xy = position (screen-space -1..1), z = reserved, w = life (1.0 = just born, 0.0 = dead)
 /// vel_size: xy = velocity, z = reserved, w = size

@@ -43,7 +43,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let idx = gid.x;
     if idx >= u.max_particles { return; }
 
-    var p = particles_in[idx];
+    var p = read_particle(idx);
     let life = p.pos_life.w;
     let age = p.flags.x;
     let max_life = p.flags.y;
@@ -52,10 +52,10 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         let slot = emit_claim();
         if slot < u.emit_count {
             p = emit_particle(idx);
-            particles_out[idx] = p;
+            write_particle(idx, p);
             mark_alive(idx);
         } else {
-            particles_out[idx] = p;
+            write_particle(idx, p);
         }
         return;
     }
@@ -63,7 +63,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let new_age = age + u.delta_time;
     if new_age >= max_life {
         p.pos_life.w = 0.0;
-        particles_out[idx] = p;
+        write_particle(idx, p);
         return;
     }
 
@@ -100,10 +100,10 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
                 let ni = sh_sorted_indices[start + i];
                 if ni == idx { continue; }
 
-                let np = particles_in[ni];
-                if np.pos_life.w <= 0.0 { continue; }
+                let n_pl = pos_life_in[ni];
+                if n_pl.w <= 0.0 { continue; }
 
-                let diff = pos - np.pos_life.xy;
+                let diff = pos - n_pl.xy;
                 let dist = length(diff);
                 if dist > interaction_radius || dist < 0.0001 { continue; }
 
@@ -113,12 +113,12 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
                 }
 
                 // Alignment: accumulate heading vectors
-                let n_heading = np.flags.z;
+                let n_heading = flags_in[ni].z;
                 sum_cos += cos(n_heading);
                 sum_sin += sin(n_heading);
 
                 // Cohesion: accumulate neighbor positions
-                center_of_mass += np.pos_life.xy;
+                center_of_mass += n_pl.xy;
                 neighbor_count++;
             }
         }
@@ -219,6 +219,6 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     p.color = vec4f(col, alpha);
     p.flags = vec4f(new_age, max_life, new_heading, 0.0);
 
-    particles_out[idx] = p;
+    write_particle(idx, p);
     mark_alive(idx);
 }

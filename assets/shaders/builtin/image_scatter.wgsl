@@ -33,14 +33,14 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     // Skip transparent particles (padding beyond sampled image pixels)
     if home_color.a < 0.01 {
         // Park invisible particles offscreen, dead
-        var p = particles_in[idx];
+        var p = read_particle(idx);
         p.pos_life = vec4f(99.0, 99.0, 0.0, 0.0);
         p.color = vec4f(0.0);
-        particles_out[idx] = p;
+        write_particle(idx, p);
         return;
     }
 
-    var p = particles_in[idx];
+    var p = read_particle(idx);
 
     // Initial emit: particles start at home position
     if p.pos_life.w <= 0.0 {
@@ -51,10 +51,10 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
             p.vel_size = vec4f(0.0, 0.0, 0.0, u.initial_size);
             p.color = home_color;
             p.flags = vec4f(hash(seed_base + 2.0) * u.lifetime * 0.5, u.lifetime, 0.0, 0.0);
-            particles_out[idx] = p;
+            write_particle(idx, p);
             mark_alive(idx);
         } else {
-            particles_out[idx] = p;
+            write_particle(idx, p);
         }
         return;
     }
@@ -120,6 +120,6 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         p.flags.x = 0.0;
     }
 
-    particles_out[idx] = p;
+    write_particle(idx, p);
     mark_alive(idx);
 }

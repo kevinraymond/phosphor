@@ -10,7 +10,7 @@ use super::flow_field::FlowFieldTexture;
 use super::spatial_hash::SpatialHashGrid;
 use super::sprite::SpriteAtlas;
 use super::types::{
-    ImageSampleDef, Particle, ParticleAux, ParticleDef, ParticleImageSource,
+    ImageSampleDef, ParticleAux, ParticleDef, ParticleImageSource,
     ParticleRenderUniforms, ParticleUniforms, SourceTransition,
 };
 
@@ -24,8 +24,11 @@ pub struct ParticleSystem {
     pub render_uniforms: ParticleRenderUniforms,
     pub alive_count: u32,
 
-    // Ping-pong particle storage buffers
-    storage_buffers: [wgpu::Buffer; 2],
+    // Ping-pong SoA particle storage buffers (4 components × 2 ping-pong)
+    pos_life_buffers: [wgpu::Buffer; 2],
+    vel_size_buffers: [wgpu::Buffer; 2],
+    color_buffers: [wgpu::Buffer; 2],
+    flags_buffers: [wgpu::Buffer; 2],
     current: usize,
 
     // Counter buffer: 4 x atomic<u32> = [alive_count, dead_count, emit_used, reserved]
@@ -139,9 +142,9 @@ impl ParticleSystem {
         interaction: bool,
     ) -> Result<Self, String> {
         // Clamp max_count to device storage buffer binding limit
+        // With SoA, each buffer is one vec4f per particle (16 bytes), so the limit is higher
         let max_storage = device.limits().max_storage_buffer_binding_size as u64;
-        let particle_size = std::mem::size_of::<Particle>() as u64;
-        let device_max_particles = (max_storage / particle_size) as u32;
+        let device_max_particles = (max_storage / super::types::PARTICLE_COMPONENT_STRIDE) as u32;
         let max_particles = if def.max_count > device_max_particles {
             log::warn!(
                 "Particle max_count {} exceeds device limit ({} particles @ {}MB max binding). Clamped to {}.",
@@ -155,32 +158,41 @@ impl ParticleSystem {
             def.max_count
         };
 
-        let buffer_size = particle_size * max_particles as u64;
+        let component_size = super::types::PARTICLE_COMPONENT_STRIDE * max_particles as u64;
 
-        // Create storage buffers (ping-pong) — GPU-cleared to zero to ensure all particles
-        // start dead (life=0). Without this, recycled GPU memory from a previous effect's
-        // freed buffers can contain alive particles with high brightness, causing blowout
-        // through additive blend + feedback accumulation.
-        let storage_buffers = [
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("particles-a"),
-                size: buffer_size,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("particles-b"),
-                size: buffer_size,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-        ];
+        // Create SoA storage buffers (4 components × 2 ping-pong) — GPU-cleared to zero
+        // to ensure all particles start dead (life=0). Without this, recycled GPU memory
+        // from a previous effect's freed buffers can contain alive particles with high
+        // brightness, causing blowout through additive blend + feedback accumulation.
+        let create_component_buffers = |label_a: &str, label_b: &str| -> [wgpu::Buffer; 2] {
+            [
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label_a),
+                    size: component_size,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label_b),
+                    size: component_size,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+            ]
+        };
+        let pos_life_buffers = create_component_buffers("pos-life-a", "pos-life-b");
+        let vel_size_buffers = create_component_buffers("vel-size-a", "vel-size-b");
+        let color_buffers = create_component_buffers("color-a", "color-b");
+        let flags_buffers = create_component_buffers("flags-a", "flags-b");
+
         // GPU-side zero-init — avoids allocating 2×buffer_size on CPU (128MB+ at 1M particles)
         let mut init_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("particle-init-clear"),
         });
-        init_encoder.clear_buffer(&storage_buffers[0], 0, None);
-        init_encoder.clear_buffer(&storage_buffers[1], 0, None);
+        for buf in [&pos_life_buffers, &vel_size_buffers, &color_buffers, &flags_buffers] {
+            init_encoder.clear_buffer(&buf[0], 0, None);
+            init_encoder.clear_buffer(&buf[1], 0, None);
+        }
         queue.submit(std::iter::once(init_encoder.finish()));
 
         // Counter buffer: 4 x u32 = 16 bytes
@@ -259,7 +271,31 @@ impl ParticleSystem {
             mapped_at_creation: false,
         });
 
-        // --- Compute pipeline (sim) ---
+        // --- Compute pipeline (sim) — SoA layout: 13 entries ---
+        let compute_storage_ro = |binding: u32| -> BindGroupLayoutEntry {
+            BindGroupLayoutEntry {
+                binding,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }
+        };
+        let compute_storage_rw = |binding: u32| -> BindGroupLayoutEntry {
+            BindGroupLayoutEntry {
+                binding,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }
+        };
         let compute_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("particle-compute-bgl"),
             entries: &[
@@ -274,72 +310,18 @@ impl ParticleSystem {
                     },
                     count: None,
                 },
-                // binding 1: particles_in (read)
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // binding 2: particles_out (write)
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // binding 3: counters (atomic, replaces emit_counter)
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // binding 4: auxiliary data (home positions, packed colors)
-                BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // binding 5: dead_indices (read)
-                BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // binding 6: alive_indices_out (write)
-                BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
+                compute_storage_ro(1),  // pos_life_in
+                compute_storage_ro(2),  // vel_size_in
+                compute_storage_ro(3),  // color_in
+                compute_storage_ro(4),  // flags_in
+                compute_storage_rw(5),  // pos_life_out
+                compute_storage_rw(6),  // vel_size_out
+                compute_storage_rw(7),  // color_out
+                compute_storage_rw(8),  // flags_out
+                compute_storage_rw(9),  // counters
+                compute_storage_ro(10), // aux
+                compute_storage_ro(11), // dead_indices
+                compute_storage_rw(12), // alive_indices_out
             ],
         });
 
@@ -415,7 +397,7 @@ impl ParticleSystem {
             Some(SpatialHashGrid::new(
                 device,
                 max_particles,
-                &storage_buffers,
+                &pos_life_buffers,
                 &uniform_buffer,
             ))
         } else {
@@ -461,7 +443,10 @@ impl ParticleSystem {
             device,
             &compute_bgl,
             &uniform_buffer,
-            &storage_buffers,
+            &pos_life_buffers,
+            &vel_size_buffers,
+            &color_buffers,
+            &flags_buffers,
             &counter_buffer,
             &aux_buffer,
             &dead_index_buffer,
@@ -477,23 +462,28 @@ impl ParticleSystem {
             );
 
         // --- Render pipeline ---
+        let render_storage_ro = |binding: u32| -> BindGroupLayoutEntry {
+            BindGroupLayoutEntry {
+                binding,
+                visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }
+        };
         let render_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("particle-render-bgl"),
             entries: &[
-                // binding 0: particles (read)
+                render_storage_ro(0), // pos_life
+                render_storage_ro(1), // vel_size
+                render_storage_ro(2), // color
+                render_storage_ro(3), // flags
+                // binding 4: render uniforms
                 BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // binding 1: render uniforms
-                BindGroupLayoutEntry {
-                    binding: 1,
+                    binding: 4,
                     visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
@@ -502,9 +492,9 @@ impl ParticleSystem {
                     },
                     count: None,
                 },
-                // binding 2: alive_indices (read) — for GPU-driven indirect draw
+                // binding 5: alive_indices (read) — for GPU-driven indirect draw
                 BindGroupLayoutEntry {
-                    binding: 2,
+                    binding: 5,
                     visibility: ShaderStages::VERTEX,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
@@ -645,7 +635,10 @@ impl ParticleSystem {
         let render_bind_groups = create_render_bind_groups(
             device,
             &render_bgl,
-            &storage_buffers,
+            &pos_life_buffers,
+            &vel_size_buffers,
+            &color_buffers,
+            &flags_buffers,
             &render_uniform_buffer,
             &alive_index_buffers,
         );
@@ -683,7 +676,7 @@ impl ParticleSystem {
                 device,
                 max_particles,
                 &counter_buffer,
-                &storage_buffers,
+                &vel_size_buffers,
                 &alive_index_buffers,
             )
         } else {
@@ -695,7 +688,10 @@ impl ParticleSystem {
             uniforms: bytemuck::Zeroable::zeroed(),
             render_uniforms: bytemuck::Zeroable::zeroed(),
             alive_count: 0,
-            storage_buffers,
+            pos_life_buffers,
+            vel_size_buffers,
+            color_buffers,
+            flags_buffers,
             current: 0,
             counter_buffer,
             alive_index_buffers,
@@ -1212,7 +1208,10 @@ impl ParticleSystem {
             device,
             &self.compute_bgl,
             &self.uniform_buffer,
-            &self.storage_buffers,
+            &self.pos_life_buffers,
+            &self.vel_size_buffers,
+            &self.color_buffers,
+            &self.flags_buffers,
             &self.counter_buffer,
             &self.aux_buffer,
             &self.dead_index_buffer,
@@ -1440,7 +1439,7 @@ impl ParticleSystem {
         let hash = SpatialHashGrid::new(
             device,
             self.max_particles,
-            &self.storage_buffers,
+            &self.pos_life_buffers,
             &self.uniform_buffer,
         );
         self.spatial_hash = Some(hash);
@@ -1568,24 +1567,29 @@ impl ParticleSystem {
             }],
         });
 
-        // Trail render bind group layout
+        // Trail render bind group layout — SoA: 4 component buffers + uniforms + alive + trail
+        let trail_render_storage_ro = |binding: u32| -> BindGroupLayoutEntry {
+            BindGroupLayoutEntry {
+                binding,
+                visibility: ShaderStages::VERTEX,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }
+        };
         let trail_render_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("particle-trail-render-bgl"),
             entries: &[
-                // binding 0: particles (read)
+                trail_render_storage_ro(0), // pos_life
+                trail_render_storage_ro(1), // vel_size
+                trail_render_storage_ro(2), // color
+                trail_render_storage_ro(3), // flags
+                // binding 4: render uniforms
                 BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::VERTEX,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // binding 1: render uniforms
-                BindGroupLayoutEntry {
-                    binding: 1,
+                    binding: 4,
                     visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
@@ -1594,28 +1598,8 @@ impl ParticleSystem {
                     },
                     count: None,
                 },
-                // binding 2: alive_indices (read)
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::VERTEX,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // binding 3: trail buffer (read)
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::VERTEX,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
+                trail_render_storage_ro(5), // alive_indices
+                trail_render_storage_ro(6), // trail buffer
             ],
         });
 
@@ -1623,7 +1607,10 @@ impl ParticleSystem {
         let trail_render_bind_groups = create_trail_render_bind_groups(
             device,
             &trail_render_bgl,
-            &self.storage_buffers,
+            &self.pos_life_buffers,
+            &self.vel_size_buffers,
+            &self.color_buffers,
+            &self.flags_buffers,
             &self.render_uniform_buffer,
             &self.alive_index_buffers,
             &trail_buffer,
@@ -1823,80 +1810,53 @@ fn create_compute_bind_groups(
     device: &Device,
     layout: &BindGroupLayout,
     uniform_buffer: &wgpu::Buffer,
-    storage_buffers: &[wgpu::Buffer; 2],
+    pos_life_buffers: &[wgpu::Buffer; 2],
+    vel_size_buffers: &[wgpu::Buffer; 2],
+    color_buffers: &[wgpu::Buffer; 2],
+    flags_buffers: &[wgpu::Buffer; 2],
     counter_buffer: &wgpu::Buffer,
     aux_buffer: &wgpu::Buffer,
     dead_index_buffer: &wgpu::Buffer,
     alive_index_buffers: &[wgpu::Buffer; 2],
 ) -> [BindGroup; 2] {
-    // bind_group[0]: read from storage[0], write to storage[1], write to alive_indices[1]
+    // bind_group[0]: read from [0], write to [1]
     let bg0 = device.create_bind_group(&BindGroupDescriptor {
         label: Some("particle-compute-bg-0"),
         layout,
         entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: storage_buffers[0].as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: storage_buffers[1].as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 3,
-                resource: counter_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 4,
-                resource: aux_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 5,
-                resource: dead_index_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 6,
-                resource: alive_index_buffers[1].as_entire_binding(),
-            },
+            BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+            BindGroupEntry { binding: 1, resource: pos_life_buffers[0].as_entire_binding() },
+            BindGroupEntry { binding: 2, resource: vel_size_buffers[0].as_entire_binding() },
+            BindGroupEntry { binding: 3, resource: color_buffers[0].as_entire_binding() },
+            BindGroupEntry { binding: 4, resource: flags_buffers[0].as_entire_binding() },
+            BindGroupEntry { binding: 5, resource: pos_life_buffers[1].as_entire_binding() },
+            BindGroupEntry { binding: 6, resource: vel_size_buffers[1].as_entire_binding() },
+            BindGroupEntry { binding: 7, resource: color_buffers[1].as_entire_binding() },
+            BindGroupEntry { binding: 8, resource: flags_buffers[1].as_entire_binding() },
+            BindGroupEntry { binding: 9, resource: counter_buffer.as_entire_binding() },
+            BindGroupEntry { binding: 10, resource: aux_buffer.as_entire_binding() },
+            BindGroupEntry { binding: 11, resource: dead_index_buffer.as_entire_binding() },
+            BindGroupEntry { binding: 12, resource: alive_index_buffers[1].as_entire_binding() },
         ],
     });
-    // bind_group[1]: read from storage[1], write to storage[0], write to alive_indices[0]
+    // bind_group[1]: read from [1], write to [0]
     let bg1 = device.create_bind_group(&BindGroupDescriptor {
         label: Some("particle-compute-bg-1"),
         layout,
         entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: storage_buffers[1].as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: storage_buffers[0].as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 3,
-                resource: counter_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 4,
-                resource: aux_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 5,
-                resource: dead_index_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 6,
-                resource: alive_index_buffers[0].as_entire_binding(),
-            },
+            BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+            BindGroupEntry { binding: 1, resource: pos_life_buffers[1].as_entire_binding() },
+            BindGroupEntry { binding: 2, resource: vel_size_buffers[1].as_entire_binding() },
+            BindGroupEntry { binding: 3, resource: color_buffers[1].as_entire_binding() },
+            BindGroupEntry { binding: 4, resource: flags_buffers[1].as_entire_binding() },
+            BindGroupEntry { binding: 5, resource: pos_life_buffers[0].as_entire_binding() },
+            BindGroupEntry { binding: 6, resource: vel_size_buffers[0].as_entire_binding() },
+            BindGroupEntry { binding: 7, resource: color_buffers[0].as_entire_binding() },
+            BindGroupEntry { binding: 8, resource: flags_buffers[0].as_entire_binding() },
+            BindGroupEntry { binding: 9, resource: counter_buffer.as_entire_binding() },
+            BindGroupEntry { binding: 10, resource: aux_buffer.as_entire_binding() },
+            BindGroupEntry { binding: 11, resource: dead_index_buffer.as_entire_binding() },
+            BindGroupEntry { binding: 12, resource: alive_index_buffers[0].as_entire_binding() },
         ],
     });
     [bg0, bg1]
@@ -1970,120 +1930,71 @@ fn create_flow_field_bind_group(
 fn create_render_bind_groups(
     device: &Device,
     layout: &BindGroupLayout,
-    storage_buffers: &[wgpu::Buffer; 2],
+    pos_life_buffers: &[wgpu::Buffer; 2],
+    vel_size_buffers: &[wgpu::Buffer; 2],
+    color_buffers: &[wgpu::Buffer; 2],
+    flags_buffers: &[wgpu::Buffer; 2],
     render_uniform_buffer: &wgpu::Buffer,
     alive_index_buffers: &[wgpu::Buffer; 2],
 ) -> [BindGroup; 2] {
-    // bg[0]: particles from storage[0], alive_indices from alive_index[0]
-    let bg0 = device.create_bind_group(&BindGroupDescriptor {
-        label: Some("particle-render-bg-0"),
-        layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: storage_buffers[0].as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: render_uniform_buffer,
-                    offset: 0,
-                    size: None,
-                }),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: alive_index_buffers[0].as_entire_binding(),
-            },
-        ],
-    });
-    // bg[1]: particles from storage[1], alive_indices from alive_index[1]
-    let bg1 = device.create_bind_group(&BindGroupDescriptor {
-        label: Some("particle-render-bg-1"),
-        layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: storage_buffers[1].as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: render_uniform_buffer,
-                    offset: 0,
-                    size: None,
-                }),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: alive_index_buffers[1].as_entire_binding(),
-            },
-        ],
-    });
-    [bg0, bg1]
+    let make_bg = |i: usize, label: &str| -> BindGroup {
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some(label),
+            layout,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: pos_life_buffers[i].as_entire_binding() },
+                BindGroupEntry { binding: 1, resource: vel_size_buffers[i].as_entire_binding() },
+                BindGroupEntry { binding: 2, resource: color_buffers[i].as_entire_binding() },
+                BindGroupEntry { binding: 3, resource: flags_buffers[i].as_entire_binding() },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: render_uniform_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+                BindGroupEntry { binding: 5, resource: alive_index_buffers[i].as_entire_binding() },
+            ],
+        })
+    };
+    [make_bg(0, "particle-render-bg-0"), make_bg(1, "particle-render-bg-1")]
 }
 
 fn create_trail_render_bind_groups(
     device: &Device,
     layout: &BindGroupLayout,
-    storage_buffers: &[wgpu::Buffer; 2],
+    pos_life_buffers: &[wgpu::Buffer; 2],
+    vel_size_buffers: &[wgpu::Buffer; 2],
+    color_buffers: &[wgpu::Buffer; 2],
+    flags_buffers: &[wgpu::Buffer; 2],
     render_uniform_buffer: &wgpu::Buffer,
     alive_index_buffers: &[wgpu::Buffer; 2],
     trail_buffer: &wgpu::Buffer,
 ) -> [BindGroup; 2] {
-    let bg0 = device.create_bind_group(&BindGroupDescriptor {
-        label: Some("particle-trail-render-bg-0"),
-        layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: storage_buffers[0].as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: render_uniform_buffer,
-                    offset: 0,
-                    size: None,
-                }),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: alive_index_buffers[0].as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 3,
-                resource: trail_buffer.as_entire_binding(),
-            },
-        ],
-    });
-    let bg1 = device.create_bind_group(&BindGroupDescriptor {
-        label: Some("particle-trail-render-bg-1"),
-        layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: storage_buffers[1].as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: render_uniform_buffer,
-                    offset: 0,
-                    size: None,
-                }),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: alive_index_buffers[1].as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 3,
-                resource: trail_buffer.as_entire_binding(),
-            },
-        ],
-    });
-    [bg0, bg1]
+    let make_bg = |i: usize, label: &str| -> BindGroup {
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some(label),
+            layout,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: pos_life_buffers[i].as_entire_binding() },
+                BindGroupEntry { binding: 1, resource: vel_size_buffers[i].as_entire_binding() },
+                BindGroupEntry { binding: 2, resource: color_buffers[i].as_entire_binding() },
+                BindGroupEntry { binding: 3, resource: flags_buffers[i].as_entire_binding() },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: render_uniform_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+                BindGroupEntry { binding: 5, resource: alive_index_buffers[i].as_entire_binding() },
+                BindGroupEntry { binding: 6, resource: trail_buffer.as_entire_binding() },
+            ],
+        })
+    };
+    [make_bg(0, "particle-trail-render-bg-0"), make_bg(1, "particle-trail-render-bg-1")]
 }
 
 fn create_trail_prepare_indirect_pipeline(
@@ -2203,7 +2114,7 @@ fn create_sort_resources(
     device: &Device,
     max_particles: u32,
     counter_buffer: &wgpu::Buffer,
-    storage_buffers: &[wgpu::Buffer; 2],
+    vel_size_buffers: &[wgpu::Buffer; 2],
     alive_index_buffers: &[wgpu::Buffer; 2],
 ) -> (
     Option<wgpu::Buffer>,          // sort_key_buffer
@@ -2332,7 +2243,7 @@ fn create_sort_resources(
             layout: &keygen_bgl,
             entries: &[
                 BindGroupEntry { binding: 0, resource: counter_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: storage_buffers[1].as_entire_binding() },
+                BindGroupEntry { binding: 1, resource: vel_size_buffers[1].as_entire_binding() },
                 BindGroupEntry { binding: 2, resource: alive_index_buffers[1].as_entire_binding() },
                 BindGroupEntry { binding: 3, resource: sort_key_buffer.as_entire_binding() },
             ],
@@ -2342,7 +2253,7 @@ fn create_sort_resources(
             layout: &keygen_bgl,
             entries: &[
                 BindGroupEntry { binding: 0, resource: counter_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: storage_buffers[0].as_entire_binding() },
+                BindGroupEntry { binding: 1, resource: vel_size_buffers[0].as_entire_binding() },
                 BindGroupEntry { binding: 2, resource: alive_index_buffers[0].as_entire_binding() },
                 BindGroupEntry { binding: 3, resource: sort_key_buffer.as_entire_binding() },
             ],

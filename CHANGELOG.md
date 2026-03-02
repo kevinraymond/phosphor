@@ -5,6 +5,15 @@
 
 ## Unreleased
 
+### AoS → SoA Particle Buffer Refactor
+- **Structure of Arrays layout**: split single 64-byte `Particle` storage buffer into 4 separate 16-byte SoA buffers (`pos_life`, `vel_size`, `color`, `flags`) — position-only reads (spatial hash, sort keygen) now load 16 instead of 64 bytes per particle (4× bandwidth savings)
+- **13-entry compute bind group**: bindings 1-4 read, 5-8 write, 9 counters, 10 aux, 11 dead, 12 alive indices
+- **6-entry render bind group**: 4 SoA read buffers + uniforms + alive indices
+- **`read_particle()` / `write_particle()` helpers** in particle_lib.wgsl — effect compute shaders use convenience functions, hot-path neighbor reads (murmur boids) access individual arrays directly
+- **Spatial hash and sort keygen optimized**: count/scatter shaders bind only `pos_life`, sort keygen binds only `vel_size`
+- Request `max_storage_buffers_per_shader_stage: 16` (all desktop GPUs support this)
+- Total memory identical (64 bytes/particle), just reorganized for better GPU cache line utilization
+
 ### Raster Shard Flex
 - **Flexible shard motion**: Voronoi shards deform organically instead of moving as rigid blocks — distance-dependent rotation twist, per-particle noise within shards, and wider burst spread with outer particles flying further
 

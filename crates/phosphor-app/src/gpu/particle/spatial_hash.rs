@@ -47,7 +47,7 @@ impl SpatialHashGrid {
     pub fn new(
         device: &Device,
         max_particles: u32,
-        storage_buffers: &[wgpu::Buffer; 2],
+        pos_life_buffers: &[wgpu::Buffer; 2],
         uniform_buffer: &wgpu::Buffer,
     ) -> Self {
         // Buffers
@@ -76,7 +76,7 @@ impl SpatialHashGrid {
         let count_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("spatial-hash-count-bgl"),
             entries: &[
-                // binding 0: particles (read)
+                // binding 0: pos_life (read)
                 bgl_storage_entry(0, true),
                 // binding 1: cell_counts (read_write atomic)
                 bgl_storage_entry(1, false),
@@ -92,10 +92,10 @@ impl SpatialHashGrid {
 
         let count_bind_groups = [
             create_count_bind_group(
-                device, &count_bgl, &storage_buffers[0], &cell_counts_buffer, uniform_buffer,
+                device, &count_bgl, &pos_life_buffers[0], &cell_counts_buffer, uniform_buffer,
             ),
             create_count_bind_group(
-                device, &count_bgl, &storage_buffers[1], &cell_counts_buffer, uniform_buffer,
+                device, &count_bgl, &pos_life_buffers[1], &cell_counts_buffer, uniform_buffer,
             ),
         ];
 
@@ -135,7 +135,7 @@ impl SpatialHashGrid {
         let scatter_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("spatial-hash-scatter-bgl"),
             entries: &[
-                // binding 0: particles (read)
+                // binding 0: pos_life (read)
                 bgl_storage_entry(0, true),
                 // binding 1: cell_offsets (read_write atomic — scatter uses atomicAdd for local offset)
                 bgl_storage_entry(1, false),
@@ -156,7 +156,7 @@ impl SpatialHashGrid {
             create_scatter_bind_group(
                 device,
                 &scatter_bgl,
-                &storage_buffers[0],
+                &pos_life_buffers[0],
                 &cell_offsets_buffer,
                 &sorted_indices_buffer,
                 uniform_buffer,
@@ -164,7 +164,7 @@ impl SpatialHashGrid {
             create_scatter_bind_group(
                 device,
                 &scatter_bgl,
-                &storage_buffers[1],
+                &pos_life_buffers[1],
                 &cell_offsets_buffer,
                 &sorted_indices_buffer,
                 uniform_buffer,
@@ -330,7 +330,7 @@ fn create_compute_pipeline(
 fn create_count_bind_group(
     device: &Device,
     layout: &BindGroupLayout,
-    particles: &wgpu::Buffer,
+    pos_life: &wgpu::Buffer,
     cell_counts: &wgpu::Buffer,
     uniforms: &wgpu::Buffer,
 ) -> BindGroup {
@@ -340,7 +340,7 @@ fn create_count_bind_group(
         entries: &[
             BindGroupEntry {
                 binding: 0,
-                resource: particles.as_entire_binding(),
+                resource: pos_life.as_entire_binding(),
             },
             BindGroupEntry {
                 binding: 1,
@@ -357,7 +357,7 @@ fn create_count_bind_group(
 fn create_scatter_bind_group(
     device: &Device,
     layout: &BindGroupLayout,
-    particles: &wgpu::Buffer,
+    pos_life: &wgpu::Buffer,
     cell_offsets: &wgpu::Buffer,
     sorted_indices: &wgpu::Buffer,
     uniforms: &wgpu::Buffer,
@@ -368,7 +368,7 @@ fn create_scatter_bind_group(
         entries: &[
             BindGroupEntry {
                 binding: 0,
-                resource: particles.as_entire_binding(),
+                resource: pos_life.as_entire_binding(),
             },
             BindGroupEntry {
                 binding: 1,

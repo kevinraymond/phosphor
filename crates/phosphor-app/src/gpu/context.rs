@@ -32,7 +32,10 @@ impl GpuContext {
         let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
             label: Some("phosphor-device"),
             required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
+            required_limits: wgpu::Limits {
+                max_storage_buffers_per_shader_stage: 16,
+                ..wgpu::Limits::default()
+            },
             experimental_features: ExperimentalFeatures::default(),
             memory_hints: MemoryHints::Performance,
             trace: Trace::Off,
