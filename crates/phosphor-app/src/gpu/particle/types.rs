@@ -115,8 +115,8 @@ pub struct ParticleUniforms {
     pub curve_flags: u32, // bit 0 = size curve, bit 1 = opacity curve
     pub depth_sort: u32,
 
-    // Padding to 384 bytes (32 bytes) [352..383]
-    pub _pad384: [f32; 8],
+    // Effect params forwarded from ParamStore (32 bytes) [352..383]
+    pub effect_params: [f32; 8],
     // Total = 384 bytes
 }
 

@@ -50,7 +50,7 @@ fn emit_particle(idx: u32) -> Particle {
     let r_c = abs(hue * 6.0 - 3.0) - 1.0;
     let g_c = 2.0 - abs(hue * 6.0 - 2.0);
     let b_c = 2.0 - abs(hue * 6.0 - 4.0);
-    let brightness = 0.035 / (1.0 + u.rms * 3.0);
+    let brightness = 0.02 / (1.0 + u.rms * 3.0);
 
     // Stagger initial age
     let initial_age = hash(seed_base + 9.0) * u.lifetime * 0.5;
@@ -136,8 +136,8 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let fade_in = smoothstep(0.0, 0.1, life_frac);
     let fade_out = 1.0 - smoothstep(0.7, 1.0, life_frac);
     let fold_boost = smoothstep(0.02, 0.2, disp_mag);
-    let loudness_dampen = 1.0 / (1.0 + (u.bass + u.mid) * 3.0);
-    let alpha = (0.01 + 0.04 * fold_boost) * fade_in * fade_out * loudness_dampen;
+    let loudness_dampen = 1.0 / (1.0 + max(u.bass + u.mid, 0.15) * 3.0);
+    let alpha = (0.005 + 0.025 * fold_boost) * fade_in * fade_out * loudness_dampen;
 
     // Gentle color evolution
     var col = p.color.rgb;

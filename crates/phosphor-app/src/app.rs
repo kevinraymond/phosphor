@@ -771,6 +771,11 @@ impl App {
                         self.uniforms.resolution,
                         self.uniforms.beat,
                     );
+                    // Forward first 8 effect params to compute shader
+                    let p = e.uniforms.params;
+                    ps.uniforms.effect_params = [
+                        p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7],
+                    ];
                     ps.update_audio(
                         self.uniforms.sub_bass,
                         self.uniforms.bass,

@@ -22,13 +22,13 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     // Faster decay when loud to prevent accumulation blowout
     let base_decay = param(1u);
     let loudness = u.rms + u.bass * 0.5;
-    let decay = base_decay * (1.0 - loudness * 0.15);
+    let decay = base_decay * (1.0 - loudness * 0.25);
 
     // Apply decay
     var col = prev.rgb * decay;
 
     // Cap prevents feedback saturation (additive particles fill the screen)
-    col = min(col, vec3f(0.4));
+    col = min(col, vec3f(0.15));
 
     // Gentle horizontal gradient tint based on color_shift param
     let color_shift = param(3u);

@@ -5,6 +5,18 @@
 
 ## Unreleased
 
+### Particle Effects Overhaul
+- **Delete 4 effects**: removed Coral, Helix, Nova, Vortex (low quality, never worked well)
+- **Murmuration → Murmur**: renamed, removed feedback trails (root cause of "sperm" look), brighter sky for contrast, larger/darker/more opaque particles (0.014 size, 0.9 alpha), reduced count 70K→40K
+- **Ribbons fix**: lower feedback clamp 0.12→0.06, stronger vignette, halved particle brightness and alpha to prevent additive washout
+- **Veil fix**: lower feedback cap 0.4→0.15, stronger decay dampening, halved particle brightness and alpha, minimum dampening floor even without audio
+- **Cymatics enhancement**: 25K→50K particles, emit rate 1700→3500, burst 100→500, 3 new params (rotation, symmetry, glow), more vivid color gradient, stronger nodal line contrast
+- **Swarm → Spirograph**: complete reimagine — hypotrochoid parametric curves with 5 arms of different petal-count patterns, drifting centers, audio-reactive ratio morphing. 6 params: trail_decay, draw_speed, pattern_scale, complexity, drift, color_spread
+- **Spirograph** (new): multi-pattern hypotrochoid curves with 5 arms of distinct petal-count patterns, drifting centers, audio-reactive ratio morphing. Replaces Swarm.
+- **Compute shader `param()` access**: particle compute shaders can now access effect params 0-7 via `param(i)` helper, forwarded from ParamStore through `effect_params` fields in ParticleUniforms (repurposed padding bytes, no size change)
+- Updated Crucible and Spectral Eye presets (Swarm→Spirograph)
+- Effect count: 15 curated effects (was 12 before particle additions, peaked at 19, now curated down to 15)
+
 ### Particle System Hardening for 1M Support
 - **GPU-side buffer zero-init**: replaced CPU `vec![0u8; 128MB]` + `write_buffer` with `encoder.clear_buffer()` — eliminates 128MB+ CPU allocation at 1M particles
 - **Device limits validation**: `max_count` clamped to device `max_storage_buffer_binding_size` with log warning

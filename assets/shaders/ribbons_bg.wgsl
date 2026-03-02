@@ -24,11 +24,11 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
 
     // Hard ceiling — with 128K additive trail draws per frame,
     // feedback must stay very low or it accumulates to solid color
-    let clamped = min(trail, vec3f(0.12));
+    let clamped = min(trail, vec3f(0.06));
 
     // Vignette helps edges stay dark
     let center = uv - 0.5;
-    let vign = 1.0 - dot(center, center) * 0.8;
+    let vign = 1.0 - dot(center, center) * 1.2;
     let result = clamped * max(vign, 0.0);
 
     let alpha = clamp(max(result.r, max(result.g, result.b)) * 2.0, 0.0, 1.0);

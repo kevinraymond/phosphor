@@ -1,4 +1,4 @@
-// Murmuration particle simulation — Full Boids flocking model.
+// Murmur particle simulation — Full Boids flocking model.
 // Three forces: separation (avoid crowding), alignment (match heading), cohesion (steer to center).
 // Heading smoothing via angular low-pass filter eliminates jitter.
 // Audio-reactive order-disorder phase transitions.
@@ -24,7 +24,7 @@ fn emit_particle(idx: u32) -> Particle {
         let grad = eval_color_gradient(t);
         col = grad.rgb;
     } else {
-        let tone = 0.06 + hash(seed_base + 5.0) * 0.04;
+        let tone = 0.04 + hash(seed_base + 5.0) * 0.03;
         col = vec3f(tone);
     }
 
@@ -33,7 +33,7 @@ fn emit_particle(idx: u32) -> Particle {
 
     p.pos_life = vec4f(pos, init_size, 1.0);
     p.vel_size = vec4f(vel, 0.0, init_size);
-    p.color = vec4f(col, 0.7);
+    p.color = vec4f(col, 0.9);
     p.flags = vec4f(initial_age, u.lifetime, angle, 0.0);
     return p;
 }
@@ -204,16 +204,15 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     // --- Alpha: opaque birds with fade in/out ---
     let fade_in = smoothstep(0.0, 0.03, life_frac);
     let fade_out = 1.0 - smoothstep(0.85, 1.0, life_frac);
-    var alpha = 0.7 * fade_in * fade_out;
+    var alpha = 0.9 * fade_in * fade_out;
     // Apply opacity curve if available
     alpha *= eval_opacity_curve(life_frac);
 
-    // --- Color: subtle audio-reactive warmth shift ---
+    // --- Color: truly dark silhouettes, no brightness boost ---
     var col = p.color.rgb;
     let warmth = u.centroid * 0.03;
     col += vec3f(warmth, 0.0, -warmth * 0.5);
-    col *= 1.0 + u.rms * 0.25;
-    col = clamp(col, vec3f(0.0), vec3f(0.3));
+    col = clamp(col, vec3f(0.0), vec3f(0.15));
 
     p.pos_life = vec4f(new_pos, init_size, 1.0);
     p.vel_size = vec4f(vel, 0.0, size);

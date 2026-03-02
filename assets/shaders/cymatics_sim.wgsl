@@ -3,6 +3,7 @@
 // cos(npi*x)cos(mpi*y) - cos(mpi*x)cos(npi*y) = 0
 // Audio frequency bands select mode numbers, creating evolving geometric patterns.
 // Smooth crossfade between modes on audio changes.
+// Rotation, symmetry folding, and glow params for visual variety.
 // Structs, bindings, and helpers are in particle_lib.wgsl (auto-prepended).
 
 const PI: f32 = 3.14159265;
@@ -15,11 +16,28 @@ fn chladni(p: vec2f, n: f32, m: f32) -> f32 {
 fn chladni_gradient(p: vec2f, n: f32, m: f32) -> vec2f {
     let npi = n * PI;
     let mpi = m * PI;
-    // d/dx [cos(npi*x)*cos(mpi*y) - cos(mpi*x)*cos(npi*y)]
     let dx = -npi * sin(npi * p.x) * cos(mpi * p.y) + mpi * sin(mpi * p.x) * cos(npi * p.y);
-    // d/dy
     let dy = -mpi * cos(npi * p.x) * sin(mpi * p.y) + npi * cos(mpi * p.x) * sin(npi * p.y);
     return vec2f(dx, dy);
+}
+
+// Rotate a 2D point
+fn rotate2d(p: vec2f, angle: f32) -> vec2f {
+    let c = cos(angle);
+    let s = sin(angle);
+    return vec2f(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+// Apply symmetry folding: 0=none, 0.5=bilateral, 1.0=quad
+fn fold_symmetry(p: vec2f, sym: f32) -> vec2f {
+    var q = p;
+    if sym > 0.25 {
+        q.x = abs(q.x); // bilateral mirror
+    }
+    if sym > 0.75 {
+        q.y = abs(q.y); // quad mirror
+    }
+    return q;
 }
 
 fn emit_particle(idx: u32) -> Particle {
@@ -89,6 +107,16 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     var vel = p.vel_size.xy;
     let pos = p.pos_life.xy;
 
+    // Params
+    let rotation_param = param(4u);   // rotation speed
+    let symmetry_param = param(5u);   // symmetry folding
+    let glow_param = param(6u);       // glow multiplier
+
+    // Transform position for Chladni evaluation: rotate + fold
+    let rot_angle = u.time * rotation_param * 0.5;
+    var eval_pos = rotate2d(pos, rot_angle);
+    eval_pos = fold_symmetry(eval_pos, symmetry_param);
+
     // Mode numbers from audio — smooth (not floor'd) for crossfade
     let n_float = 1.0 + u.bass * 3.0 + 0.5;
     let m_float = 2.0 + u.mid * 5.0 + 0.5;
@@ -102,17 +130,20 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let m_frac = m_float - m_lo;
 
     // Evaluate chladni at 4 corners of mode grid, blend
-    let val_ll = chladni(pos, n_lo, m_lo);
-    let val_lh = chladni(pos, n_lo, m_hi);
-    let val_hl = chladni(pos, n_hi, m_lo);
-    let val_hh = chladni(pos, n_hi, m_hi);
+    let val_ll = chladni(eval_pos, n_lo, m_lo);
+    let val_lh = chladni(eval_pos, n_lo, m_hi);
+    let val_hl = chladni(eval_pos, n_hi, m_lo);
+    let val_hh = chladni(eval_pos, n_hi, m_hi);
     let val = mix(mix(val_ll, val_lh, m_frac), mix(val_hl, val_hh, m_frac), n_frac);
 
-    let grad_ll = chladni_gradient(pos, n_lo, m_lo);
-    let grad_lh = chladni_gradient(pos, n_lo, m_hi);
-    let grad_hl = chladni_gradient(pos, n_hi, m_lo);
-    let grad_hh = chladni_gradient(pos, n_hi, m_hi);
-    let grad = mix(mix(grad_ll, grad_lh, m_frac), mix(grad_hl, grad_hh, m_frac), n_frac);
+    let grad_ll = chladni_gradient(eval_pos, n_lo, m_lo);
+    let grad_lh = chladni_gradient(eval_pos, n_lo, m_hi);
+    let grad_hl = chladni_gradient(eval_pos, n_hi, m_lo);
+    let grad_hh = chladni_gradient(eval_pos, n_hi, m_hi);
+    var grad = mix(mix(grad_ll, grad_lh, m_frac), mix(grad_hl, grad_hh, m_frac), n_frac);
+
+    // Un-rotate gradient back to world space
+    grad = rotate2d(grad, -rot_angle);
     let grad_len = length(grad);
 
     // Attraction toward nodal lines (zero crossings)
@@ -149,16 +180,17 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     if new_pos.y < -edge { vel.y -= (new_pos.y + edge) * bstr * dt; }
     new_pos = clamp(new_pos, vec2f(-1.05), vec2f(1.05));
 
-    // Size: larger on nodal lines, with curve
+    // Size: larger on nodal lines, with stronger contrast
     let on_line = exp(-abs(val) * 10.0);
     let init_size = p.pos_life.z;
     let base_size = mix(init_size, u.size_end, life_frac * 0.3);
-    let size = base_size * (0.8 + 0.5 * on_line) * eval_size_curve(life_frac) * (1.0 + u.rms * 0.2);
+    let size = base_size * (0.6 + 0.8 * on_line) * eval_size_curve(life_frac) * (1.0 + u.rms * 0.2);
 
-    // Alpha: brighter on nodal lines
+    // Alpha: brighter on nodal lines, boosted by glow param
     let fade_in = smoothstep(0.0, 0.05, life_frac);
     let fade_out = 1.0 - smoothstep(0.75, 1.0, life_frac);
-    let alpha = p.color.a * fade_in * fade_out * (0.6 + 0.4 * on_line) * eval_opacity_curve(life_frac);
+    let glow_mult = 0.5 + glow_param * 1.5; // 0.5 to 2.0 range
+    let alpha = p.color.a * fade_in * fade_out * (0.5 + 0.5 * on_line) * eval_opacity_curve(life_frac) * glow_mult;
 
     let col = p.color.rgb;
 

@@ -85,9 +85,18 @@ struct ParticleUniforms {
     curve_flags: u32,
     depth_sort: u32,
 
-    // Padding to 384 bytes
-    _pad384a: vec4f,
-    _pad384b: vec4f,
+    // Effect params forwarded from ParamStore (8 floats = params 0..7)
+    effect_params_0: vec4f,
+    effect_params_1: vec4f,
+}
+
+// Access effect param by index (mirrors fragment shader's param() function).
+// Only params 0..7 are available in compute shaders.
+fn param(i: u32) -> f32 {
+    if i < 4u {
+        return u.effect_params_0[i];
+    }
+    return u.effect_params_1[i - 4u];
 }
 
 struct Particle {

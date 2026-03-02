@@ -114,7 +114,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - 7-band frequency visualization in audio panel
 - `treble` → `presence` + `brilliance`, `phase` → `beat_phase` in all shaders
 - ShaderUniforms: 256 bytes with 20 audio fields + params + feedback uniforms
-- ParticleUniforms: 384 bytes with 10 audio fields + forces (wind, vortex, ground) + noise (FBM octaves, curl mode) + emitter enhancements (cone, variance, velocity inherit) + lifetime curves (size, opacity, color gradient) + spin + depth sort
+- ParticleUniforms: 384 bytes with 10 audio fields + forces (wind, vortex, ground) + noise (FBM octaves, curl mode) + emitter enhancements (cone, variance, velocity inherit) + lifetime curves (size, opacity, color gradient) + spin + depth sort + 8 effect params forwarded from ParamStore
 
 #### MIDI Input
 - midir 0.10 integration: callback thread → crossbeam bounded(64) channel → main thread drain in `App::update()`
@@ -197,8 +197,9 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - `MidiSystem::update_triggers_only()`: drains MIDI but skips CC→param when active layer is locked
 
 #### Effect Set
-12 curated audio-reactive effects designed for compositing across layers:
+15 curated audio-reactive effects designed for compositing across layers:
 
+**Shader-only effects:**
 1. **Aurora** (`aurora.wgsl`) — 7 frequency bands as horizontal flowing northern light curtains. Params: curtain_speed, band_spread, glow_width. No feedback.
 2. **Drift** (`drift.wgsl`) — Triple domain-warped FBM fluid smoke with advected feedback. Params: warp_intensity, flow_speed, color_mode, density. Uses `mix()` feedback blend (not `max()`) so darks reclaim space.
 3. **Tunnel** (`tunnel.wgsl`) — Log-polar infinite cylindrical flythrough with wall panels, checkerboard shading, and twist rotation. Params: twist_amount (centered at 0.5 = no twist), speed, tunnel_radius, segments. No feedback. IMPORTANT: speed must NOT be multiplied by audio (`t * varying_value` causes back-and-forth jitter).
@@ -206,11 +207,16 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 5. **Shards** (`shards.wgsl`) — Animated Voronoi cells with stained-glass fill and glowing fracture edges. Params: cell_scale, edge_glow, fill_amount, saturation (0=gray, 0.5=normal, 1.0=vivid). No feedback.
 6. **Pulse** (`pulse.wgsl`) — Beat-synced concentric rings expanding from center with feedback trails. Params: ring_count, expansion_speed, ring_width. Uses feedback.
 7. **Iris** (`feedback_test.wgsl`) — Spinning dot with fading feedback trails. Params: trail_length. Uses feedback.
-8. **Swarm** (`spectral_eye_bg.wgsl` + `spectral_eye_sim.wgsl`) — Orbital particle cloud with custom compute shader. Params: orbit_speed, trail_decay. Uses feedback + particles.
-9. **Storm** (`storm.wgsl`) — Volumetric dark clouds with beat-triggered internal lightning. FBM-Worley density (smooth log-sum-exp Worley for puffy billow shapes), Beer-Lambert 4-step light march for self-shadowing, silver lining at cloud edges. Params: turbulence, flow_speed, flash_power, flash_spread. Uses feedback.
-10. **Veil** (`veil_bg.wgsl` + `veil_sim.wgsl`) — Flowing silk curtain with 6000 particles on screen emitter. Multi-layer displacement field (bass billow + mid ripple + noise flutter) with spring-return physics for coherent sheet motion. Params: flow_speed, trail_decay, wind_strength, color_shift, density. Uses feedback + particles.
-11. **Nova** (`nova_bg.wgsl` + `nova_sim.wgsl`) — Fireworks display with burst emission from random points. Two particle types: shells (20%, large, bright) and sparks (80%, small, flickering). Gravity, dripping feedback trails, ground glow. Params: trail_decay, gravity_strength, spread, sparkle. Uses feedback + particles.
-12. **Vortex** (`vortex_bg.wgsl` + `vortex_sim.wgsl`) — Gravity well with Newtonian 1/r² orbital mechanics forming an accretion disk. Event horizon kills inner particles. Beat-triggered polar jets. Gravitational lensing UV distortion in background. Params: trail_decay, gravity_well, event_horizon, jet_power, lensing. Uses feedback + particles.
+8. **Storm** (`storm.wgsl`) — Volumetric dark clouds with beat-triggered internal lightning. FBM-Worley density (smooth log-sum-exp Worley for puffy billow shapes), Beer-Lambert 4-step light march for self-shadowing, silver lining at cloud edges. Params: turbulence, flow_speed, flash_power, flash_spread. Uses feedback.
+
+**Particle effects:**
+9. **Chaos** (`chaos_bg.wgsl` + `chaos_sim.wgsl`) — Strange attractor with Lorenz/Rossler trajectories. Audio-reactive bifurcation, XZ butterfly projection. Params: trail_decay, attractor, bifurcation, color_mode. Uses feedback + particles.
+10. **Cymatics** (`cymatics_bg.wgsl` + `cymatics_sim.wgsl`) — Standing wave Chladni nodal lines with 50K particles. Audio frequency bands select mode numbers. Rotation, symmetry folding, and glow params. Params: trail_decay, pattern_scale, attract_strength, color_mode, rotation, symmetry, glow. Uses feedback + particles.
+11. **Flux** (`flux_bg.wgsl` + `flux_sim.wgsl`) — Organic smoke with 3D curl noise flow field. Audio-reactive turbulence and color. Params: trail_decay, flow_scale, turbulence, color_mode. Uses feedback + particles.
+12. **Murmur** (`murmur_bg.wgsl` + `murmur_sim.wgsl`) — Starling murmuration with full Boids flocking (separation, cohesion, alignment). 40K dark bird silhouettes against twilight sky, no feedback trails. Params: order, flock_speed, color_mode. Uses particles (alpha blend, spatial hash).
+13. **Ribbons** (`ribbons_bg.wgsl` + `ribbons_sim.wgsl`) — Sweeping ribbons with curl noise flow field and 16-point trail strips. Params: trail_decay, flow_intensity, color_mode, ribbon_width. Uses feedback + particles (trails).
+14. **Spirograph** (`spirograph_bg.wgsl` + `spirograph_sim.wgsl`) — Multi-pattern hypotrochoid curves. 5 arms with distinct k-ratios trace evolving petal patterns, drifting centers. Params: trail_decay, draw_speed, pattern_scale, complexity, drift, color_spread. Uses feedback + particles.
+15. **Veil** (`veil_bg.wgsl` + `veil_sim.wgsl`) — Flowing silk curtain with 5000 particles on screen emitter. Multi-layer displacement field (bass billow + mid ripple + noise flutter) with spring-return physics for coherent sheet motion. Params: flow_speed, trail_decay, wind_strength, color_shift, density. Uses feedback + particles.
 
 **Bundled preset**: "Crucible" (`~/.config/phosphor/presets/Crucible.json`) — all 8 layers composited with tuned blend modes, opacities, and params.
 
@@ -282,6 +288,7 @@ egui Overlay → Surface
 - Particle render uses vertex-pulling (no vertex buffer) — 6 vertices per instance expand to screen-space quads with aspect ratio correction. Spin rotation applied to corner offsets in vs_main when `pos_life.z != 0`.
 - Bitonic depth sort: optional GPU merge-sort on alive indices by particle size. Key generation pass + `log2(N)*(log2(N)+1)/2` swap passes using dynamic uniform buffer offsets. Only created when `depth_sort: true` in .pfx.
 - `apply_builtin_forces()` in particle_lib.wgsl: single call for all forces. Custom compute shaders can call it or ignore it. Falls back to legacy hash turbulence when `noise_octaves=0`.
+- Effect params in compute shaders: `param(i)` helper (i=0..7) reads from `effect_params` fields forwarded from ParamStore. Allows compute shaders to access the same params as fragment shaders. Packed in `update()` loop in app.rs.
 - Lifetime curves: 8-point LUTs packed as `array<vec4f, 2>` in WGSL. `pack_curve_lut()` in Rust resamples variable-length input to 8 points via linear interpolation. `curve_flags` bitmask gates evaluation (bit 0=size, bit 1=opacity).
 - Color gradient: up to 8 packed RGBA u32 in `array<vec4u, 2>`. `parse_hex_color()` converts "#RRGGBB"/"#RRGGBBAA" to `(R<<24|G<<16|B<<8|A)`. `gradient_count` gates evaluation. `read_gradient()` indexes into the vec4u pair.
 - midir 0.10: `MidiInputConnection<()>` is RAII — drop closes the port. No explicit close needed.
