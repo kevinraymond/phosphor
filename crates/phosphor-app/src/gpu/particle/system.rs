@@ -9,7 +9,10 @@ use wgpu::{
 use super::flow_field::FlowFieldTexture;
 use super::spatial_hash::SpatialHashGrid;
 use super::sprite::SpriteAtlas;
-use super::types::{Particle, ParticleAux, ParticleDef, ParticleRenderUniforms, ParticleUniforms};
+use super::types::{
+    ImageSampleDef, Particle, ParticleAux, ParticleDef, ParticleImageSource,
+    ParticleRenderUniforms, ParticleUniforms, SourceTransition,
+};
 
 const WORKGROUP_SIZE: u32 = 256;
 
@@ -115,6 +118,15 @@ pub struct ParticleSystem {
     pub def: ParticleDef,
     /// Tracked for content-change detection in hot-reload.
     pub current_compute_source: String,
+
+    // --- Particle image source (video/webcam/static) ---
+    pub image_source: ParticleImageSource,
+    pub source_transition: Option<SourceTransition>,
+    pub sample_def: ImageSampleDef,
+    /// Path to the video file (for preset save/load).
+    pub video_path: Option<String>,
+    /// Cached aux data for the current static source (used as transition "from").
+    pub current_aux: Vec<ParticleAux>,
 }
 
 impl ParticleSystem {
@@ -222,7 +234,9 @@ impl ParticleSystem {
         queue.write_buffer(&indirect_args_buffer, 0, bytemuck::cast_slice(&[6u32, 0, 0, 0]));
 
         // Auxiliary buffer (home positions for image decomposition)
-        let aux_size = std::mem::size_of::<ParticleAux>() as u64;
+        // Pre-allocate at max_particles size so updates can use write_buffer without
+        // recreating the buffer or bind groups (enables per-frame video source updates).
+        let aux_size = (std::mem::size_of::<ParticleAux>() * max_particles as usize).max(16) as u64;
         let aux_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("particle-aux"),
             size: aux_size,
@@ -743,6 +757,15 @@ impl ParticleSystem {
             burst_on_beat: def.burst_on_beat,
             def: def.clone(),
             current_compute_source: compute_source.to_string(),
+            image_source: ParticleImageSource::Static,
+            source_transition: None,
+            sample_def: def.image_sample.clone().unwrap_or(ImageSampleDef {
+                mode: "grid".to_string(),
+                threshold: 0.1,
+                scale: 1.0,
+            }),
+            video_path: None,
+            current_aux: Vec::new(),
         })
     }
 
@@ -1195,6 +1218,170 @@ impl ParticleSystem {
             &self.dead_index_buffer,
             &self.alive_index_buffers,
         );
+    }
+
+    /// Update aux data via write_buffer without recreating buffer or bind groups.
+    /// Buffer must already be pre-allocated at max_particles size (done in `new()`).
+    /// Used for per-frame updates when video/webcam source changes particle home positions.
+    pub fn update_aux_in_place(&self, queue: &Queue, data: &[ParticleAux]) {
+        if data.is_empty() {
+            return;
+        }
+        let byte_len = (std::mem::size_of::<ParticleAux>() * data.len()) as u64;
+        if byte_len <= self.aux_buffer.size() {
+            queue.write_buffer(&self.aux_buffer, 0, bytemuck::cast_slice(data));
+        }
+    }
+
+    /// Advance the particle image source (video playback). If the frame changed,
+    /// re-samples aux data and uploads to GPU. Returns true if aux was updated.
+    pub fn update_source(&mut self, queue: &Queue, dt_secs: f64) -> bool {
+        if self.image_source.is_static() {
+            return false;
+        }
+
+        let frame_changed = self.image_source.advance(dt_secs);
+        if !frame_changed {
+            return false;
+        }
+
+        if let Some(frame) = self.image_source.current_frame_data() {
+            let aux = super::image_source::sample_rgba_buffer(
+                &frame.data,
+                frame.width,
+                frame.height,
+                &self.sample_def,
+                self.max_particles,
+            );
+            if !aux.is_empty() {
+                self.update_aux_in_place(queue, &aux);
+                self.current_aux = aux;
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Set a video file as the particle source. Initiates a transition from current aux.
+    #[cfg(feature = "video")]
+    pub fn set_video_source(
+        &mut self,
+        queue: &Queue,
+        frames: Vec<crate::media::types::DecodedFrame>,
+        delays_ms: Vec<u32>,
+        path: String,
+    ) {
+        // Sample first frame for immediate display + transition target
+        let first_aux = if let Some(frame) = frames.first() {
+            super::image_source::sample_rgba_buffer(
+                &frame.data,
+                frame.width,
+                frame.height,
+                &self.sample_def,
+                self.max_particles,
+            )
+        } else {
+            Vec::new()
+        };
+
+        // Start transition from current aux to new
+        if !self.current_aux.is_empty() && !first_aux.is_empty() {
+            self.source_transition = Some(SourceTransition {
+                from_aux: self.current_aux.clone(),
+                to_aux: first_aux.clone(),
+                progress: 0.0,
+                duration_secs: 0.5,
+            });
+        } else if !first_aux.is_empty() {
+            // No transition — just upload directly
+            self.update_aux_in_place(queue, &first_aux);
+        }
+
+        self.current_aux = first_aux;
+        self.has_aux_data = true;
+        self.video_path = Some(path);
+        self.image_source = ParticleImageSource::Video {
+            frames,
+            delays_ms,
+            current_frame: 0,
+            frame_elapsed_ms: 0.0,
+            playing: true,
+            looping: true,
+            speed: 1.0,
+        };
+    }
+
+    /// Set a webcam as the particle source. Frames will be provided via `update_webcam_frame()`.
+    #[cfg(feature = "webcam")]
+    pub fn set_webcam_source(&mut self, queue: &Queue, width: u32, height: u32) {
+        // Start transition from current aux if we have any
+        let empty_aux: Vec<ParticleAux> = Vec::new();
+        if !self.current_aux.is_empty() {
+            // Transition will complete once first webcam frame arrives
+            self.source_transition = Some(SourceTransition {
+                from_aux: self.current_aux.clone(),
+                to_aux: empty_aux,
+                progress: 0.0,
+                duration_secs: 0.5,
+            });
+        }
+
+        self.has_aux_data = true;
+        self.video_path = None;
+        let _ = queue; // used for API consistency
+        self.image_source = ParticleImageSource::Webcam { width, height };
+    }
+
+    /// Update aux data from a webcam frame. Called per-frame from the webcam drain loop.
+    pub fn update_webcam_frame(&mut self, queue: &Queue, data: &[u8], width: u32, height: u32) {
+        let aux = super::image_source::sample_rgba_buffer(
+            data,
+            width,
+            height,
+            &self.sample_def,
+            self.max_particles,
+        );
+        if !aux.is_empty() {
+            // If we have an active transition with empty to_aux (first webcam frame), fill it
+            if let Some(ref mut trans) = self.source_transition {
+                if trans.to_aux.is_empty() {
+                    trans.to_aux = aux.clone();
+                }
+            }
+            self.update_aux_in_place(queue, &aux);
+            self.current_aux = aux;
+        }
+    }
+
+    /// Advance source transition animation. Uploads blended aux data.
+    pub fn advance_transition(&mut self, queue: &Queue, dt_secs: f32) {
+        // Take transition out to avoid borrow conflict with self methods
+        let mut trans = match self.source_transition.take() {
+            Some(t) => t,
+            None => return,
+        };
+
+        trans.progress += dt_secs / trans.duration_secs;
+        if trans.progress >= 1.0 {
+            // Upload final target positions
+            if !trans.to_aux.is_empty() {
+                self.update_aux_in_place(queue, &trans.to_aux);
+                self.current_aux = trans.to_aux;
+            }
+            // transition is dropped (not put back)
+        } else {
+            // Upload interpolated positions
+            let blended = trans.interpolated();
+            if !blended.is_empty() {
+                self.update_aux_in_place(queue, &blended);
+            }
+            self.source_transition = Some(trans);
+        }
+    }
+
+    /// Store current aux data (called after initial image load so transitions have a "from").
+    pub fn store_current_aux(&mut self, aux: Vec<ParticleAux>) {
+        self.current_aux = aux;
     }
 
     /// Reset sprite, aux data, and compute shader to defaults.

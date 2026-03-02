@@ -22,6 +22,20 @@ pub struct ParticleInfo {
     pub trail_length: u32,
     pub has_interaction: bool,
     pub has_sprite: bool,
+    // Image source info
+    pub has_image_source: bool,
+    /// "static", "video", or "webcam"
+    pub source_type: String,
+    /// Source filename or device name
+    pub source_name: String,
+    pub video_playing: bool,
+    pub video_looping: bool,
+    pub video_speed: f32,
+    pub video_position_secs: f64,
+    pub video_duration_secs: f64,
+    pub is_transitioning: bool,
+    pub source_loading: bool,
+    pub source_loading_name: String,
 }
 
 pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
@@ -89,6 +103,171 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             feature_badge(ui, "sprite", tc.accent);
         }
     });
+
+    // Image source section (shown only for image emitter effects)
+    if info.has_image_source {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            // Source type badge
+            let badge_text = match info.source_type.as_str() {
+                "video" => "VIDEO",
+                "webcam" => "CAM",
+                _ => "IMG",
+            };
+            let badge_color = match info.source_type.as_str() {
+                "video" => egui::Color32::from_rgb(0x60, 0x80, 0xC0),
+                "webcam" => egui::Color32::from_rgb(0xC0, 0x60, 0x60),
+                _ => tc.text_secondary,
+            };
+            feature_badge(ui, badge_text, badge_color);
+            if !info.source_name.is_empty() {
+                let name = if info.source_name.len() > 20 {
+                    format!("{}...", &info.source_name[..17])
+                } else {
+                    info.source_name.clone()
+                };
+                let label = ui.label(
+                    RichText::new(&name)
+                        .size(SMALL_SIZE)
+                        .color(tc.text_secondary),
+                );
+                if info.source_name.len() > 20 {
+                    label.on_hover_text(&info.source_name);
+                }
+            }
+            if info.is_transitioning {
+                ui.label(
+                    RichText::new("transitioning...")
+                        .size(SMALL_SIZE - 1.0)
+                        .color(tc.accent),
+                );
+            }
+        });
+
+        // Source action buttons
+        if info.source_loading {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(
+                    RichText::new(format!("Loading {}...", info.source_loading_name))
+                        .size(SMALL_SIZE)
+                        .color(tc.text_secondary),
+                );
+            });
+        } else {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                if ui
+                    .add(egui::Button::new(RichText::new("Load Image").size(SMALL_SIZE)).min_size(egui::vec2(0.0, 24.0)))
+                    .clicked()
+                {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("particle_load_image"), true);
+                    });
+                }
+                #[cfg(feature = "video")]
+                if ui
+                    .add(egui::Button::new(RichText::new("Load Video").size(SMALL_SIZE)).min_size(egui::vec2(0.0, 24.0)))
+                    .clicked()
+                {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("particle_load_video"), true);
+                    });
+                }
+                #[cfg(feature = "webcam")]
+                if ui
+                    .add(egui::Button::new(RichText::new("Webcam").size(SMALL_SIZE)).min_size(egui::vec2(0.0, 24.0)))
+                    .clicked()
+                {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("particle_webcam"), true);
+                    });
+                }
+            });
+        }
+
+        // Video transport controls (only when video source is active)
+        if info.source_type == "video" {
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let play_label = if info.video_playing { "Pause" } else { "Play" };
+                if ui
+                    .add(egui::Button::new(RichText::new(play_label).size(SMALL_SIZE)).min_size(egui::vec2(0.0, 24.0)))
+                    .clicked()
+                {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(
+                            egui::Id::new("particle_video_playing"),
+                            !info.video_playing,
+                        );
+                    });
+                }
+                let loop_label = if info.video_looping { "Loop: On" } else { "Loop: Off" };
+                if ui
+                    .add(egui::Button::new(RichText::new(loop_label).size(SMALL_SIZE)).min_size(egui::vec2(0.0, 24.0)))
+                    .clicked()
+                {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(
+                            egui::Id::new("particle_video_looping"),
+                            !info.video_looping,
+                        );
+                    });
+                }
+            });
+
+            // Speed slider
+            let mut speed = info.video_speed;
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Speed").size(SMALL_SIZE).color(tc.text_secondary));
+                let r = ui.add(
+                    egui::Slider::new(&mut speed, 0.1..=4.0)
+                        .show_value(true)
+                        .custom_formatter(|v, _| format!("{:.1}x", v)),
+                );
+                if r.changed() {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("particle_video_speed"), speed);
+                    });
+                }
+            });
+
+            // Seek bar
+            if info.video_duration_secs > 0.0 {
+                let mut pos = info.video_position_secs as f32;
+                let dur = info.video_duration_secs as f32;
+                ui.horizontal(|ui| {
+                    let r = ui.add(
+                        egui::Slider::new(&mut pos, 0.0..=dur)
+                            .show_value(false)
+                            .custom_formatter(|v, _| {
+                                let s = v as u32;
+                                format!("{}:{:02}", s / 60, s % 60)
+                            }),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "{:.0}:{:02.0} / {:.0}:{:02.0}",
+                            (info.video_position_secs as u32) / 60,
+                            (info.video_position_secs as u32) % 60,
+                            (info.video_duration_secs as u32) / 60,
+                            (info.video_duration_secs as u32) % 60,
+                        ))
+                        .size(SMALL_SIZE)
+                        .color(tc.text_secondary),
+                    );
+                    if r.changed() {
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new("particle_video_seek"), pos as f64);
+                        });
+                    }
+                });
+            }
+        }
+        ui.add_space(4.0);
+    }
 
     ui.add_space(6.0);
 

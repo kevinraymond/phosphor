@@ -2,6 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use serde::{Deserialize, Serialize};
 
 use super::emitter::EmitterDef;
+use crate::media::types::DecodedFrame;
 
 /// GPU particle: 64 bytes (4 x vec4f).
 /// pos_life: xy = position (screen-space -1..1), z = reserved, w = life (1.0 = just born, 0.0 = dead)
@@ -128,6 +129,207 @@ pub struct ParticleUniforms {
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct ParticleAux {
     pub home: [f32; 4],
+}
+
+/// Particle image source: controls where aux data (home positions + colors) come from.
+pub enum ParticleImageSource {
+    /// Static image (current behavior, no per-frame updates).
+    Static,
+    /// Pre-decoded video frames — plays back and updates aux per frame.
+    #[cfg(feature = "video")]
+    Video {
+        frames: Vec<DecodedFrame>,
+        delays_ms: Vec<u32>,
+        current_frame: usize,
+        frame_elapsed_ms: f64,
+        playing: bool,
+        looping: bool,
+        speed: f32,
+    },
+    /// Live webcam feed — frames arrive externally.
+    #[cfg(feature = "webcam")]
+    Webcam { width: u32, height: u32 },
+}
+
+impl ParticleImageSource {
+    /// Advance playback by dt seconds. Returns true if the current frame changed.
+    pub fn advance(&mut self, dt_secs: f64) -> bool {
+        match self {
+            #[cfg(feature = "video")]
+            ParticleImageSource::Video {
+                frames,
+                delays_ms,
+                current_frame,
+                frame_elapsed_ms,
+                playing,
+                looping,
+                speed,
+                ..
+            } => {
+                if !*playing || frames.is_empty() {
+                    return false;
+                }
+                *frame_elapsed_ms += dt_secs * 1000.0 * (*speed as f64);
+                let delay = delays_ms.get(*current_frame).copied().unwrap_or(33) as f64;
+                if *frame_elapsed_ms >= delay {
+                    *frame_elapsed_ms -= delay;
+                    let next = *current_frame + 1;
+                    if next >= frames.len() {
+                        if *looping {
+                            *current_frame = 0;
+                        } else {
+                            *playing = false;
+                        }
+                    } else {
+                        *current_frame = next;
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Get the current frame's raw RGBA data (for video sources).
+    pub fn current_frame_data(&self) -> Option<&DecodedFrame> {
+        match self {
+            #[cfg(feature = "video")]
+            ParticleImageSource::Video {
+                frames,
+                current_frame,
+                ..
+            } => frames.get(*current_frame),
+            _ => None,
+        }
+    }
+
+    pub fn frame_count(&self) -> usize {
+        match self {
+            #[cfg(feature = "video")]
+            ParticleImageSource::Video { frames, .. } => frames.len(),
+            _ => 0,
+        }
+    }
+
+    pub fn is_static(&self) -> bool {
+        matches!(self, ParticleImageSource::Static)
+    }
+
+    pub fn is_video(&self) -> bool {
+        #[cfg(feature = "video")]
+        if matches!(self, ParticleImageSource::Video { .. }) {
+            return true;
+        }
+        false
+    }
+
+    pub fn is_webcam(&self) -> bool {
+        #[cfg(feature = "webcam")]
+        if matches!(self, ParticleImageSource::Webcam { .. }) {
+            return true;
+        }
+        false
+    }
+
+    /// Get video playback speed (1.0 if not video).
+    pub fn video_speed(&self) -> Option<f32> {
+        #[cfg(feature = "video")]
+        if let ParticleImageSource::Video { speed, .. } = self {
+            return Some(*speed);
+        }
+        None
+    }
+
+    /// Get current position in seconds (video only).
+    pub fn video_position_secs(&self) -> f64 {
+        #[cfg(feature = "video")]
+        if let ParticleImageSource::Video {
+            delays_ms,
+            current_frame,
+            frame_elapsed_ms,
+            ..
+        } = self
+        {
+            let ms: f64 = delays_ms.iter().take(*current_frame).map(|d| *d as f64).sum();
+            return (ms + *frame_elapsed_ms) / 1000.0;
+        }
+        0.0
+    }
+
+    /// Get total duration in seconds (video only).
+    pub fn video_duration_secs(&self) -> f64 {
+        #[cfg(feature = "video")]
+        if let ParticleImageSource::Video { delays_ms, .. } = self {
+            return delays_ms.iter().map(|d| *d as f64).sum::<f64>() / 1000.0;
+        }
+        0.0
+    }
+
+    /// Seek to a specific time position (video only).
+    pub fn seek_to_secs(&mut self, target_secs: f64) {
+        #[cfg(feature = "video")]
+        if let ParticleImageSource::Video {
+            delays_ms,
+            current_frame,
+            frame_elapsed_ms,
+            ..
+        } = self
+        {
+            let target_ms = target_secs * 1000.0;
+            let mut accumulated = 0.0f64;
+            for (i, delay) in delays_ms.iter().enumerate() {
+                let d = *delay as f64;
+                if accumulated + d > target_ms {
+                    *current_frame = i;
+                    *frame_elapsed_ms = target_ms - accumulated;
+                    return;
+                }
+                accumulated += d;
+            }
+            // Past end — clamp to last frame
+            if !delays_ms.is_empty() {
+                *current_frame = delays_ms.len() - 1;
+                *frame_elapsed_ms = 0.0;
+            }
+        }
+    }
+}
+
+/// Smooth transition between particle source positions.
+pub struct SourceTransition {
+    pub from_aux: Vec<ParticleAux>,
+    pub to_aux: Vec<ParticleAux>,
+    pub progress: f32,
+    pub duration_secs: f32,
+}
+
+impl SourceTransition {
+    /// Interpolate aux data at current progress, returning blended result.
+    pub fn interpolated(&self) -> Vec<ParticleAux> {
+        let t = self.progress.clamp(0.0, 1.0);
+        let len = self.from_aux.len().max(self.to_aux.len());
+        let mut result = Vec::with_capacity(len);
+        for i in 0..len {
+            let from = self.from_aux.get(i).map(|a| a.home).unwrap_or([0.0; 4]);
+            let to = self.to_aux.get(i).map(|a| a.home).unwrap_or([0.0; 4]);
+            // Lerp xy (home position), keep target's z (packed color) and w (sprite index)
+            result.push(ParticleAux {
+                home: [
+                    from[0] * (1.0 - t) + to[0] * t,
+                    from[1] * (1.0 - t) + to[1] * t,
+                    to[2], // packed RGBA from target
+                    to[3], // sprite index from target
+                ],
+            });
+        }
+        result
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.progress >= 1.0
+    }
 }
 
 /// Particle render uniforms: 48 bytes.
@@ -510,5 +712,87 @@ mod tests {
     #[test]
     fn parse_hex_color_no_hash() {
         assert_eq!(parse_hex_color("FF0000"), 0xFF0000FF);
+    }
+
+    #[test]
+    fn particle_image_source_static_default() {
+        let src = ParticleImageSource::Static;
+        assert!(src.is_static());
+        assert!(!src.is_video());
+        assert!(!src.is_webcam());
+        assert_eq!(src.frame_count(), 0);
+        assert!(src.current_frame_data().is_none());
+        assert!((src.video_position_secs() - 0.0).abs() < 1e-10);
+        assert!((src.video_duration_secs() - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn particle_image_source_static_no_advance() {
+        let mut src = ParticleImageSource::Static;
+        assert!(!src.advance(0.016));
+    }
+
+    #[test]
+    fn source_transition_interpolation() {
+        let from = vec![ParticleAux {
+            home: [0.0, 0.0, 1.0, 0.0],
+        }];
+        let to = vec![ParticleAux {
+            home: [1.0, 1.0, 2.0, 1.0],
+        }];
+        let trans = SourceTransition {
+            from_aux: from,
+            to_aux: to,
+            progress: 0.5,
+            duration_secs: 1.0,
+        };
+        let result = trans.interpolated();
+        assert_eq!(result.len(), 1);
+        assert!((result[0].home[0] - 0.5).abs() < 1e-6); // lerp x
+        assert!((result[0].home[1] - 0.5).abs() < 1e-6); // lerp y
+        assert!((result[0].home[2] - 2.0).abs() < 1e-6); // target color
+        assert!((result[0].home[3] - 1.0).abs() < 1e-6); // target sprite idx
+    }
+
+    #[test]
+    fn source_transition_complete() {
+        let trans = SourceTransition {
+            from_aux: vec![],
+            to_aux: vec![],
+            progress: 1.0,
+            duration_secs: 0.5,
+        };
+        assert!(trans.is_complete());
+
+        let trans2 = SourceTransition {
+            from_aux: vec![],
+            to_aux: vec![],
+            progress: 0.5,
+            duration_secs: 0.5,
+        };
+        assert!(!trans2.is_complete());
+    }
+
+    #[test]
+    fn source_transition_mismatched_lengths() {
+        let from = vec![
+            ParticleAux { home: [1.0, 2.0, 3.0, 0.0] },
+        ];
+        let to = vec![
+            ParticleAux { home: [4.0, 5.0, 6.0, 0.0] },
+            ParticleAux { home: [7.0, 8.0, 9.0, 0.0] },
+        ];
+        let trans = SourceTransition {
+            from_aux: from,
+            to_aux: to,
+            progress: 0.0,
+            duration_secs: 1.0,
+        };
+        let result = trans.interpolated();
+        assert_eq!(result.len(), 2);
+        // First entry: lerp from [1,2] to [4,5] at t=0 → [1,2]
+        assert!((result[0].home[0] - 1.0).abs() < 1e-6);
+        // Second entry: lerp from [0,0] (missing) to [7,8] at t=0 → [0,0]
+        assert!((result[1].home[0] - 0.0).abs() < 1e-6);
     }
 }

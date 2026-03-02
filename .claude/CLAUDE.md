@@ -15,7 +15,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 **OSC Input/Output: COMPLETE** — rosc UDP, RX on port 9000, TX opt-in on 9001, OSC learn, config persistence
 **Web Control Surface: COMPLETE** — tungstenite WebSocket server, embedded HTML touch UI, bidirectional JSON state sync, multi-client
 **Media Layers: COMPLETE** — PNG/JPEG/GIF as compositing layers, GPU blit with letterbox, animated GIF playback, transport controls, preset save/load
-**Advanced Particles: COMPLETE** — sprite atlas textures, dual blend pipelines, image decomposition with spring-reform compute shader
+**Advanced Particles: COMPLETE** — sprite atlas textures, dual blend pipelines, image decomposition with spring-reform compute shader, video/webcam particle sources with per-frame aux updates and source transitions
 **Video Playback: COMPLETE** — feature-gated ffmpeg pre-decode to RAM, instant scrub, 60s max
 **NDI Output: COMPLETE** — feature-gated runtime-loaded NDI SDK, GPU capture with double-buffered staging, sender thread, UI panel
 **Per-Effect Alpha: COMPLETE** — effects write meaningful alpha, preserved through post-processing, delivered to NDI for downstream compositing
@@ -292,6 +292,12 @@ egui Overlay → Surface
 - Effect params in compute shaders: `param(i)` helper (i=0..7) reads from `effect_params` fields forwarded from ParamStore. Allows compute shaders to access the same params as fragment shaders. Packed in `update()` loop in app.rs.
 - Lifetime curves: 8-point LUTs packed as `array<vec4f, 2>` in WGSL. `pack_curve_lut()` in Rust resamples variable-length input to 8 points via linear interpolation. `curve_flags` bitmask gates evaluation (bit 0=size, bit 1=opacity).
 - Color gradient: up to 8 packed RGBA u32 in `array<vec4u, 2>`. `parse_hex_color()` converts "#RRGGBB"/"#RRGGBBAA" to `(R<<24|G<<16|B<<8|A)`. `gradient_count` gates evaluation. `read_gradient()` indexes into the vec4u pair.
+- Particle aux buffer pre-allocated at `max_particles` size (not 1-element) — enables `update_aux_in_place()` via `write_buffer` without recreating buffer or bind groups. 500K × 16 bytes = 8MB DMA per frame, well within budget. Original `upload_aux_data()` still exists for initial load (recreates buffer if needed for size changes, e.g. clear_customization).
+- `ParticleImageSource` enum: `Static` (default), `Video` (feature-gated, pre-decoded frames with transport), `Webcam` (feature-gated, frames arrive externally). Stored on `ParticleSystem`. `update_source()` advances video playback + re-samples aux per frame. `update_webcam_frame()` accepts external frame data.
+- `SourceTransition`: lerps particle home positions (xy) from old to new over 0.5s, keeping target's packed color (z) and sprite index (w). Taken out of `Option` via `.take()` in `advance_transition()` to avoid borrow conflicts.
+- `sample_rgba_buffer()`: samples raw RGBA bytes directly without file I/O — same grid/threshold/random logic as `sample_image()`, used for video/webcam per-frame sampling.
+- EmitterDef `video` field: `.pfx` files can specify `"video": "clip.mp4"` (relative to assets/videos/) or `"video": "webcam"` for built-in source at effect load time. Serde default = empty string.
+- Particle video/webcam preset fields: `particle_video_path`, `particle_video_speed`, `particle_video_looping`, `particle_webcam` on `LayerPreset` with serde defaults for backward compat.
 - midir 0.10: `MidiInputConnection<()>` is RAII — drop closes the port. No explicit close needed.
 - Presets stored at `~/.config/phosphor/presets/{name}.json`. `PresetStore` re-scans after every save/delete.
 - Preset loading: `load_preset()` scans for media layers → if none, `apply_preset_immediately()` (sync); if media found, `PresetLoader::request_load()` → background thread decodes via `decoder::load_media()` → `update()` drains result → `apply_preset_immediately()` with pre-decoded `MediaSource` HashMap (GPU resources created on main thread). Generation counter for cancellation, `MediaSource` moved (not cloned) via `HashMap::remove()`.
@@ -338,12 +344,13 @@ RUST_LOG=phosphor_app=debug cargo run  # verbose logging
 ```
 
 ### Test Coverage
-~320 unit tests covering pure logic, parsing, serde, and data transforms across 17 modules:
+~337 unit tests covering pure logic, parsing, serde, and data transforms across 17 modules:
 - **Audio**: beat detection pipeline (onset → tempo → scheduler), adaptive normalization, BPM convergence
 - **Params**: ParamDef/ParamValue types, ParamStore CRUD, pack_to_buffer with all types
 - **Effect loader**: `is_builtin`, `prepend_library` (with/without existing uniforms)
 - **GPU layer**: BlendMode serde/display, `adjusted_active_after_remove/move` edge cases
-- **Preset**: sanitize_name, LayerPreset serde defaults, Preset roundtrip, PresetStore API, PresetLoader (generation tracking, loading state, empty/missing media, stale result discard)
+- **Preset**: sanitize_name, LayerPreset serde defaults (incl. particle source fields), Preset roundtrip, PresetStore API, PresetLoader (generation tracking, loading state, empty/missing media, stale result discard), particle video/webcam preset serde
+- **Particle image source**: sample_rgba_buffer (empty, single pixel, grid mode, transparent skip, max particles), ParticleImageSource (static default, no advance), SourceTransition (interpolation, complete, mismatched lengths), EmitterDef serde with video field
 - **MIDI**: MidiMapping scale (inverted, custom range, zero range), matches (channel, omni, type), MidiConfig
 - **OSC**: parse all message types (param, layer, trigger, blend, enabled, raw), msg_address, OscConfig/OscLearnTarget
 - **Web**: parse_client_message (all types + edge cases), build_params (all ParamDef types), state builders
@@ -358,7 +365,7 @@ RUST_LOG=phosphor_app=debug cargo run  # verbose logging
 - File I/O in config load/save (tested implicitly via serde roundtrips)
 
 ```bash
-cargo test                         # run all tests (~320)
+cargo test                         # run all tests (~337)
 cargo test --features ndi          # include NDI tests
 cargo tarpaulin --features ndi     # line coverage report
 ```

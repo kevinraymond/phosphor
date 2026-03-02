@@ -96,6 +96,8 @@ pub struct App {
     // Webcam capture (feature-gated)
     #[cfg(feature = "webcam")]
     pub webcam_capture: Option<crate::media::webcam::WebcamCapture>,
+    // Particle source loader (background image/video decode)
+    pub particle_source_loader: crate::gpu::particle::ParticleSourceLoader,
 }
 
 impl App {
@@ -335,6 +337,7 @@ impl App {
             status_error: None,
             #[cfg(feature = "webcam")]
             webcam_capture: None,
+            particle_source_loader: crate::gpu::particle::ParticleSourceLoader::new(),
         })
     }
 
@@ -745,12 +748,45 @@ impl App {
             }
             if let Some(ref capture) = self.webcam_capture {
                 if let Some(frame) = capture.try_recv_frame() {
+                    // Feed media layers
                     for layer in &mut self.layer_stack.layers {
                         if let LayerContent::Media(ref mut m) = layer.content {
                             if m.is_live() {
                                 m.set_live_frame(frame.data.clone());
                                 m.upload_frame(&self.gpu.queue);
                             }
+                        }
+                    }
+                    // Feed particle systems with webcam source
+                    for layer in &mut self.layer_stack.layers {
+                        if let LayerContent::Effect(ref mut e) = layer.content {
+                            if let Some(ref mut ps) = e.pass_executor.particle_system {
+                                if ps.image_source.is_webcam() {
+                                    ps.update_webcam_frame(
+                                        &self.gpu.queue,
+                                        &frame.data,
+                                        frame.width,
+                                        frame.height,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Update particle image sources (video playback) and transitions
+        {
+            let dt_f64 = dt as f64;
+            for layer in &mut self.layer_stack.layers {
+                if let LayerContent::Effect(ref mut e) = layer.content {
+                    if let Some(ref mut ps) = e.pass_executor.particle_system {
+                        // Advance video source playback
+                        ps.update_source(&self.gpu.queue, dt_f64);
+                        // Advance source transition animation
+                        if ps.source_transition.is_some() {
+                            ps.advance_transition(&self.gpu.queue, dt);
                         }
                     }
                 }
@@ -1059,6 +1095,7 @@ impl App {
                             scale: 1.0,
                         },
                     );
+                    ps.sample_def = sample_def.clone();
                     let image_path = assets_dir().join("images").join(&particles.emitter.image);
                     match crate::gpu::particle::image_source::sample_image(
                         &image_path,
@@ -1067,6 +1104,7 @@ impl App {
                     ) {
                         Ok(aux_data) => {
                             ps.upload_aux_data(&self.gpu.device, &self.gpu.queue, &aux_data);
+                            ps.store_current_aux(aux_data.clone());
                             log::info!(
                                 "Loaded image '{}': {} particles",
                                 particles.emitter.image,
@@ -1078,6 +1116,43 @@ impl App {
                                 "Failed to load image '{}': {e}",
                                 particles.emitter.image
                             );
+                        }
+                    }
+
+                    // If a video source is specified, set up video playback
+                    #[cfg(feature = "video")]
+                    if !particles.emitter.video.is_empty() && particles.emitter.video != "webcam" {
+                        let video_path = assets_dir().join("videos").join(&particles.emitter.video);
+                        if video_path.exists() {
+                            if crate::media::video::ffmpeg_available() {
+                                match crate::media::video::probe_video(&video_path) {
+                                    Ok(meta) => {
+                                        match crate::media::video::decode_all_frames(&video_path, &meta) {
+                                            Ok((frames, delays_ms)) => {
+                                                let path_str = video_path.to_string_lossy().to_string();
+                                                ps.set_video_source(
+                                                    &self.gpu.queue,
+                                                    frames,
+                                                    delays_ms,
+                                                    path_str,
+                                                );
+                                                log::info!(
+                                                    "Particle video source: '{}'",
+                                                    particles.emitter.video
+                                                );
+                                            }
+                                            Err(e) => log::warn!(
+                                                "Failed to decode particle video '{}': {e}",
+                                                particles.emitter.video
+                                            ),
+                                        }
+                                    }
+                                    Err(e) => log::warn!(
+                                        "Failed to probe particle video '{}': {e}",
+                                        particles.emitter.video
+                                    ),
+                                }
+                            }
                         }
                     }
                 }
@@ -1500,6 +1575,28 @@ impl App {
                 let webcam_device = l.as_media()
                     .filter(|m| m.is_live())
                     .map(|m| m.file_name.clone());
+                // Capture particle source info
+                let ps_ref = l.as_effect()
+                    .and_then(|e| e.pass_executor.particle_system.as_ref());
+                let particle_video_path = ps_ref
+                    .and_then(|ps| ps.video_path.clone());
+                let particle_video_speed = ps_ref
+                    .and_then(|ps| ps.image_source.video_speed());
+                let particle_video_looping = ps_ref.and_then(|ps| {
+                    #[cfg(feature = "video")]
+                    if let crate::gpu::particle::ParticleImageSource::Video { looping, .. } = &ps.image_source {
+                        return Some(*looping);
+                    }
+                    let _ = ps;
+                    None
+                });
+                let particle_webcam = ps_ref.and_then(|ps| {
+                    if ps.image_source.is_webcam() {
+                        Some(true)
+                    } else {
+                        None
+                    }
+                });
                 LayerPreset {
                     effect_name,
                     params: l.param_store.values.clone(),
@@ -1513,6 +1610,10 @@ impl App {
                     media_speed,
                     media_looping,
                     webcam_device,
+                    particle_video_path,
+                    particle_video_speed,
+                    particle_video_looping,
+                    particle_webcam,
                 }
             })
             .collect();
@@ -1708,6 +1809,87 @@ impl App {
                             lp.effect_name,
                             i
                         );
+                    }
+                }
+            }
+
+            // Restore particle source (video or webcam) if saved in preset
+            #[cfg(feature = "video")]
+            if let Some(ref video_path) = lp.particle_video_path {
+                let path = std::path::PathBuf::from(video_path);
+                if path.exists() && crate::media::video::ffmpeg_available() {
+                    match crate::media::video::probe_video(&path) {
+                        Ok(meta) => {
+                            match crate::media::video::decode_all_frames(&path, &meta) {
+                                Ok((frames, delays_ms)) => {
+                                    if let Some(layer) = self.layer_stack.layers.get_mut(i) {
+                                        if let Some(effect) = layer.as_effect_mut() {
+                                            if let Some(ps) =
+                                                effect.pass_executor.particle_system.as_mut()
+                                            {
+                                                ps.set_video_source(
+                                                    &self.gpu.queue,
+                                                    frames,
+                                                    delays_ms,
+                                                    video_path.clone(),
+                                                );
+                                                // Restore transport settings
+                                                if let crate::gpu::particle::ParticleImageSource::Video {
+                                                    speed: ref mut s,
+                                                    looping: ref mut l,
+                                                    ..
+                                                } = ps.image_source
+                                                {
+                                                    if let Some(spd) = lp.particle_video_speed {
+                                                        *s = spd;
+                                                    }
+                                                    if let Some(lp_loop) = lp.particle_video_looping {
+                                                        *l = lp_loop;
+                                                    }
+                                                }
+                                                log::info!(
+                                                    "Restored particle video source for layer {i}"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => log::warn!(
+                                    "Failed to decode particle video for layer {i}: {e}"
+                                ),
+                            }
+                        }
+                        Err(e) => log::warn!(
+                            "Failed to probe particle video for layer {i}: {e}"
+                        ),
+                    }
+                }
+            }
+
+            #[cfg(feature = "webcam")]
+            if lp.particle_webcam == Some(true) {
+                // Start webcam capture if not already running
+                if self.webcam_capture.is_none() {
+                    match crate::media::webcam::WebcamCapture::start(0, Some((1280, 720))) {
+                        Ok(capture) => {
+                            self.webcam_capture = Some(capture);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to start webcam for particle source: {e}");
+                        }
+                    }
+                }
+                if let Some(ref capture) = self.webcam_capture {
+                    let (w, h) = capture.resolution;
+                    if let Some(layer) = self.layer_stack.layers.get_mut(i) {
+                        if let Some(effect) = layer.as_effect_mut() {
+                            if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
+                                ps.set_webcam_source(&self.gpu.queue, w, h);
+                                log::info!(
+                                    "Restored particle webcam source for layer {i}"
+                                );
+                            }
+                        }
                     }
                 }
             }

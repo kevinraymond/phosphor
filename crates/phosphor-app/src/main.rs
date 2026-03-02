@@ -201,29 +201,69 @@ impl ApplicationHandler for PhosphorApp {
                     let ctx = app.egui_overlay.context();
 
                     // Get particle info from active layer
-                    let particle_info = app
+                    let mut particle_info = app
                         .layer_stack
                         .active()
                         .and_then(|l| l.as_effect())
                         .and_then(|e| e.pass_executor.particle_system.as_ref())
-                        .map(|ps| crate::ui::panels::particle_panel::ParticleInfo {
-                            alive_count: ps.alive_count,
-                            max_count: ps.max_particles,
-                            emit_rate: ps.emit_rate,
-                            burst_on_beat: ps.burst_on_beat,
-                            lifetime: ps.def.lifetime,
-                            initial_speed: ps.def.initial_speed,
-                            initial_size: ps.def.initial_size,
-                            size_end: ps.def.size_end,
-                            drag: ps.def.drag,
-                            attraction_strength: ps.def.attraction_strength,
-                            blend_mode: ps.blend_mode.clone(),
-                            has_flow_field: ps.def.flow_field,
-                            has_trails: ps.def.trail_length >= 2,
-                            trail_length: ps.def.trail_length,
-                            has_interaction: ps.def.interaction,
-                            has_sprite: ps.sprite.is_some(),
+                        .map(|ps| {
+                            let (source_type, source_name) = if ps.image_source.is_video() {
+                                ("video".to_string(), ps.video_path.clone().unwrap_or_default())
+                            } else if ps.image_source.is_webcam() {
+                                ("webcam".to_string(), "webcam".to_string())
+                            } else {
+                                ("static".to_string(), ps.def.emitter.image.clone())
+                            };
+                            let (video_playing, video_looping, video_speed) = {
+                                #[cfg(feature = "video")]
+                                {
+                                    if let crate::gpu::particle::ParticleImageSource::Video {
+                                        playing, looping, speed, ..
+                                    } = &ps.image_source
+                                    {
+                                        (*playing, *looping, *speed)
+                                    } else {
+                                        (false, true, 1.0)
+                                    }
+                                }
+                                #[cfg(not(feature = "video"))]
+                                { (false, true, 1.0) }
+                            };
+                            crate::ui::panels::particle_panel::ParticleInfo {
+                                alive_count: ps.alive_count,
+                                max_count: ps.max_particles,
+                                emit_rate: ps.emit_rate,
+                                burst_on_beat: ps.burst_on_beat,
+                                lifetime: ps.def.lifetime,
+                                initial_speed: ps.def.initial_speed,
+                                initial_size: ps.def.initial_size,
+                                size_end: ps.def.size_end,
+                                drag: ps.def.drag,
+                                attraction_strength: ps.def.attraction_strength,
+                                blend_mode: ps.blend_mode.clone(),
+                                has_flow_field: ps.def.flow_field,
+                                has_trails: ps.def.trail_length >= 2,
+                                trail_length: ps.def.trail_length,
+                                has_interaction: ps.def.interaction,
+                                has_sprite: ps.sprite.is_some(),
+                                has_image_source: ps.has_aux_data || ps.def.emitter.shape == "image",
+                                source_type,
+                                source_name,
+                                video_playing,
+                                video_looping,
+                                video_speed,
+                                video_position_secs: ps.image_source.video_position_secs(),
+                                video_duration_secs: ps.image_source.video_duration_secs(),
+                                is_transitioning: ps.source_transition.is_some(),
+                                source_loading: false, // set below
+                                source_loading_name: String::new(),
+                            }
                         });
+                    // Overlay loader state onto particle info
+                    if let Some(ref mut pi) = particle_info {
+                        pi.source_loading = app.particle_source_loader.loading;
+                        pi.source_loading_name = app.particle_source_loader.loading_name.clone();
+                    }
                     let particle_count = particle_info.as_ref().map(|p| p.max_count);
 
                     // Get active layer's shader error
@@ -1087,6 +1127,204 @@ impl ApplicationHandler for PhosphorApp {
                                 if let Some(ref path) = effect.source_path {
                                     if let Ok(json) = serde_json::to_string_pretty(effect) {
                                         let _ = std::fs::write(path, json);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Handle particle source change signals
+                {
+                    let ctx = app.egui_overlay.context();
+
+                    // Load image as particle source (dialog + decode on background thread)
+                    let load_image: Option<bool> =
+                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_image")));
+                    if load_image.is_some() && !app.particle_source_loader.loading {
+                        app.particle_source_loader.open_image_dialog();
+                    }
+
+                    // Load video as particle source (dialog + decode on background thread)
+                    #[cfg(feature = "video")]
+                    {
+                        let load_video: Option<bool> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_video")));
+                        if load_video.is_some() && !app.particle_source_loader.loading {
+                            app.particle_source_loader.open_video_dialog();
+                        }
+                    }
+
+                    // Set webcam as particle source (instant — no decode needed)
+                    #[cfg(feature = "webcam")]
+                    {
+                        let use_webcam: Option<bool> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_webcam")));
+                        if use_webcam.is_some() {
+                            if app.webcam_capture.is_none() {
+                                match crate::media::webcam::WebcamCapture::start(
+                                    0,
+                                    Some((1280, 720)),
+                                ) {
+                                    Ok(capture) => {
+                                        app.webcam_capture = Some(capture);
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to start webcam: {e}");
+                                    }
+                                }
+                            }
+                            if let Some(ref capture) = app.webcam_capture {
+                                let (w, h) = capture.resolution;
+                                if let Some(layer) = app.layer_stack.active_mut() {
+                                    if let Some(effect) = layer.as_effect_mut() {
+                                        if let Some(ps) =
+                                            effect.pass_executor.particle_system.as_mut()
+                                        {
+                                            ps.set_webcam_source(&app.gpu.queue, w, h);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Video transport controls
+                    #[cfg(feature = "video")]
+                    {
+                        let playing: Option<bool> = ctx.data_mut(|d| {
+                            d.remove_temp(egui::Id::new("particle_video_playing"))
+                        });
+                        let looping: Option<bool> = ctx.data_mut(|d| {
+                            d.remove_temp(egui::Id::new("particle_video_looping"))
+                        });
+                        let speed: Option<f32> = ctx.data_mut(|d| {
+                            d.remove_temp(egui::Id::new("particle_video_speed"))
+                        });
+                        let seek: Option<f64> = ctx.data_mut(|d| {
+                            d.remove_temp(egui::Id::new("particle_video_seek"))
+                        });
+                        if playing.is_some()
+                            || looping.is_some()
+                            || speed.is_some()
+                            || seek.is_some()
+                        {
+                            if let Some(layer) = app.layer_stack.active_mut() {
+                                if let Some(effect) = layer.as_effect_mut() {
+                                    if let Some(ps) =
+                                        effect.pass_executor.particle_system.as_mut()
+                                    {
+                                        if let crate::gpu::particle::ParticleImageSource::Video {
+                                            playing: ref mut p,
+                                            looping: ref mut l,
+                                            speed: ref mut s,
+                                            ..
+                                        } = ps.image_source
+                                        {
+                                            if let Some(v) = playing {
+                                                *p = v;
+                                            }
+                                            if let Some(v) = looping {
+                                                *l = v;
+                                            }
+                                            if let Some(v) = speed {
+                                                *s = v;
+                                            }
+                                        }
+                                        if let Some(v) = seek {
+                                            ps.image_source.seek_to_secs(v);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Drain background particle source loader results
+                    if let Some(result) = app.particle_source_loader.try_recv() {
+                        if let Some(layer) = app.layer_stack.active_mut() {
+                            if let Some(effect) = layer.as_effect_mut() {
+                                if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
+                                    match result {
+                                        crate::gpu::particle::ParticleSourceResult::Image {
+                                            path,
+                                            data,
+                                            width,
+                                            height,
+                                        } => {
+                                            let aux = crate::gpu::particle::image_source::sample_rgba_buffer(
+                                                &data, width, height,
+                                                &ps.sample_def,
+                                                ps.max_particles,
+                                            );
+                                            if !aux.is_empty() {
+                                                // Start transition from current aux
+                                                if !ps.current_aux.is_empty() {
+                                                    ps.source_transition = Some(
+                                                        crate::gpu::particle::SourceTransition {
+                                                            from_aux: ps.current_aux.clone(),
+                                                            to_aux: aux.clone(),
+                                                            progress: 0.0,
+                                                            duration_secs: 0.5,
+                                                        },
+                                                    );
+                                                } else {
+                                                    ps.update_aux_in_place(&app.gpu.queue, &aux);
+                                                }
+                                                ps.store_current_aux(aux);
+                                                ps.has_aux_data = true;
+                                                ps.image_source = crate::gpu::particle::ParticleImageSource::Static;
+                                                ps.video_path = None;
+                                            }
+                                            log::info!(
+                                                "Loaded particle image source: {} ({}x{})",
+                                                path, width, height
+                                            );
+                                        }
+                                        crate::gpu::particle::ParticleSourceResult::Animated {
+                                            path,
+                                            frames,
+                                            delays_ms,
+                                        } => {
+                                            #[cfg(feature = "video")]
+                                            {
+                                                let path_clone = path.clone();
+                                                ps.set_video_source(
+                                                    &app.gpu.queue,
+                                                    frames,
+                                                    delays_ms,
+                                                    path_clone,
+                                                );
+                                                log::info!(
+                                                    "Loaded animated particle source: {}",
+                                                    path,
+                                                );
+                                            }
+                                            #[cfg(not(feature = "video"))]
+                                            {
+                                                // Without video feature, use first frame as static
+                                                if let Some(frame) = frames.first() {
+                                                    let aux = crate::gpu::particle::image_source::sample_rgba_buffer(
+                                                        &frame.data, frame.width, frame.height,
+                                                        &ps.sample_def,
+                                                        ps.max_particles,
+                                                    );
+                                                    if !aux.is_empty() {
+                                                        ps.update_aux_in_place(&app.gpu.queue, &aux);
+                                                        ps.store_current_aux(aux);
+                                                        ps.has_aux_data = true;
+                                                    }
+                                                }
+                                                let _ = (path, delays_ms);
+                                            }
+                                        }
+                                        crate::gpu::particle::ParticleSourceResult::Error(e) => {
+                                            log::error!("Particle source load failed: {e}");
+                                            app.status_error = Some((
+                                                format!("Particle source: {e}"),
+                                                std::time::Instant::now(),
+                                            ));
+                                        }
                                     }
                                 }
                             }

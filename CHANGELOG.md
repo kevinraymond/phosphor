@@ -5,6 +5,21 @@
 
 ## Unreleased
 
+### Particle Video/Webcam Source + Transitions
+- **Video as particle source**: Raster (and any image-emitter effect) can now use video files as particle source — particles update home positions per-frame tracking video content
+- **Webcam as particle source**: live webcam feed drives particle positions in real-time (feature-gated `webcam`)
+- **Source transitions**: smooth 0.5s interpolation of particle home positions when switching between image/video/webcam sources (no hard snap)
+- **Per-frame aux updates**: pre-allocated aux buffer at `max_particles` size enables `write_buffer` updates without recreating GPU bind groups (8MB DMA transfer for 500K particles)
+- **`sample_rgba_buffer()`**: new function samples raw RGBA byte data directly, skipping file I/O — used for video frame and webcam frame particle sampling
+- **UI source controls**: particle panel shows source type badge (IMG/VIDEO/CAM), source name, Load Video / Webcam buttons (feature-gated), video transport (play/pause, speed, loop, seek)
+- **Preset save/load**: particle video path, speed, looping, and webcam source persisted in `LayerPreset` with serde defaults for backward compat
+- **Load Image button**: users can load custom PNG/JPEG/WebP images as particle source (replaces default image)
+- **Animated GIF as particle source**: GIFs with multiple frames auto-detect as animated source with per-frame particle position updates (same as video, no feature gate required)
+- **Background loading**: all particle source loading (image, GIF, video) happens on a background thread via `ParticleSourceLoader` — no UI freeze during decode
+- **EmitterDef `video` field**: `.pfx` files can specify `"video": "clip.mp4"` or `"video": "webcam"` for built-in video/webcam source at effect load time
+- Video decode reuses existing `media/video.rs` infrastructure (ffmpeg pre-decode to RAM, 60s max)
+- 12 new tests: `sample_rgba_buffer` (5), `ParticleImageSource` (2), `SourceTransition` (3), `LayerPreset` serde (3), `EmitterDef` serde with video (2)
+
 ### Raster Effect (New)
 - **Raster** (video wall): 500K particles map to image pixel positions, colored by source image
 - Voronoi shard fragmentation: 32 seed points create irregular fragments with per-shard rotation, translation, and depth variation

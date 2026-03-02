@@ -165,8 +165,146 @@ fn sample_random(
     samples
 }
 
+/// Sample pixels from raw RGBA buffer data into ParticleAux data.
+/// Like `sample_image()`, but skips file I/O and image crate decode — used for
+/// per-frame updates from video or webcam sources where data is already decoded RGBA.
+pub fn sample_rgba_buffer(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    sample_def: &ImageSampleDef,
+    max_particles: u32,
+) -> Vec<ParticleAux> {
+    if data.is_empty() || width == 0 || height == 0 {
+        return Vec::new();
+    }
+
+    // Resize if needed (reuse image crate for downscale)
+    let (rgba_data, w, h) = if width > MAX_DIM || height > MAX_DIM {
+        let img = image::RgbaImage::from_raw(width, height, data.to_vec());
+        match img {
+            Some(img) => {
+                let resized = image::imageops::resize(
+                    &img,
+                    MAX_DIM.min(width),
+                    MAX_DIM.min(height),
+                    image::imageops::FilterType::Nearest,
+                );
+                let (rw, rh) = resized.dimensions();
+                (resized.into_raw(), rw, rh)
+            }
+            None => return Vec::new(),
+        }
+    } else {
+        (data.to_vec(), width, height)
+    };
+
+    // Build a temporary RgbaImage for sampling functions
+    let img = match image::RgbaImage::from_raw(w, h, rgba_data) {
+        Some(img) => img,
+        None => return Vec::new(),
+    };
+
+    let samples = match sample_def.mode.as_str() {
+        "threshold" => sample_threshold(&img, w, h, sample_def.threshold, max_particles),
+        "random" => sample_random(&img, w, h, max_particles),
+        _ => sample_grid(&img, w, h, max_particles),
+    };
+
+    // Map pixel coords to clip space with aspect ratio correction
+    let aspect = w as f32 / h as f32;
+    let scale = sample_def.scale;
+    samples
+        .into_iter()
+        .map(|(px, py, r, g, b, a)| {
+            let cx = ((px as f32 / w as f32) * 2.0 - 1.0) * scale;
+            let cy = -((py as f32 / h as f32) * 2.0 - 1.0) * scale;
+            let cx = if aspect > 1.0 { cx } else { cx * aspect };
+            let cy = if aspect > 1.0 { cy / aspect } else { cy };
+            let packed = pack_rgba(r, g, b, a);
+            ParticleAux {
+                home: [cx, cy, packed, 0.0],
+            }
+        })
+        .collect()
+}
+
 /// Pack RGBA bytes into a single f32 via bitcast from u32.
 fn pack_rgba(r: u8, g: u8, b: u8, a: u8) -> f32 {
     let packed = (r as u32) | ((g as u32) << 8) | ((b as u32) << 16) | ((a as u32) << 24);
     f32::from_bits(packed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sample_rgba_buffer_empty() {
+        let def = ImageSampleDef {
+            mode: "grid".to_string(),
+            threshold: 0.1,
+            scale: 1.0,
+        };
+        assert!(sample_rgba_buffer(&[], 0, 0, &def, 100).is_empty());
+    }
+
+    #[test]
+    fn sample_rgba_buffer_single_pixel() {
+        // 1x1 white pixel
+        let data = vec![255, 255, 255, 255];
+        let def = ImageSampleDef {
+            mode: "grid".to_string(),
+            threshold: 0.1,
+            scale: 1.0,
+        };
+        let result = sample_rgba_buffer(&data, 1, 1, &def, 100);
+        assert_eq!(result.len(), 1);
+        // Position should be at origin (single pixel maps to center)
+        assert!(result[0].home[0].abs() < 1.1);
+        assert!(result[0].home[1].abs() < 1.1);
+    }
+
+    #[test]
+    fn sample_rgba_buffer_grid_mode() {
+        // 4x4 opaque red image
+        let mut data = Vec::with_capacity(4 * 4 * 4);
+        for _ in 0..16 {
+            data.extend_from_slice(&[255, 0, 0, 255]);
+        }
+        let def = ImageSampleDef {
+            mode: "grid".to_string(),
+            threshold: 0.1,
+            scale: 1.0,
+        };
+        let result = sample_rgba_buffer(&data, 4, 4, &def, 100);
+        assert!(!result.is_empty());
+        assert!(result.len() <= 16);
+    }
+
+    #[test]
+    fn sample_rgba_buffer_transparent_skipped() {
+        // 2x2 fully transparent image
+        let data = vec![0u8; 2 * 2 * 4];
+        let def = ImageSampleDef {
+            mode: "grid".to_string(),
+            threshold: 0.1,
+            scale: 1.0,
+        };
+        let result = sample_rgba_buffer(&data, 2, 2, &def, 100);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn sample_rgba_buffer_respects_max_particles() {
+        // 100x100 opaque image = 10000 pixels, limit to 50
+        let data = vec![255u8; 100 * 100 * 4];
+        let def = ImageSampleDef {
+            mode: "grid".to_string(),
+            threshold: 0.1,
+            scale: 1.0,
+        };
+        let result = sample_rgba_buffer(&data, 100, 100, &def, 50);
+        assert!(result.len() <= 50);
+    }
 }

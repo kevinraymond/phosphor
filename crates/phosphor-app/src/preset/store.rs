@@ -46,6 +46,16 @@ pub struct LayerPreset {
     pub media_looping: Option<bool>,
     #[serde(default)]
     pub webcam_device: Option<String>,
+    /// Absolute path to video file used as particle image source.
+    #[serde(default)]
+    pub particle_video_path: Option<String>,
+    #[serde(default)]
+    pub particle_video_speed: Option<f32>,
+    #[serde(default)]
+    pub particle_video_looping: Option<bool>,
+    /// True if particle source is webcam.
+    #[serde(default)]
+    pub particle_webcam: Option<bool>,
 }
 
 fn default_opacity() -> f32 {
@@ -431,6 +441,45 @@ mod tests {
         assert!(!lp.pinned);
         assert!(lp.custom_name.is_none());
         assert!(lp.media_path.is_none());
+        // New particle source fields default to None
+        assert!(lp.particle_video_path.is_none());
+        assert!(lp.particle_video_speed.is_none());
+        assert!(lp.particle_video_looping.is_none());
+        assert!(lp.particle_webcam.is_none());
+    }
+
+    #[test]
+    fn layer_preset_particle_source_serde() {
+        let json = r#"{
+            "effect_name": "Raster",
+            "particle_video_path": "/tmp/test.mp4",
+            "particle_video_speed": 1.5,
+            "particle_video_looping": false,
+            "particle_webcam": null
+        }"#;
+        let lp: LayerPreset = serde_json::from_str(json).unwrap();
+        assert_eq!(lp.particle_video_path.as_deref(), Some("/tmp/test.mp4"));
+        assert!((lp.particle_video_speed.unwrap() - 1.5).abs() < 1e-6);
+        assert_eq!(lp.particle_video_looping, Some(false));
+        assert!(lp.particle_webcam.is_none());
+
+        // Roundtrip
+        let serialized = serde_json::to_string(&lp).unwrap();
+        let lp2: LayerPreset = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(lp2.particle_video_path, lp.particle_video_path);
+        assert_eq!(lp2.particle_video_speed, lp.particle_video_speed);
+        assert_eq!(lp2.particle_video_looping, lp.particle_video_looping);
+    }
+
+    #[test]
+    fn layer_preset_particle_webcam_serde() {
+        let json = r#"{
+            "effect_name": "Raster",
+            "particle_webcam": true
+        }"#;
+        let lp: LayerPreset = serde_json::from_str(json).unwrap();
+        assert_eq!(lp.particle_webcam, Some(true));
+        assert!(lp.particle_video_path.is_none());
     }
 
     #[test]
@@ -449,6 +498,10 @@ mod tests {
                 media_speed: None,
                 media_looping: None,
                 webcam_device: None,
+                particle_video_path: None,
+                particle_video_speed: None,
+                particle_video_looping: None,
+                particle_webcam: None,
             }],
             active_layer: 0,
             postprocess: PostProcessDef::default(),
