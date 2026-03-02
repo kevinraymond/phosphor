@@ -36,6 +36,8 @@ pub struct ParticleInfo {
     pub is_transitioning: bool,
     pub source_loading: bool,
     pub source_loading_name: String,
+    /// Built-in image names (e.g. "skull", "phoenix") available for quick select.
+    pub builtin_images: Vec<String>,
 }
 
 pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
@@ -144,6 +146,45 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                 );
             }
         });
+
+        // Built-in image selector
+        if !info.builtin_images.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Image")
+                        .size(SMALL_SIZE)
+                        .color(tc.text_secondary),
+                );
+                // Derive current selection label from source_name
+                let current_label = if info.source_type == "static" && !info.source_name.is_empty() {
+                    // Strip "raster_" prefix and ".png" suffix for display
+                    let name = info.source_name.trim_end_matches(".png");
+                    let name = name.strip_prefix("raster_").unwrap_or(name);
+                    name.to_string()
+                } else {
+                    "—".to_string()
+                };
+                egui::ComboBox::from_id_salt("particle_builtin_image")
+                    .selected_text(&current_label)
+                    .width(ui.available_width() - 4.0)
+                    .show_ui(ui, |ui| {
+                        for name in &info.builtin_images {
+                            if ui
+                                .selectable_label(*name == current_label, name)
+                                .clicked()
+                            {
+                                ui.ctx().data_mut(|d| {
+                                    d.insert_temp(
+                                        egui::Id::new("particle_select_builtin"),
+                                        name.clone(),
+                                    );
+                                });
+                            }
+                        }
+                    });
+            });
+            ui.add_space(2.0);
+        }
 
         // Source action buttons
         if info.source_loading {

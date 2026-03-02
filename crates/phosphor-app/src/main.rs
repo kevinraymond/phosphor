@@ -257,12 +257,16 @@ impl ApplicationHandler for PhosphorApp {
                                 is_transitioning: ps.source_transition.is_some(),
                                 source_loading: false, // set below
                                 source_loading_name: String::new(),
+                                builtin_images: Vec::new(), // set below
                             }
                         });
-                    // Overlay loader state onto particle info
+                    // Overlay loader state + built-in images onto particle info
                     if let Some(ref mut pi) = particle_info {
                         pi.source_loading = app.particle_source_loader.loading;
                         pi.source_loading_name = app.particle_source_loader.loading_name.clone();
+                        if pi.has_image_source {
+                            pi.builtin_images = crate::gpu::particle::builtin_raster_images().clone();
+                        }
                     }
                     let particle_count = particle_info.as_ref().map(|p| p.max_count);
 
@@ -1137,6 +1141,16 @@ impl ApplicationHandler for PhosphorApp {
                 // Handle particle source change signals
                 {
                     let ctx = app.egui_overlay.context();
+
+                    // Select built-in raster image
+                    let select_builtin: Option<String> =
+                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_select_builtin")));
+                    if let Some(name) = select_builtin {
+                        if !app.particle_source_loader.loading {
+                            let path = crate::gpu::particle::builtin_raster_path(&name);
+                            app.particle_source_loader.load_image(path);
+                        }
+                    }
 
                     // Load image as particle source (dialog + decode on background thread)
                     let load_image: Option<bool> =

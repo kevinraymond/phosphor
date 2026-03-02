@@ -1,9 +1,44 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::thread;
 
 use crossbeam_channel::{bounded, Receiver, TryRecvError};
 
 use crate::media::types::DecodedFrame;
+
+/// Discover built-in raster_*.png images in the assets/images/ directory.
+/// Returns display names (e.g. "skull", "phoenix") sorted alphabetically.
+/// Cached after first call.
+pub fn builtin_raster_images() -> &'static Vec<String> {
+    static IMAGES: OnceLock<Vec<String>> = OnceLock::new();
+    IMAGES.get_or_init(|| {
+        let images_dir = crate::effect::loader::assets_dir().join("images");
+        let mut names = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&images_dir) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if file_name.starts_with("raster_") && file_name.ends_with(".png") {
+                    let display = file_name
+                        .strip_prefix("raster_")
+                        .unwrap_or(&file_name)
+                        .strip_suffix(".png")
+                        .unwrap_or(&file_name)
+                        .to_string();
+                    names.push(display);
+                }
+            }
+        }
+        names.sort();
+        names
+    })
+}
+
+/// Get the full path for a built-in raster image by display name.
+pub fn builtin_raster_path(display_name: &str) -> PathBuf {
+    crate::effect::loader::assets_dir()
+        .join("images")
+        .join(format!("raster_{display_name}.png"))
+}
 
 /// Request to load a particle source in the background.
 pub enum ParticleSourceRequest {

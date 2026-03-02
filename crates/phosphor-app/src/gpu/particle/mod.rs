@@ -8,7 +8,9 @@ pub mod system;
 pub mod types;
 
 pub use flow_field::FlowFieldTexture;
-pub use source_loader::{ParticleSourceLoader, ParticleSourceResult};
+pub use source_loader::{
+    builtin_raster_images, builtin_raster_path, ParticleSourceLoader, ParticleSourceResult,
+};
 pub use sprite::SpriteAtlas;
 pub use system::ParticleSystem;
 pub use types::{
