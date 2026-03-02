@@ -5,6 +5,13 @@
 
 ## Unreleased
 
+### Raster Grid Artifact Fix
+- **Jittered grid sampling**: ±0.4×step deterministic offset per particle breaks up visible row/column banding in smooth gradient areas
+- **Bilinear color interpolation**: fractional pixel positions sample from 4 surrounding pixels, eliminating color stairstepping in gradients
+- **Gradient-based size modulation**: luminance gradient magnitude stored in `home.w`; smooth areas get 30% larger particles (fill gaps), edges stay neutral
+- **Sparkle boost**: bright pixels at high-gradient locations (stars, glints) get audio-reactive size pulsing — per-particle phase offset creates independent twinkling driven by onset and mids
+- New unit tests for jitter, bilinear sampling, and gradient helpers
+
 ### Raster Image Loading Fixes
 - **Fix 2048x2048 image loading**: `upload_aux_data()` no longer shrinks aux buffer below `max_particles` size — subsequent `update_aux_in_place()` calls for larger images were silently dropped
 - **Fix image selector not updating**: switching built-in images now updates `ps.def.emitter.image` so the ComboBox reflects the active selection

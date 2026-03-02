@@ -123,7 +123,7 @@ pub struct ParticleUniforms {
 
 /// Auxiliary particle data: 16 bytes (1 x vec4f).
 /// home.xy = home position (for image decomposition reform), home.z = packed RGBA (bitcast u32→f32),
-/// home.w = sprite_index (for animated sprite sheets).
+/// home.w = effect-dependent: sprite_index for sprite effects, gradient magnitude for image decomposition.
 /// Stored in a separate storage buffer at compute binding 4.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
@@ -314,13 +314,13 @@ impl SourceTransition {
         for i in 0..len {
             let from = self.from_aux.get(i).map(|a| a.home).unwrap_or([0.0; 4]);
             let to = self.to_aux.get(i).map(|a| a.home).unwrap_or([0.0; 4]);
-            // Lerp xy (home position), keep target's z (packed color) and w (sprite index)
+            // Lerp xy (home position), keep target's z (packed color) and w (gradient/sprite_index)
             result.push(ParticleAux {
                 home: [
                     from[0] * (1.0 - t) + to[0] * t,
                     from[1] * (1.0 - t) + to[1] * t,
                     to[2], // packed RGBA from target
-                    to[3], // sprite index from target
+                    to[3], // gradient or sprite_index from target
                 ],
             });
         }
