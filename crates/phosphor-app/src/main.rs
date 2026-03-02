@@ -1123,11 +1123,13 @@ impl ApplicationHandler for PhosphorApp {
                         }
                     }
 
-                    // Persist particle changes to effect loader + disk for user effects
+                    // Persist particle changes to disk for user effects only.
+                    // Built-in effects are runtime-only; users should create a
+                    // preset or copy the effect to persist changes.
                     if let Some((idx, updated_def)) = particle_save_info {
                         if let Some(effect) = app.effect_loader.effects.get_mut(idx) {
-                            effect.particles = Some(updated_def);
                             if !EffectLoader::is_builtin(effect) {
+                                effect.particles = Some(updated_def);
                                 if let Some(ref path) = effect.source_path {
                                     if let Ok(json) = serde_json::to_string_pretty(effect) {
                                         let _ = std::fs::write(path, json);
@@ -1289,6 +1291,12 @@ impl ApplicationHandler for PhosphorApp {
                                                 ps.has_aux_data = true;
                                                 ps.image_source = crate::gpu::particle::ParticleImageSource::Static;
                                                 ps.video_path = None;
+                                                // Update emitter image name so UI selector reflects the change
+                                                let filename = std::path::Path::new(&path)
+                                                    .file_name()
+                                                    .map(|f| f.to_string_lossy().to_string())
+                                                    .unwrap_or_default();
+                                                ps.def.emitter.image = filename;
                                             }
                                             log::info!(
                                                 "Loaded particle image source: {} ({}x{})",

@@ -320,13 +320,26 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
     let mut size = info.initial_size;
     let mut drag = info.drag;
 
+    // Dynamic ranges: extend to include current value so out-of-range
+    // values (e.g. Raster's emit_rate=100K, lifetime=999) aren't silently
+    // clamped by the slider, which would corrupt ps.def every frame.
+    let emit_max = emit_rate.max(5000.0);
+    let burst_max = burst.max(2000);
+    let life_max = lifetime.max(30.0);
+    let speed_min = speed.min(0.0);
+    let speed_max = speed.max(2.0);
+    let speed_log = speed > 0.0;
+    let size_min = size.min(0.001);
+    let size_max = size.max(0.1);
+    let drag_min = drag.min(0.8);
+
     egui::Grid::new("particle_params")
         .num_columns(2)
         .spacing([8.0, 3.0])
         .show(ui, |ui| {
             ui.label(RichText::new("Emit rate").size(SMALL_SIZE).color(tc.text_secondary));
             let r = ui.add(
-                egui::Slider::new(&mut emit_rate, 10.0..=5000.0)
+                egui::Slider::new(&mut emit_rate, 10.0..=emit_max)
                     .logarithmic(true)
                     .show_value(true)
                     .custom_formatter(|v, _| format!("{:.0}/s", v)),
@@ -340,7 +353,7 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
 
             ui.label(RichText::new("Burst").size(SMALL_SIZE).color(tc.text_secondary));
             let r = ui.add(
-                egui::Slider::new(&mut burst, 0..=2000)
+                egui::Slider::new(&mut burst, 0..=burst_max)
                     .show_value(true),
             );
             if r.changed() {
@@ -352,7 +365,7 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
 
             ui.label(RichText::new("Lifetime").size(SMALL_SIZE).color(tc.text_secondary));
             let r = ui.add(
-                egui::Slider::new(&mut lifetime, 0.5..=30.0)
+                egui::Slider::new(&mut lifetime, 0.5..=life_max)
                     .show_value(true)
                     .custom_formatter(|v, _| format!("{:.1}s", v)),
             );
@@ -365,8 +378,8 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
 
             ui.label(RichText::new("Speed").size(SMALL_SIZE).color(tc.text_secondary));
             let r = ui.add(
-                egui::Slider::new(&mut speed, 0.01..=2.0)
-                    .logarithmic(true)
+                egui::Slider::new(&mut speed, speed_min..=speed_max)
+                    .logarithmic(speed_log)
                     .show_value(true)
                     .custom_formatter(|v, _| format!("{:.3}", v)),
             );
@@ -379,7 +392,7 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
 
             ui.label(RichText::new("Size").size(SMALL_SIZE).color(tc.text_secondary));
             let r = ui.add(
-                egui::Slider::new(&mut size, 0.001..=0.1)
+                egui::Slider::new(&mut size, size_min..=size_max)
                     .logarithmic(true)
                     .show_value(true)
                     .custom_formatter(|v, _| format!("{:.4}", v)),
@@ -393,7 +406,7 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
 
             ui.label(RichText::new("Drag").size(SMALL_SIZE).color(tc.text_secondary));
             let r = ui.add(
-                egui::Slider::new(&mut drag, 0.8..=1.0)
+                egui::Slider::new(&mut drag, drag_min..=1.0)
                     .show_value(true)
                     .custom_formatter(|v, _| format!("{:.3}", v)),
             );

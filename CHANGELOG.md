@@ -5,6 +5,15 @@
 
 ## Unreleased
 
+### Raster Image Loading Fixes
+- **Fix 2048x2048 image loading**: `upload_aux_data()` no longer shrinks aux buffer below `max_particles` size — subsequent `update_aux_in_place()` calls for larger images were silently dropped
+- **Fix image selector not updating**: switching built-in images now updates `ps.def.emitter.image` so the ComboBox reflects the active selection
+- **Fix particle slider clamping**: slider ranges now dynamically extend to include the current value — prevents Raster's `emit_rate=100K` / `lifetime=999` from being silently clamped to slider defaults, which corrupted the effect every frame the panel was drawn
+- **Built-in effects are runtime-only**: particle slider changes no longer write back to `effect_loader` for built-in effects — use presets to persist tweaks
+- **Warning on aux buffer overflow**: `update_aux_in_place()` now logs a warning when a write is skipped due to buffer size
+- Raster particle cap raised from 500K to 2M (covers 2048² images at grid step=1)
+- Raster default particle size reduced from 0.004 to 0.002
+
 ### Particle Video/Webcam Source + Transitions
 - **Video as particle source**: Raster (and any image-emitter effect) can now use video files as particle source — particles update home positions per-frame tracking video content
 - **Webcam as particle source**: live webcam feed drives particle positions in real-time (feature-gated `webcam`)

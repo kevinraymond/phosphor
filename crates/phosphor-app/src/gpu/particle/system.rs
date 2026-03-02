@@ -1195,7 +1195,7 @@ impl ParticleSystem {
     /// Upload auxiliary data (home positions, packed colors) for image decomposition.
     /// Recreates aux buffer and compute bind groups.
     pub fn upload_aux_data(&mut self, device: &Device, queue: &Queue, data: &[ParticleAux]) {
-        let aux_size = (std::mem::size_of::<ParticleAux>() * data.len().max(1)) as u64;
+        let aux_size = (std::mem::size_of::<ParticleAux>() * (data.len().max(self.max_particles as usize)).max(1)) as u64;
         self.aux_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("particle-aux"),
             size: aux_size,
@@ -1230,6 +1230,12 @@ impl ParticleSystem {
         let byte_len = (std::mem::size_of::<ParticleAux>() * data.len()) as u64;
         if byte_len <= self.aux_buffer.size() {
             queue.write_buffer(&self.aux_buffer, 0, bytemuck::cast_slice(data));
+        } else {
+            log::warn!(
+                "Aux buffer too small: need {} bytes, have {} bytes ({} vs {} particles)",
+                byte_len, self.aux_buffer.size(),
+                data.len(), self.aux_buffer.size() as usize / std::mem::size_of::<ParticleAux>()
+            );
         }
     }
 
