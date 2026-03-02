@@ -158,13 +158,22 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         let trans_dir = shard_translate_dir(sid);
         let translate = trans_dir * bass_amt * 0.5;
 
-        // Rotation: each shard rotates around its centroid
+        // Rotation: twist increases with distance from shard center (flex, not rigid)
         let rot_spd = shard_rot_speed(sid);
         let offset = home_pos - shard.center;
-        let rot_amount = bass_amt * rot_spd;
+        let dist_from_center = length(offset);
+        let flex = 1.0 + dist_from_center * 1.8; // outer particles rotate more
+        let rot_amount = bass_amt * rot_spd * flex;
         let rotated = rot2(offset, rot_amount) - offset;
 
-        let shard_disp = translate + rotated;
+        // Per-particle noise displacement within shard (breaks rigid lockstep)
+        let inner_seed = f32(idx) * 3.91 + f32(sid) * 17.3;
+        let inner_noise = vec2f(
+            hash(inner_seed) - 0.5,
+            hash(inner_seed + 2.7) - 0.5
+        ) * bass_amt * 0.3;
+
+        let shard_disp = translate + rotated + inner_noise;
 
         // Edge affinity: particles near Voronoi cell boundaries break free
         let d1 = sqrt(shard.dist1_sq);
@@ -211,15 +220,19 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         let burst_seed = f32(idx) * 3.17 + u.time;
         let random_dir = vec2f(hash(burst_seed) - 0.5, hash(burst_seed + 7.0) - 0.5);
         var burst_dir: vec2f;
+        var burst_mag = burst_force * (1.0 + u.kick);
         if bass_mode < 0.33 {
-            // In shard mode, burst uses shard's translation direction
+            // In shard mode, burst uses shard's direction + per-particle spread
             let shard = find_shard(home_pos);
             let trans_dir = shard_translate_dir(shard.id);
-            burst_dir = normalize(trans_dir + random_dir * 0.4 + vec2f(0.001));
+            burst_dir = normalize(trans_dir + random_dir * 0.8 + vec2f(0.001));
+            // Outer particles in the shard fly further (flex, not rigid block)
+            let dist_c = length(home_pos - shard.center);
+            burst_mag *= (0.7 + dist_c * 1.2);
         } else {
             burst_dir = normalize(radial_dir + random_dir * 0.3 + vec2f(0.001));
         }
-        vel += burst_dir * burst_force * (1.0 + u.kick);
+        vel += burst_dir * burst_mag;
     }
 
     // Velocity cap

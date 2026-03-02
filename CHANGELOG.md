@@ -5,6 +5,9 @@
 
 ## Unreleased
 
+### Raster Shard Flex
+- **Flexible shard motion**: Voronoi shards deform organically instead of moving as rigid blocks — distance-dependent rotation twist, per-particle noise within shards, and wider burst spread with outer particles flying further
+
 ### Raster Grid Artifact Fix
 - **Jittered grid sampling**: ±0.4×step deterministic offset per particle breaks up visible row/column banding in smooth gradient areas
 - **Bilinear color interpolation**: fractional pixel positions sample from 4 surrounding pixels, eliminating color stairstepping in gradients
