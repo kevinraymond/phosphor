@@ -219,14 +219,22 @@ fn draw_effect_grid(
 
                 let response = ui.add_sized(Vec2::new(btn_width, btn_height), btn);
 
-                // Particle badge: small dot in top-right corner for effects with particles
+                // Particle badge: scattered burst in top-right corner for effects with particles
                 if effect.particles.is_some() {
-                    let r = 3.0;
-                    let center = egui::pos2(
-                        response.rect.right() - r - 2.0,
-                        response.rect.top() + r + 2.0,
+                    let anchor = egui::pos2(
+                        response.rect.right() - 5.0,
+                        response.rect.top() + 5.0,
                     );
-                    ui.painter().circle_filled(center, r, tc.accent);
+                    let accent_50 = Color32::from_rgba_unmultiplied(tc.accent.r(), tc.accent.g(), tc.accent.b(), 128);
+                    let accent_35 = Color32::from_rgba_unmultiplied(tc.accent.r(), tc.accent.g(), tc.accent.b(), 90);
+                    let painter = ui.painter();
+                    // Center dot
+                    painter.circle_filled(anchor, 1.2, accent_50);
+                    // Surrounding scattered dots (slightly irregular offsets)
+                    painter.circle_filled(egui::pos2(anchor.x - 2.8, anchor.y - 0.5), 0.9, accent_35);
+                    painter.circle_filled(egui::pos2(anchor.x + 2.5, anchor.y + 0.8), 1.0, accent_35);
+                    painter.circle_filled(egui::pos2(anchor.x + 0.3, anchor.y - 2.7), 0.8, accent_35);
+                    painter.circle_filled(egui::pos2(anchor.x - 0.6, anchor.y + 2.6), 0.9, accent_35);
                 }
 
                 // Left click: load effect (also clears pending delete)
