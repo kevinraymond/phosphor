@@ -1514,6 +1514,8 @@ impl ParticleSystem {
     }
 
     /// Set obstacle from pre-decoded video frames.
+    /// Video frames have alpha=1.0 everywhere, so we convert luminance to alpha
+    /// so bright areas become solid obstacles and dark areas are passable.
     pub fn set_obstacle_video(
         &mut self,
         device: &Device,
@@ -1523,7 +1525,8 @@ impl ParticleSystem {
         path: String,
     ) {
         if let Some(frame) = frames.first() {
-            self.obstacle = ObstacleTexture::from_rgba(device, queue, &frame.data, frame.width, frame.height);
+            let converted = Self::luminance_to_alpha(&frame.data);
+            self.obstacle = ObstacleTexture::from_rgba(device, queue, &converted, frame.width, frame.height);
             self.rebuild_flow_field_bind_group(device);
         }
         self.obstacle_video_frames = frames;
@@ -1536,6 +1539,19 @@ impl ParticleSystem {
         self.obstacle_enabled = true;
         self.obstacle_source = "video".to_string();
         self.obstacle_image_path = Some(path);
+    }
+
+    /// Convert RGBA data so alpha = luminance. Videos from ffmpeg have alpha=1.0
+    /// everywhere, which makes the entire frame an obstacle. This maps brightness
+    /// to alpha so bright regions become solid obstacles and dark regions are passable.
+    fn luminance_to_alpha(data: &[u8]) -> Vec<u8> {
+        let mut out = data.to_vec();
+        for pixel in out.chunks_exact_mut(4) {
+            // Perceptual luminance: 0.299R + 0.587G + 0.114B
+            let lum = (pixel[0] as u32 * 77 + pixel[1] as u32 * 150 + pixel[2] as u32 * 29) >> 8;
+            pixel[3] = lum as u8;
+        }
+        out
     }
 
     /// Advance obstacle video playback and update texture if frame changed.
@@ -1564,10 +1580,11 @@ impl ParticleSystem {
         } else {
             self.obstacle_video_frame = next;
         }
-        // Upload new frame
+        // Upload new frame (with luminance-to-alpha conversion)
         if let Some(frame) = self.obstacle_video_frames.get(self.obstacle_video_frame) {
             let dims_changed = frame.width != self.obstacle.width || frame.height != self.obstacle.height;
-            self.obstacle.update(device, queue, &frame.data, frame.width, frame.height);
+            let converted = Self::luminance_to_alpha(&frame.data);
+            self.obstacle.update(device, queue, &converted, frame.width, frame.height);
             if dims_changed {
                 self.rebuild_flow_field_bind_group(device);
             }

@@ -1158,6 +1158,8 @@ impl ApplicationHandler for PhosphorApp {
                                             {
                                                 app.depth_thread = None;
                                             }
+                                            #[cfg(feature = "webcam")]
+                                            app.cleanup_webcam_if_unused();
                                         }
                                         ObstacleCommand::None => {}
                                     }
@@ -1232,6 +1234,13 @@ impl ApplicationHandler for PhosphorApp {
                                 Err(e) => log::error!("Failed to load obstacle image: {e}"),
                             }
                         }
+                        // Stop depth thread + webcam if switching away from depth/webcam source
+                        #[cfg(feature = "depth")]
+                        {
+                            app.depth_thread = None;
+                        }
+                        #[cfg(feature = "webcam")]
+                        app.cleanup_webcam_if_unused();
                     }
                 }
 

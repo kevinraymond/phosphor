@@ -213,9 +213,16 @@ fn apply_obstacle_collision(pos: vec2f, vel: vec2f, prev_pos: vec2f) -> vec4f {
     if u.obstacle_enabled < 0.5 { return vec4f(pos, vel); }
 
     let alpha = obstacle_alpha(pos);
-    if alpha < u.obstacle_threshold { return vec4f(pos, vel); }
+    let is_contain = u.obstacle_mode == 3u;
 
-    let normal = obstacle_normal(pos);
+    // Normal modes: collide when inside obstacle (alpha >= threshold)
+    // Contain mode: collide when outside obstacle (alpha < threshold)
+    if !is_contain && alpha < u.obstacle_threshold { return vec4f(pos, vel); }
+    if is_contain && alpha >= u.obstacle_threshold { return vec4f(pos, vel); }
+
+    let raw_normal = obstacle_normal(pos);
+    // Contain mode: invert normal to point inward (toward high-alpha region)
+    let normal = select(raw_normal, -raw_normal, is_contain);
 
     // Binary search for surface contact point along the integration step.
     // This prevents particles from tunneling deep into the obstacle and
@@ -226,7 +233,9 @@ fn apply_obstacle_collision(pos: vec2f, vel: vec2f, prev_pos: vec2f) -> vec4f {
         let mid = (lo + hi) * 0.5;
         let test_pos = mix(prev_pos, pos, mid);
         let test_alpha = obstacle_alpha(test_pos);
-        if test_alpha >= u.obstacle_threshold {
+        // Normal: safe side is low alpha; Contain: safe side is high alpha
+        let in_collision = select(test_alpha >= u.obstacle_threshold, test_alpha < u.obstacle_threshold, is_contain);
+        if in_collision {
             hi = mid;
         } else {
             lo = mid;
@@ -248,12 +257,24 @@ fn apply_obstacle_collision(pos: vec2f, vel: vec2f, prev_pos: vec2f) -> vec4f {
         case 1u: {
             return vec4f(safe_pos, vec2f(0.0));
         }
-        // Flow: remove normal component of velocity (tangent projection)
+        // Flow: redirect into tangential direction, preserving energy
         case 2u: {
             let v_dot_n = dot(vel, normal);
             if v_dot_n >= 0.0 { return vec4f(safe_pos, vel); }
-            let tangent_vel = vel - normal * v_dot_n;
-            return vec4f(safe_pos, tangent_vel * u.obstacle_elasticity);
+            // Tangent: 90-degree rotation of normal
+            let tangent = vec2f(-normal.y, normal.x);
+            // Pick tangent direction matching existing motion
+            let tangent_dir = select(-tangent, tangent, dot(vel, tangent) >= 0.0);
+            // Existing tangential speed + redirected normal speed
+            let tangent_vel = tangent_dir * (abs(dot(vel, tangent_dir)) + abs(v_dot_n) * u.obstacle_elasticity);
+            return vec4f(safe_pos, tangent_vel);
+        }
+        // Contain: bounce off outside of obstacle shape (particles trapped inside)
+        case 3u: {
+            let v_dot_n = dot(vel, normal);
+            if v_dot_n >= 0.0 { return vec4f(safe_pos, vel); }
+            let reflected = vel - normal * 2.0 * v_dot_n;
+            return vec4f(safe_pos, reflected * u.obstacle_elasticity);
         }
         default: {
             return vec4f(pos, vel);

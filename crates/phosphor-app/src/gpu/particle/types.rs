@@ -125,7 +125,7 @@ pub struct ParticleUniforms {
     // Obstacle collision (16 bytes) [384..399]
     pub obstacle_enabled: f32,    // 0.0 or 1.0
     pub obstacle_threshold: f32,  // alpha cutoff (default 0.5)
-    pub obstacle_mode: u32,       // 0=bounce, 1=stick, 2=flow
+    pub obstacle_mode: u32,       // 0=bounce, 1=stick, 2=flow, 3=contain
     pub obstacle_elasticity: f32, // restitution/friction (default 0.7)
     // Total = 400 bytes
 }
@@ -136,6 +136,7 @@ pub enum ObstacleMode {
     Bounce = 0,
     Stick = 1,
     Flow = 2,
+    Contain = 3,
 }
 
 impl ObstacleMode {
@@ -143,6 +144,7 @@ impl ObstacleMode {
         match v {
             1 => Self::Stick,
             2 => Self::Flow,
+            3 => Self::Contain,
             _ => Self::Bounce,
         }
     }
@@ -152,6 +154,7 @@ impl ObstacleMode {
             Self::Bounce => "Bounce",
             Self::Stick => "Stick",
             Self::Flow => "Flow Around",
+            Self::Contain => "Contain",
         }
     }
 }
@@ -836,6 +839,7 @@ mod tests {
         assert_eq!(ObstacleMode::from_u32(0), ObstacleMode::Bounce);
         assert_eq!(ObstacleMode::from_u32(1), ObstacleMode::Stick);
         assert_eq!(ObstacleMode::from_u32(2), ObstacleMode::Flow);
+        assert_eq!(ObstacleMode::from_u32(3), ObstacleMode::Contain);
         assert_eq!(ObstacleMode::from_u32(99), ObstacleMode::Bounce); // fallback
     }
 
@@ -844,5 +848,6 @@ mod tests {
         assert_eq!(ObstacleMode::Bounce.label(), "Bounce");
         assert_eq!(ObstacleMode::Stick.label(), "Stick");
         assert_eq!(ObstacleMode::Flow.label(), "Flow Around");
+        assert_eq!(ObstacleMode::Contain.label(), "Contain");
     }
 }

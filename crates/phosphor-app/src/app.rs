@@ -1576,7 +1576,7 @@ impl App {
         log::info!("Added webcam layer: {device_name}");
     }
 
-    /// Stop webcam capture if no live webcam layers remain.
+    /// Stop webcam capture if no live webcam layers or obstacle sources need it.
     #[cfg(feature = "webcam")]
     pub fn cleanup_webcam_if_unused(&mut self) {
         let has_live = self
@@ -1584,9 +1584,16 @@ impl App {
             .layers
             .iter()
             .any(|l| l.as_media().map_or(false, |m| m.is_live()));
-        if !has_live {
+        let obstacle_uses_cam = self.layer_stack.layers.iter().any(|l| {
+            l.as_effect()
+                .and_then(|e| e.pass_executor.particle_system.as_ref())
+                .map_or(false, |ps| {
+                    matches!(ps.obstacle_source.as_str(), "webcam" | "depth")
+                })
+        });
+        if !has_live && !obstacle_uses_cam {
             if self.webcam_capture.is_some() {
-                log::info!("No live webcam layers remain, stopping capture");
+                log::info!("No live webcam layers or obstacle sources remain, stopping capture");
             }
             self.webcam_capture = None;
         }

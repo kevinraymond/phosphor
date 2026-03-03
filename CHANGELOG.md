@@ -5,6 +5,13 @@
 
 ## Unreleased
 
+### Obstacle Refinements
+- **Contain mode**: new collision mode that traps particles inside the obstacle shape — inverted collision test, binary search, and normals
+- **Flow Around improvement**: redirects approach energy into tangential direction instead of stripping it, preventing pile-ups
+- **Video obstacles**: luminance-to-alpha conversion so video frames work as obstacles (bright = solid, dark = passable); UI now shows "Video: filename"
+- **Webcam cleanup**: Clear and source-switching now properly stop webcam/depth when no longer needed
+- **Tooltips**: all obstacle panel controls have descriptive hover text
+
 ### Monocular Depth Estimation (New)
 - Feature-gated `depth`: `cargo run --features depth,webcam` for MiDaS v2.1 small monocular depth estimation
 - Webcam frames → background `phosphor-depth` thread → ONNX Runtime (ort crate) → 256×256 depth map → obstacle texture

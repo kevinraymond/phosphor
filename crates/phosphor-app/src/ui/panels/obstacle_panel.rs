@@ -55,7 +55,10 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
 
     // Enable toggle
     let mut enabled = info.enabled;
-    if ui.checkbox(&mut enabled, "Enable Obstacle").changed() {
+    if ui.checkbox(&mut enabled, "Enable Obstacle")
+        .on_hover_text("Enable particle-obstacle collision")
+        .changed()
+    {
         ui.ctx()
             .data_mut(|d| d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::SetEnabled(enabled)));
     }
@@ -80,6 +83,17 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
                     "Image".to_string()
                 }
             }
+            "video" => {
+                if let Some(ref path) = info.image_path {
+                    let name = std::path::Path::new(path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "video".to_string());
+                    format!("Video: {}", name)
+                } else {
+                    "Video".to_string()
+                }
+            }
             "webcam" => "Webcam".to_string(),
             "depth" => "Depth (MiDaS)".to_string(),
             _ => "None".to_string(),
@@ -92,18 +106,18 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
     });
 
     ui.horizontal(|ui| {
-        if ui.button("Image").clicked() {
+        if ui.button("Image").on_hover_text("Load an image as obstacle shape").clicked() {
             ui.ctx()
                 .data_mut(|d| d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::LoadImage));
         }
         if info.video_available {
-            if ui.button("Video").clicked() {
+            if ui.button("Video").on_hover_text("Load a video as animated obstacle").clicked() {
                 ui.ctx()
                     .data_mut(|d| d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::LoadVideo));
             }
         }
         if info.webcam_available && info.source != "webcam" {
-            if ui.button("Webcam").clicked() {
+            if ui.button("Webcam").on_hover_text("Use live webcam feed as obstacle").clicked() {
                 ui.ctx()
                     .data_mut(|d| d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::UseWebcam));
             }
@@ -129,7 +143,7 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
             }
         }
         if !info.source.is_empty() {
-            if ui.button("Clear").clicked() {
+            if ui.button("Clear").on_hover_text("Remove obstacle and stop capture").clicked() {
                 ui.ctx()
                     .data_mut(|d| d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::Clear));
             }
@@ -150,11 +164,12 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
     // Mode dropdown
     let mut mode = info.mode;
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Mode").size(BODY_SIZE).color(tc.text_secondary));
+        ui.label(RichText::new("Mode").size(BODY_SIZE).color(tc.text_secondary))
+            .on_hover_text("How particles respond when hitting the obstacle");
         egui::ComboBox::from_id_salt("obstacle_mode")
             .selected_text(mode.label())
             .show_ui(ui, |ui| {
-                for m in [ObstacleMode::Bounce, ObstacleMode::Stick, ObstacleMode::Flow] {
+                for m in [ObstacleMode::Bounce, ObstacleMode::Stick, ObstacleMode::Flow, ObstacleMode::Contain] {
                     if ui.selectable_value(&mut mode, m, m.label()).changed() {
                         ui.ctx()
                             .data_mut(|d| d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::SetMode(mode)));
@@ -166,7 +181,8 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
     // Threshold slider
     let mut threshold = info.threshold;
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Threshold").size(BODY_SIZE).color(tc.text_secondary));
+        ui.label(RichText::new("Threshold").size(BODY_SIZE).color(tc.text_secondary))
+            .on_hover_text("Alpha cutoff for collision detection (lower = more sensitive)");
         if ui.add(egui::Slider::new(&mut threshold, 0.0..=1.0).step_by(0.01)).changed() {
             ui.ctx()
                 .data_mut(|d| d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::SetThreshold(threshold)));
@@ -176,7 +192,8 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
     // Elasticity slider
     let mut elasticity = info.elasticity;
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Elasticity").size(BODY_SIZE).color(tc.text_secondary));
+        ui.label(RichText::new("Elasticity").size(BODY_SIZE).color(tc.text_secondary))
+            .on_hover_text("Energy preserved on bounce (0 = absorb, 1 = full)");
         if ui.add(egui::Slider::new(&mut elasticity, 0.0..=1.0).step_by(0.01)).changed() {
             ui.ctx()
                 .data_mut(|d| d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::SetElasticity(elasticity)));
