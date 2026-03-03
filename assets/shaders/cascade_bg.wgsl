@@ -54,9 +54,8 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
 
     let glow = edge_color * edge_glow_param * 0.12;
 
-    // --- Beat flash at edges ---
-    let beat_flash = u.beat * beat_sync * 0.05;
-    let flash_color = vec3f(0.8, 0.85, 1.0) * beat_flash;
+    // --- Beat pulse (disabled) ---
+    let flash_color = vec3f(0.0);
 
     // --- Composite ---
     let result = min(trail + glow + flash_color, vec3f(1.5));

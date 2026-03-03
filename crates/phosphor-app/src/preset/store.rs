@@ -56,6 +56,21 @@ pub struct LayerPreset {
     /// True if particle source is webcam.
     #[serde(default)]
     pub particle_webcam: Option<bool>,
+    /// Obstacle collision image path.
+    #[serde(default)]
+    pub obstacle_image_path: Option<String>,
+    /// Obstacle collision mode (0=bounce, 1=stick, 2=flow).
+    #[serde(default)]
+    pub obstacle_mode: Option<u32>,
+    /// Obstacle alpha threshold.
+    #[serde(default)]
+    pub obstacle_threshold: Option<f32>,
+    /// Obstacle elasticity/restitution.
+    #[serde(default)]
+    pub obstacle_elasticity: Option<f32>,
+    /// True if obstacle source is depth estimation.
+    #[serde(default)]
+    pub obstacle_depth: Option<bool>,
 }
 
 fn default_opacity() -> f32 {
@@ -502,6 +517,11 @@ mod tests {
                 particle_video_speed: None,
                 particle_video_looping: None,
                 particle_webcam: None,
+                obstacle_image_path: None,
+                obstacle_mode: None,
+                obstacle_threshold: None,
+                obstacle_elasticity: None,
+                obstacle_depth: None,
             }],
             active_layer: 0,
             postprocess: PostProcessDef::default(),
@@ -513,6 +533,55 @@ mod tests {
         assert_eq!(p2.layers[0].blend_mode, BlendMode::Add);
         assert!((p2.layers[0].opacity - 0.5).abs() < 1e-6);
         assert!(p2.layers[0].pinned);
+    }
+
+    #[test]
+    fn layer_preset_obstacle_serde() {
+        let json = r#"{
+            "effect_name": "Cascade",
+            "obstacle_image_path": "/tmp/logo.png",
+            "obstacle_mode": 2,
+            "obstacle_threshold": 0.3,
+            "obstacle_elasticity": 0.8
+        }"#;
+        let lp: LayerPreset = serde_json::from_str(json).unwrap();
+        assert_eq!(lp.obstacle_image_path, Some("/tmp/logo.png".to_string()));
+        assert_eq!(lp.obstacle_mode, Some(2));
+        assert!((lp.obstacle_threshold.unwrap() - 0.3).abs() < 1e-6);
+        assert!((lp.obstacle_elasticity.unwrap() - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn layer_preset_obstacle_backward_compat() {
+        // Old preset without obstacle fields should parse fine
+        let json = r#"{
+            "effect_name": "Flux",
+            "opacity": 0.8
+        }"#;
+        let lp: LayerPreset = serde_json::from_str(json).unwrap();
+        assert!(lp.obstacle_image_path.is_none());
+        assert!(lp.obstacle_mode.is_none());
+        assert!(lp.obstacle_threshold.is_none());
+        assert!(lp.obstacle_elasticity.is_none());
+        assert!(lp.obstacle_depth.is_none());
+    }
+
+    #[test]
+    fn layer_preset_obstacle_depth_serde() {
+        let json = r#"{
+            "effect_name": "Cascade",
+            "obstacle_depth": true,
+            "obstacle_mode": 0,
+            "obstacle_threshold": 0.5,
+            "obstacle_elasticity": 0.7
+        }"#;
+        let lp: LayerPreset = serde_json::from_str(json).unwrap();
+        assert_eq!(lp.obstacle_depth, Some(true));
+        assert!(lp.obstacle_image_path.is_none());
+        // Roundtrip
+        let serialized = serde_json::to_string(&lp).unwrap();
+        let lp2: LayerPreset = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(lp2.obstacle_depth, Some(true));
     }
 
     #[test]

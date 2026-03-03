@@ -6,6 +6,7 @@ pub mod media_panel;
 pub mod midi_panel;
 #[cfg(feature = "ndi")]
 pub mod ndi_panel;
+pub mod obstacle_panel;
 pub mod osc_panel;
 pub mod param_panel;
 pub mod particle_panel;
@@ -54,6 +55,7 @@ pub fn draw_panels(
     media_info: Option<media_panel::MediaInfo>,
     webcam_info: Option<webcam_panel::WebcamInfo>,
     particle_info: Option<particle_panel::ParticleInfo>,
+    obstacle_info: Option<obstacle_panel::ObstacleInfo>,
     scene_info: Option<scene_panel::SceneInfo>,
     status_error: &Option<(String, std::time::Instant)>,
     current_theme: ThemeMode,
@@ -382,6 +384,22 @@ pub fn draw_panels(
                                 particle_panel::draw_particle_panel(ui, pinfo);
                             },
                         );
+                    }
+
+                    // Obstacle section (shows when active layer has particles)
+                    if let Some(ref oinfo) = obstacle_info {
+                        if oinfo.has_particles {
+                            widgets::section(
+                                ui,
+                                "sec_obstacle",
+                                "Obstacle",
+                                if oinfo.enabled { Some("ON") } else { None },
+                                false, // default collapsed
+                                |ui| {
+                                    obstacle_panel::draw_obstacle_panel(ui, oinfo);
+                                },
+                            );
+                        }
                     }
 
                     // Audio Reactivity section (default collapsed)

@@ -1,5 +1,7 @@
 mod app;
 mod audio;
+#[cfg(feature = "depth")]
+mod depth;
 mod effect;
 mod gpu;
 mod media;
@@ -34,6 +36,7 @@ struct PhosphorApp {
     app: Option<App>,
     window: Option<Arc<Window>>,
     file_dialog_rx: Option<Receiver<PathBuf>>,
+    obstacle_dialog_rx: Option<Receiver<PathBuf>>,
     /// Debounced param save: (effect_index, last_change_time)
     param_save_pending: Option<(usize, std::time::Instant)>,
 }
@@ -44,6 +47,7 @@ impl PhosphorApp {
             app: None,
             window: None,
             file_dialog_rx: None,
+            obstacle_dialog_rx: None,
             param_save_pending: None,
         }
     }
@@ -270,6 +274,82 @@ impl ApplicationHandler for PhosphorApp {
                     }
                     let particle_count = particle_info.as_ref().map(|p| p.max_count);
 
+                    // Get obstacle info from active layer
+                    let obstacle_info = app
+                        .layer_stack
+                        .active()
+                        .and_then(|l| l.as_effect())
+                        .map(|e| {
+                            let has_particles = e.pass_executor.particle_system.is_some();
+                            let webcam_available = cfg!(feature = "webcam");
+                            let video_available = cfg!(feature = "video") && {
+                                #[cfg(feature = "video")]
+                                { crate::media::video::ffmpeg_available() }
+                                #[cfg(not(feature = "video"))]
+                                { false }
+                            };
+                            let depth_available = cfg!(feature = "depth");
+                            let depth_model_downloaded = {
+                                #[cfg(feature = "depth")]
+                                { crate::depth::model::depth_ready() }
+                                #[cfg(not(feature = "depth"))]
+                                { false }
+                            };
+                            let depth_downloading = {
+                                #[cfg(feature = "depth")]
+                                {
+                                    app.depth_download.as_ref()
+                                        .filter(|p| p.is_downloading())
+                                        .map(|p| p.percent())
+                                }
+                                #[cfg(not(feature = "depth"))]
+                                { let _ = &app; None::<u8> }
+                            };
+                            let depth_download_error = {
+                                #[cfg(feature = "depth")]
+                                {
+                                    app.depth_download.as_ref()
+                                        .filter(|p| p.is_error())
+                                        .and_then(|p| p.error_message.lock().ok().and_then(|m| m.clone()))
+                                }
+                                #[cfg(not(feature = "depth"))]
+                                { None::<String> }
+                            };
+                            if let Some(ps) = &e.pass_executor.particle_system {
+                                crate::ui::panels::obstacle_panel::ObstacleInfo {
+                                    enabled: ps.obstacle_enabled,
+                                    mode: ps.obstacle_mode,
+                                    threshold: ps.obstacle_threshold,
+                                    elasticity: ps.obstacle_elasticity,
+                                    source: ps.obstacle_source.clone(),
+                                    image_path: ps.obstacle_image_path.clone(),
+                                    has_particles,
+                                    webcam_available,
+                                    video_available,
+                                    depth_available,
+                                    depth_model_downloaded,
+                                    depth_downloading,
+                                    depth_download_error,
+                                }
+                            } else {
+                                crate::ui::panels::obstacle_panel::ObstacleInfo {
+                                    enabled: false,
+                                    mode: crate::gpu::particle::ObstacleMode::Bounce,
+                                    threshold: 0.5,
+                                    elasticity: 0.7,
+                                    source: String::new(),
+                                    image_path: None,
+                                    has_particles,
+                                    webcam_available,
+                                    video_available,
+                                    depth_available,
+                                    depth_model_downloaded,
+                                    depth_downloading,
+                                    depth_download_error,
+                                }
+                            }
+                        });
+
                     // Get active layer's shader error
                     let shader_error = app
                         .layer_stack
@@ -374,6 +454,7 @@ impl ApplicationHandler for PhosphorApp {
                                 media_info,
                                 webcam_info,
                                 particle_info,
+                                obstacle_info,
                                 scene_info,
                                 &app.status_error,
                                 app.settings.theme,
@@ -393,6 +474,9 @@ impl ApplicationHandler for PhosphorApp {
                         &ctx,
                         &mut app.shader_editor,
                     );
+
+                    // Draw depth download confirmation modal
+                    crate::ui::panels::obstacle_panel::draw_depth_download_modal(&ctx);
 
                     // Draw quit confirmation dialog
                     if app.quit_requested {
@@ -938,6 +1022,217 @@ impl ApplicationHandler for PhosphorApp {
                 // Auto-save scene after any cue/timeline mutation
                 if scene_dirty {
                     app.autosave_scene();
+                }
+
+                // Handle obstacle panel signals
+                {
+                    use crate::ui::panels::obstacle_panel::ObstacleCommand;
+                    let obstacle_cmd: Option<ObstacleCommand> =
+                        app.egui_overlay.context().data_mut(|d| {
+                            d.remove_temp(egui::Id::new("obstacle_cmd"))
+                        });
+                    if let Some(cmd) = obstacle_cmd.filter(|c| !matches!(c, ObstacleCommand::None)) {
+                        if let Some(layer) = app.layer_stack.active_mut() {
+                            if let Some(e) = layer.as_effect_mut() {
+                                if let Some(ps) = &mut e.pass_executor.particle_system {
+                                    match cmd {
+                                        ObstacleCommand::SetEnabled(en) => {
+                                            ps.obstacle_enabled = en;
+                                        }
+                                        ObstacleCommand::SetMode(mode) => {
+                                            ps.obstacle_mode = mode;
+                                        }
+                                        ObstacleCommand::SetThreshold(t) => {
+                                            ps.obstacle_threshold = t;
+                                        }
+                                        ObstacleCommand::SetElasticity(e_val) => {
+                                            ps.obstacle_elasticity = e_val;
+                                        }
+                                        ObstacleCommand::LoadImage => {
+                                            // Open file dialog for obstacle image
+                                            if self.obstacle_dialog_rx.is_none() {
+                                                let (tx, rx) = crossbeam_channel::bounded(1);
+                                                self.obstacle_dialog_rx = Some(rx);
+                                                std::thread::Builder::new()
+                                                    .name("obstacle-dialog".into())
+                                                    .spawn(move || {
+                                                        let dialog = rfd::FileDialog::new()
+                                                            .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp"]);
+                                                        if let Some(path) = dialog.pick_file() {
+                                                            let _ = tx.send(path);
+                                                        }
+                                                    })
+                                                    .ok();
+                                            }
+                                        }
+                                        ObstacleCommand::LoadVideo => {
+                                            #[cfg(feature = "video")]
+                                            if self.obstacle_dialog_rx.is_none() {
+                                                let (tx, rx) = crossbeam_channel::bounded(1);
+                                                self.obstacle_dialog_rx = Some(rx);
+                                                std::thread::Builder::new()
+                                                    .name("obstacle-video-dialog".into())
+                                                    .spawn(move || {
+                                                        let video_exts = crate::media::decoder::VIDEO_EXTENSIONS;
+                                                        let dialog = rfd::FileDialog::new()
+                                                            .add_filter("Video", video_exts);
+                                                        if let Some(path) = dialog.pick_file() {
+                                                            let _ = tx.send(path);
+                                                        }
+                                                    })
+                                                    .ok();
+                                            }
+                                        }
+                                        ObstacleCommand::UseWebcam => {
+                                            // Start webcam capture if not already running
+                                            #[cfg(feature = "webcam")]
+                                            {
+                                                if app.webcam_capture.is_none() {
+                                                    match crate::media::webcam::WebcamCapture::start(0, Some((1280, 720))) {
+                                                        Ok(capture) => {
+                                                            app.webcam_capture = Some(capture);
+                                                        }
+                                                        Err(e) => {
+                                                            log::error!("Failed to start webcam for obstacle: {e}");
+                                                        }
+                                                    }
+                                                }
+                                                ps.obstacle_enabled = true;
+                                                ps.obstacle_source = "webcam".to_string();
+                                                ps.obstacle_image_path = None;
+                                            }
+                                        }
+                                        ObstacleCommand::UseDepth => {
+                                            #[cfg(feature = "depth")]
+                                            {
+                                                // Ensure ONNX Runtime is loaded (init_from our bundled dylib)
+                                                if !crate::depth::model::ort_available() {
+                                                    log::error!("ONNX Runtime not available for depth estimation");
+                                                } else {
+                                                    // Start webcam capture if not already running
+                                                    #[cfg(feature = "webcam")]
+                                                    if app.webcam_capture.is_none() {
+                                                        match crate::media::webcam::WebcamCapture::start(0, Some((1280, 720))) {
+                                                            Ok(capture) => {
+                                                                app.webcam_capture = Some(capture);
+                                                            }
+                                                            Err(e) => {
+                                                                log::error!("Failed to start webcam for depth obstacle: {e}");
+                                                            }
+                                                        }
+                                                    }
+                                                    // Start depth thread if not running
+                                                    if app.depth_thread.is_none() {
+                                                        let model_path = crate::depth::model::model_path();
+                                                        match crate::depth::thread::DepthThread::start(model_path) {
+                                                            Ok(dt) => {
+                                                                app.depth_thread = Some(dt);
+                                                                log::info!("Depth estimation thread started");
+                                                            }
+                                                            Err(e) => {
+                                                                log::error!("Failed to start depth thread: {e}");
+                                                            }
+                                                        }
+                                                    }
+                                                    ps.obstacle_enabled = true;
+                                                    ps.obstacle_source = "depth".to_string();
+                                                    ps.obstacle_image_path = None;
+                                                }
+                                            }
+                                        }
+                                        ObstacleCommand::DownloadDepthModel => {
+                                            #[cfg(feature = "depth")]
+                                            {
+                                                if app.depth_download.is_none()
+                                                    || app.depth_download.as_ref().map_or(false, |p| !p.is_downloading())
+                                                {
+                                                    app.depth_download = Some(crate::depth::model::download_model());
+                                                    log::info!("Starting depth model download");
+                                                }
+                                            }
+                                        }
+                                        ObstacleCommand::Clear => {
+                                            ps.clear_obstacle(&app.gpu.device, &app.gpu.queue);
+                                            // Stop depth thread when obstacle cleared
+                                            #[cfg(feature = "depth")]
+                                            {
+                                                app.depth_thread = None;
+                                            }
+                                        }
+                                        ObstacleCommand::None => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Drain obstacle file dialog result (non-blocking)
+                if let Some(ref rx) = self.obstacle_dialog_rx {
+                    if let Ok(path) = rx.try_recv() {
+                        self.obstacle_dialog_rx = None;
+                        let ext = path.extension()
+                            .map(|e| e.to_string_lossy().to_lowercase())
+                            .unwrap_or_default();
+                        let is_video = {
+                            #[cfg(feature = "video")]
+                            { crate::media::decoder::VIDEO_EXTENSIONS.contains(&ext.as_str()) }
+                            #[cfg(not(feature = "video"))]
+                            { let _ = &ext; false }
+                        };
+                        if is_video {
+                            #[cfg(feature = "video")]
+                            {
+                                match crate::media::video::probe_video(&path) {
+                                    Ok(meta) => {
+                                        match crate::media::video::decode_all_frames(&path, &meta) {
+                                            Ok((frames, delays_ms)) => {
+                                                let path_str = path.to_string_lossy().to_string();
+                                                if let Some(layer) = app.layer_stack.active_mut() {
+                                                    if let Some(e) = layer.as_effect_mut() {
+                                                        if let Some(ps) = &mut e.pass_executor.particle_system {
+                                                            ps.set_obstacle_video(
+                                                                &app.gpu.device,
+                                                                &app.gpu.queue,
+                                                                frames,
+                                                                delays_ms,
+                                                                path_str,
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => log::error!("Failed to decode obstacle video: {e}"),
+                                        }
+                                    }
+                                    Err(e) => log::error!("Failed to probe obstacle video: {e}"),
+                                }
+                            }
+                        } else {
+                            match image::open(&path) {
+                                Ok(img) => {
+                                    let rgba = img.to_rgba8();
+                                    let (w, h) = rgba.dimensions();
+                                    let path_str = path.to_string_lossy().to_string();
+                                    if let Some(layer) = app.layer_stack.active_mut() {
+                                        if let Some(e) = layer.as_effect_mut() {
+                                            if let Some(ps) = &mut e.pass_executor.particle_system {
+                                                ps.set_obstacle_image(
+                                                    &app.gpu.device,
+                                                    &app.gpu.queue,
+                                                    &rgba,
+                                                    w,
+                                                    h,
+                                                    Some(path_str),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => log::error!("Failed to load obstacle image: {e}"),
+                            }
+                        }
+                    }
                 }
 
                 // Handle media layer signals

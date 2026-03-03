@@ -7,6 +7,7 @@ use wgpu::{
 };
 
 use super::flow_field::FlowFieldTexture;
+use super::obstacle::ObstacleTexture;
 use super::spatial_hash::SpatialHashGrid;
 use super::sprite::SpriteAtlas;
 use super::types::{
@@ -73,10 +74,30 @@ pub struct ParticleSystem {
     /// Active blend mode: "additive" or "alpha"
     pub blend_mode: String,
 
-    // Flow field (group 1 for compute)
+    // Flow field + obstacle (group 1 for compute)
     flow_field: FlowFieldTexture,
+    obstacle: ObstacleTexture,
     flow_field_bgl: BindGroupLayout,
     flow_field_bind_group: BindGroup,
+
+    // Obstacle collision state
+    pub obstacle_enabled: bool,
+    pub obstacle_mode: super::types::ObstacleMode,
+    pub obstacle_threshold: f32,
+    pub obstacle_elasticity: f32,
+    /// "image", "video", "webcam", or "" (none)
+    pub obstacle_source: String,
+    /// Path to obstacle image/video file (for preset save/load)
+    pub obstacle_image_path: Option<String>,
+
+    // Obstacle video playback
+    obstacle_video_frames: Vec<crate::media::types::DecodedFrame>,
+    obstacle_video_delays_ms: Vec<u32>,
+    obstacle_video_frame: usize,
+    obstacle_video_elapsed_ms: f64,
+    pub obstacle_video_playing: bool,
+    pub obstacle_video_looping: bool,
+    pub obstacle_video_speed: f32,
 
     // Trail rendering
     trail_buffer: Option<wgpu::Buffer>,
@@ -353,10 +374,29 @@ impl ParticleSystem {
                     ty: BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // binding 2: obstacle 2D texture
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // binding 3: obstacle sampler
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
 
-        let flow_field_bind_group = create_flow_field_bind_group(device, &flow_field_bgl, &flow_field);
+        let obstacle = ObstacleTexture::placeholder(device, queue);
+        let flow_field_bind_group = create_flow_field_bind_group(device, &flow_field_bgl, &flow_field, &obstacle);
 
         // Empty BGL + bind group for padding contiguous bind group indices
         let empty_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -715,8 +755,22 @@ impl ParticleSystem {
             sprite: None,
             blend_mode,
             flow_field,
+            obstacle,
             flow_field_bgl,
             flow_field_bind_group,
+            obstacle_enabled: false,
+            obstacle_mode: super::types::ObstacleMode::Bounce,
+            obstacle_threshold: 0.5,
+            obstacle_elasticity: 0.7,
+            obstacle_source: String::new(),
+            obstacle_image_path: None,
+            obstacle_video_frames: Vec::new(),
+            obstacle_video_delays_ms: Vec::new(),
+            obstacle_video_frame: 0,
+            obstacle_video_elapsed_ms: 0.0,
+            obstacle_video_playing: true,
+            obstacle_video_looping: true,
+            obstacle_video_speed: 1.0,
             trail_buffer: None,
             trail_length: 0,
             trail_width: 0.005,
@@ -1430,8 +1484,113 @@ impl ParticleSystem {
             FlowFieldTexture::placeholder(device, queue)
         };
         self.flow_field = new_field;
+        self.rebuild_flow_field_bind_group(device);
+    }
+
+    /// Set obstacle from RGBA image data. Enables obstacle collision.
+    pub fn set_obstacle_image(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        data: &[u8],
+        w: u32,
+        h: u32,
+        path: Option<String>,
+    ) {
+        self.obstacle = ObstacleTexture::from_rgba(device, queue, data, w, h);
+        self.obstacle_enabled = true;
+        self.obstacle_source = "image".to_string();
+        self.obstacle_image_path = path;
+        self.rebuild_flow_field_bind_group(device);
+    }
+
+    /// Update obstacle texture from webcam frame data (per-frame).
+    pub fn update_obstacle_webcam(&mut self, device: &Device, queue: &Queue, data: &[u8], w: u32, h: u32) {
+        let dims_changed = w != self.obstacle.width || h != self.obstacle.height;
+        self.obstacle.update(device, queue, data, w, h);
+        if dims_changed {
+            self.rebuild_flow_field_bind_group(device);
+        }
+    }
+
+    /// Set obstacle from pre-decoded video frames.
+    pub fn set_obstacle_video(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        frames: Vec<crate::media::types::DecodedFrame>,
+        delays_ms: Vec<u32>,
+        path: String,
+    ) {
+        if let Some(frame) = frames.first() {
+            self.obstacle = ObstacleTexture::from_rgba(device, queue, &frame.data, frame.width, frame.height);
+            self.rebuild_flow_field_bind_group(device);
+        }
+        self.obstacle_video_frames = frames;
+        self.obstacle_video_delays_ms = delays_ms;
+        self.obstacle_video_frame = 0;
+        self.obstacle_video_elapsed_ms = 0.0;
+        self.obstacle_video_playing = true;
+        self.obstacle_video_looping = true;
+        self.obstacle_video_speed = 1.0;
+        self.obstacle_enabled = true;
+        self.obstacle_source = "video".to_string();
+        self.obstacle_image_path = Some(path);
+    }
+
+    /// Advance obstacle video playback and update texture if frame changed.
+    /// Call from the main update loop. Returns true if texture was updated.
+    pub fn advance_obstacle_video(&mut self, device: &Device, queue: &Queue, dt_secs: f64) -> bool {
+        if !self.obstacle_video_playing || self.obstacle_video_frames.is_empty() {
+            return false;
+        }
+        self.obstacle_video_elapsed_ms += dt_secs * 1000.0 * self.obstacle_video_speed as f64;
+        let delay = self.obstacle_video_delays_ms
+            .get(self.obstacle_video_frame)
+            .copied()
+            .unwrap_or(33) as f64;
+        if self.obstacle_video_elapsed_ms < delay {
+            return false;
+        }
+        self.obstacle_video_elapsed_ms -= delay;
+        let next = self.obstacle_video_frame + 1;
+        if next >= self.obstacle_video_frames.len() {
+            if self.obstacle_video_looping {
+                self.obstacle_video_frame = 0;
+            } else {
+                self.obstacle_video_playing = false;
+                return false;
+            }
+        } else {
+            self.obstacle_video_frame = next;
+        }
+        // Upload new frame
+        if let Some(frame) = self.obstacle_video_frames.get(self.obstacle_video_frame) {
+            let dims_changed = frame.width != self.obstacle.width || frame.height != self.obstacle.height;
+            self.obstacle.update(device, queue, &frame.data, frame.width, frame.height);
+            if dims_changed {
+                self.rebuild_flow_field_bind_group(device);
+            }
+        }
+        true
+    }
+
+    /// Clear obstacle texture, disabling collision.
+    pub fn clear_obstacle(&mut self, device: &Device, queue: &Queue) {
+        self.obstacle = ObstacleTexture::placeholder(device, queue);
+        self.obstacle_enabled = false;
+        self.obstacle_source.clear();
+        self.obstacle_image_path = None;
+        self.obstacle_video_frames.clear();
+        self.obstacle_video_delays_ms.clear();
+        self.obstacle_video_frame = 0;
+        self.rebuild_flow_field_bind_group(device);
+    }
+
+    /// Rebuild group 1 bind group (flow field + obstacle).
+    fn rebuild_flow_field_bind_group(&mut self, device: &Device) {
         self.flow_field_bind_group =
-            create_flow_field_bind_group(device, &self.flow_field_bgl, &self.flow_field);
+            create_flow_field_bind_group(device, &self.flow_field_bgl, &self.flow_field, &self.obstacle);
     }
 
     /// Set up spatial hash grid for particle-particle interaction.
@@ -1910,6 +2069,7 @@ fn create_flow_field_bind_group(
     device: &Device,
     layout: &BindGroupLayout,
     flow_field: &FlowFieldTexture,
+    obstacle: &ObstacleTexture,
 ) -> BindGroup {
     device.create_bind_group(&BindGroupDescriptor {
         label: Some("particle-flow-field-bg"),
@@ -1922,6 +2082,14 @@ fn create_flow_field_bind_group(
             BindGroupEntry {
                 binding: 1,
                 resource: BindingResource::Sampler(&flow_field.sampler),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: BindingResource::TextureView(&obstacle.view),
+            },
+            BindGroupEntry {
+                binding: 3,
+                resource: BindingResource::Sampler(&obstacle.sampler),
             },
         ],
     })

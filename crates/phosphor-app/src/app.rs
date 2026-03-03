@@ -98,6 +98,11 @@ pub struct App {
     pub webcam_capture: Option<crate::media::webcam::WebcamCapture>,
     // Particle source loader (background image/video decode)
     pub particle_source_loader: crate::gpu::particle::ParticleSourceLoader,
+    // Depth estimation (feature-gated)
+    #[cfg(feature = "depth")]
+    pub depth_thread: Option<crate::depth::thread::DepthThread>,
+    #[cfg(feature = "depth")]
+    pub depth_download: Option<std::sync::Arc<crate::depth::model::DownloadProgress>>,
 }
 
 impl App {
@@ -338,6 +343,10 @@ impl App {
             #[cfg(feature = "webcam")]
             webcam_capture: None,
             particle_source_loader: crate::gpu::particle::ParticleSourceLoader::new(),
+            #[cfg(feature = "depth")]
+            depth_thread: None,
+            #[cfg(feature = "depth")]
+            depth_download: None,
         })
     }
 
@@ -769,6 +778,55 @@ impl App {
                                         frame.height,
                                     );
                                 }
+                                // Feed obstacle with webcam frames
+                                if ps.obstacle_enabled && ps.obstacle_source == "webcam" {
+                                    ps.update_obstacle_webcam(
+                                        &self.gpu.device,
+                                        &self.gpu.queue,
+                                        &frame.data,
+                                        frame.width,
+                                        frame.height,
+                                    );
+                                }
+                                // Send webcam frame to depth thread for depth-based obstacle
+                                #[cfg(feature = "depth")]
+                                if ps.obstacle_enabled && ps.obstacle_source == "depth" {
+                                    if let Some(ref depth) = self.depth_thread {
+                                        depth.send_frame(
+                                            frame.data.clone(),
+                                            frame.width,
+                                            frame.height,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Drain depth estimation results → update obstacle texture
+        #[cfg(feature = "depth")]
+        if let Some(ref depth_thread) = self.depth_thread {
+            if let Some(depth_frame) = depth_thread.try_recv_depth() {
+                // Convert grayscale depth to RGBA: white RGB with depth as alpha
+                let rgba: Vec<u8> = depth_frame
+                    .data
+                    .iter()
+                    .flat_map(|&d| [255u8, 255, 255, d])
+                    .collect();
+                for layer in &mut self.layer_stack.layers {
+                    if let LayerContent::Effect(ref mut e) = layer.content {
+                        if let Some(ref mut ps) = e.pass_executor.particle_system {
+                            if ps.obstacle_enabled && ps.obstacle_source == "depth" {
+                                ps.update_obstacle_webcam(
+                                    &self.gpu.device,
+                                    &self.gpu.queue,
+                                    &rgba,
+                                    depth_frame.width,
+                                    depth_frame.height,
+                                );
                             }
                         }
                     }
@@ -812,6 +870,19 @@ impl App {
                     ps.uniforms.effect_params = [
                         p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7],
                     ];
+                    // Advance obstacle video playback
+                    if ps.obstacle_source == "video" {
+                        ps.advance_obstacle_video(
+                            &self.gpu.device,
+                            &self.gpu.queue,
+                            dt as f64,
+                        );
+                    }
+                    // Pack obstacle collision uniforms
+                    ps.uniforms.obstacle_enabled = if ps.obstacle_enabled { 1.0 } else { 0.0 };
+                    ps.uniforms.obstacle_threshold = ps.obstacle_threshold;
+                    ps.uniforms.obstacle_mode = ps.obstacle_mode as u32;
+                    ps.uniforms.obstacle_elasticity = ps.obstacle_elasticity;
                     ps.update_audio(
                         self.uniforms.sub_bass,
                         self.uniforms.bass,
@@ -1597,6 +1668,20 @@ impl App {
                         None
                     }
                 });
+                // Capture obstacle info
+                let obstacle_image_path = ps_ref.and_then(|ps| ps.obstacle_image_path.clone());
+                let obstacle_mode = ps_ref
+                    .filter(|ps| ps.obstacle_enabled)
+                    .map(|ps| ps.obstacle_mode as u32);
+                let obstacle_threshold = ps_ref
+                    .filter(|ps| ps.obstacle_enabled)
+                    .map(|ps| ps.obstacle_threshold);
+                let obstacle_elasticity = ps_ref
+                    .filter(|ps| ps.obstacle_enabled)
+                    .map(|ps| ps.obstacle_elasticity);
+                let obstacle_depth = ps_ref
+                    .filter(|ps| ps.obstacle_enabled && ps.obstacle_source == "depth")
+                    .map(|_| true);
                 LayerPreset {
                     effect_name,
                     params: l.param_store.values.clone(),
@@ -1614,6 +1699,11 @@ impl App {
                     particle_video_speed,
                     particle_video_looping,
                     particle_webcam,
+                    obstacle_image_path,
+                    obstacle_mode,
+                    obstacle_threshold,
+                    obstacle_elasticity,
+                    obstacle_depth,
                 }
             })
             .collect();
@@ -1914,6 +2004,95 @@ impl App {
                             }
                         }
                     }
+                }
+            }
+
+            // Restore obstacle collision state
+            if let Some(ref obstacle_path) = lp.obstacle_image_path {
+                let path = std::path::PathBuf::from(obstacle_path);
+                if path.exists() {
+                    match image::open(&path) {
+                        Ok(img) => {
+                            let rgba = img.to_rgba8();
+                            let (w, h) = rgba.dimensions();
+                            if let Some(layer) = self.layer_stack.layers.get_mut(i) {
+                                if let Some(effect) = layer.as_effect_mut() {
+                                    if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
+                                        ps.set_obstacle_image(
+                                            &self.gpu.device,
+                                            &self.gpu.queue,
+                                            &rgba,
+                                            w,
+                                            h,
+                                            Some(obstacle_path.clone()),
+                                        );
+                                        if let Some(mode) = lp.obstacle_mode {
+                                            ps.obstacle_mode = crate::gpu::particle::ObstacleMode::from_u32(mode);
+                                        }
+                                        if let Some(threshold) = lp.obstacle_threshold {
+                                            ps.obstacle_threshold = threshold;
+                                        }
+                                        if let Some(elasticity) = lp.obstacle_elasticity {
+                                            ps.obstacle_elasticity = elasticity;
+                                        }
+                                        log::info!("Restored obstacle image for layer {i}");
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => log::warn!("Failed to load obstacle image for layer {i}: {e}"),
+                    }
+                }
+            }
+
+            // Restore depth obstacle source
+            #[cfg(feature = "depth")]
+            if lp.obstacle_depth == Some(true) && lp.obstacle_image_path.is_none() {
+                if crate::depth::model::model_exists() {
+                    // Start webcam if needed
+                    #[cfg(feature = "webcam")]
+                    if self.webcam_capture.is_none() {
+                        match crate::media::webcam::WebcamCapture::start(0, Some((1280, 720))) {
+                            Ok(capture) => {
+                                self.webcam_capture = Some(capture);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to start webcam for depth obstacle restore: {e}");
+                            }
+                        }
+                    }
+                    // Start depth thread if needed
+                    if self.depth_thread.is_none() {
+                        let model_path = crate::depth::model::model_path();
+                        match crate::depth::thread::DepthThread::start(model_path) {
+                            Ok(dt) => {
+                                self.depth_thread = Some(dt);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to start depth thread for preset restore: {e}");
+                            }
+                        }
+                    }
+                    if let Some(layer) = self.layer_stack.layers.get_mut(i) {
+                        if let Some(effect) = layer.as_effect_mut() {
+                            if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
+                                ps.obstacle_enabled = true;
+                                ps.obstacle_source = "depth".to_string();
+                                if let Some(mode) = lp.obstacle_mode {
+                                    ps.obstacle_mode = crate::gpu::particle::ObstacleMode::from_u32(mode);
+                                }
+                                if let Some(threshold) = lp.obstacle_threshold {
+                                    ps.obstacle_threshold = threshold;
+                                }
+                                if let Some(elasticity) = lp.obstacle_elasticity {
+                                    ps.obstacle_elasticity = elasticity;
+                                }
+                                log::info!("Restored depth obstacle for layer {i}");
+                            }
+                        }
+                    }
+                } else {
+                    log::warn!("Preset requires depth model but it's not downloaded, skipping depth obstacle for layer {i}");
                 }
             }
 

@@ -5,6 +5,34 @@
 
 ## Unreleased
 
+### Monocular Depth Estimation (New)
+- Feature-gated `depth`: `cargo run --features depth,webcam` for MiDaS v2.1 small monocular depth estimation
+- Webcam frames → background `phosphor-depth` thread → ONNX Runtime (ort crate) → 256×256 depth map → obstacle texture
+- Particles collide with person's depth silhouette — nearby objects block, far objects pass through
+- Model download from HuggingFace (~66 MB), user-initiated via UI button with progress indicator
+- Model cached at `~/.config/phosphor/models/midas_v21_small_256.onnx`
+- 1-2 frame latency depth pipeline: bounded(1) channels, try_send drops stale frames
+- UI: "Depth" button in Obstacle panel (auto-shows "Download" if model missing, progress % during download)
+- Preset save/load: `obstacle_depth` field with backward-compatible serde defaults
+- 7 new tests (downscale, model path, download progress states, preset serde) — 352 total
+
+### Obstacle Collision (New)
+- Image-based 2D obstacle textures for particle collision — load PNG/JPEG/WebP with alpha channel
+- 3 collision modes: **Bounce** (reflect velocity along surface normal, scale by elasticity), **Stick** (zero velocity, hold at surface), **Flow Around** (tangent projection, remove normal component)
+- Obstacle texture extends compute group 1 bind group (bindings 2+3) alongside existing flow field
+- WGSL collision helpers in `particle_lib.wgsl`: `obstacle_alpha()`, `obstacle_normal()` (central-difference gradient), `apply_obstacle_collision()` — any `*_sim.wgsl` can call them with 3 lines
+- `ParticleUniforms` extended 384→400 bytes: obstacle_enabled, obstacle_threshold, obstacle_mode, obstacle_elasticity
+- Collapsible "Obstacle" UI panel in right sidebar: enable toggle, Load Image (rfd), Clear, mode dropdown, threshold/elasticity sliders
+- Integrated into Cascade effect; same 3-line pattern (`prev_pos`, integrate, `apply_obstacle_collision`) works in any particle sim
+- Preset save/load with backward-compatible serde defaults
+- Opaque image support: images without alpha (JPEG, opaque PNG) auto-detect and use luminance as collision mask — dark areas are passthrough, bright areas are solid
+- Anti-strobe: binary search finds exact surface contact point along integration step (4 iterations), places particle just outside surface; velocity reflection only when moving into obstacle
+- Texture format `Rgba8Unorm` (not sRGB) for raw data sampling; UV Y-flip for correct clip→texture mapping
+- 6 new tests (ObstacleMode conversions, preset serde, backward compat, alpha preprocessing) — 351 total
+
+### Cascade Effect (Fix)
+- Fixed beat flash strobe: replaced binary `u.beat` full-screen flash with smooth `beat_phase` envelope (fast 25%-of-beat quadratic fade), reduced amplitude from 0.05 to 0.03
+
 ### Cascade Effect (New)
 - **Cascade**: solid walls of particles emit inward from all 4 screen edges, audio-segmented by frequency band
 - Pixel-perfect wall emission: particle index maps deterministically to perimeter pixels (1920 top/bottom + 1080 left/right at 1080p), guaranteeing gap-free solid walls that scale with resolution

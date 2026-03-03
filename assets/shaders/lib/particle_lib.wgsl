@@ -88,6 +88,12 @@ struct ParticleUniforms {
     // Effect params forwarded from ParamStore (8 floats = params 0..7)
     effect_params_0: vec4f,
     effect_params_1: vec4f,
+
+    // Obstacle collision
+    obstacle_enabled: f32,    // 0.0 or 1.0
+    obstacle_threshold: f32,  // alpha cutoff
+    obstacle_mode: u32,       // 0=bounce, 1=stick, 2=flow
+    obstacle_elasticity: f32, // restitution/friction
 }
 
 // Access effect param by index (mirrors fragment shader's param() function).
@@ -159,6 +165,100 @@ fn sample_flow_field(pos: vec2f) -> vec2f {
     let sample = textureSampleLevel(flow_field_tex, flow_field_sampler, vec3f(uv, w), 0.0);
     // xyz = curl velocity, scale by strength
     return sample.xy * u.flow_strength;
+}
+
+// --- Obstacle texture bindings (group 1, bindings 2+3) ---
+
+@group(1) @binding(2) var obstacle_tex: texture_2d<f32>;
+@group(1) @binding(3) var obstacle_sampler: sampler;
+
+// Map clip-space position [-1,1] to obstacle UV [0,1].
+// Clip Y is up (+1=top), texture V is down (0=top), so flip Y.
+fn obstacle_uv(pos: vec2f) -> vec2f {
+    return vec2f(pos.x * 0.5 + 0.5, -pos.y * 0.5 + 0.5);
+}
+
+// Sample obstacle alpha at clip-space position. Returns 0 if disabled.
+fn obstacle_alpha(pos: vec2f) -> f32 {
+    if u.obstacle_enabled < 0.5 { return 0.0; }
+    let uv = obstacle_uv(pos);
+    if uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 { return 0.0; }
+    return textureSampleLevel(obstacle_tex, obstacle_sampler, uv, 0.0).a;
+}
+
+// Compute outward surface normal from alpha gradient (central differences).
+fn obstacle_normal(pos: vec2f) -> vec2f {
+    let dims = vec2f(textureDimensions(obstacle_tex));
+    let texel = 1.0 / dims;
+    // Central differences in UV space, converted from clip space
+    let eps = texel * 2.0; // 2 texels for smoother gradient
+    let uv = obstacle_uv(pos);
+
+    let ax = textureSampleLevel(obstacle_tex, obstacle_sampler, uv + vec2f(eps.x, 0.0), 0.0).a;
+    let bx = textureSampleLevel(obstacle_tex, obstacle_sampler, uv - vec2f(eps.x, 0.0), 0.0).a;
+    let ay = textureSampleLevel(obstacle_tex, obstacle_sampler, uv + vec2f(0.0, eps.y), 0.0).a;
+    let by = textureSampleLevel(obstacle_tex, obstacle_sampler, uv - vec2f(0.0, eps.y), 0.0).a;
+
+    // Gradient of alpha field (points toward higher alpha = into obstacle)
+    let grad = vec2f(ax - bx, ay - by);
+    let len = length(grad);
+    if len < 0.001 { return vec2f(0.0, -1.0); } // fallback normal
+    // Outward normal = negative gradient direction
+    return -grad / len;
+}
+
+// Apply obstacle collision. Returns vec4f(new_pos.xy, new_vel.xy).
+// Call after position integration: prev_pos is before integration, pos is after.
+fn apply_obstacle_collision(pos: vec2f, vel: vec2f, prev_pos: vec2f) -> vec4f {
+    if u.obstacle_enabled < 0.5 { return vec4f(pos, vel); }
+
+    let alpha = obstacle_alpha(pos);
+    if alpha < u.obstacle_threshold { return vec4f(pos, vel); }
+
+    let normal = obstacle_normal(pos);
+
+    // Binary search for surface contact point along the integration step.
+    // This prevents particles from tunneling deep into the obstacle and
+    // bouncing back and forth (strobe effect).
+    var lo = 0.0;
+    var hi = 1.0;
+    for (var i = 0; i < 4; i++) {
+        let mid = (lo + hi) * 0.5;
+        let test_pos = mix(prev_pos, pos, mid);
+        let test_alpha = obstacle_alpha(test_pos);
+        if test_alpha >= u.obstacle_threshold {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    // Place particle just before the surface along its trajectory
+    let safe_pos = mix(prev_pos, pos, lo) + normal * 0.002;
+
+    switch u.obstacle_mode {
+        // Bounce: reflect velocity along normal, scale by elasticity
+        case 0u: {
+            let v_dot_n = dot(vel, normal);
+            // Only reflect if moving into the obstacle
+            if v_dot_n >= 0.0 { return vec4f(safe_pos, vel); }
+            let reflected = vel - normal * 2.0 * v_dot_n;
+            return vec4f(safe_pos, reflected * u.obstacle_elasticity);
+        }
+        // Stick: zero velocity, hold at surface
+        case 1u: {
+            return vec4f(safe_pos, vec2f(0.0));
+        }
+        // Flow: remove normal component of velocity (tangent projection)
+        case 2u: {
+            let v_dot_n = dot(vel, normal);
+            if v_dot_n >= 0.0 { return vec4f(safe_pos, vel); }
+            let tangent_vel = vel - normal * v_dot_n;
+            return vec4f(safe_pos, tangent_vel * u.obstacle_elasticity);
+        }
+        default: {
+            return vec4f(pos, vel);
+        }
+    }
 }
 
 // --- Trail buffer (group 2, optional) ---

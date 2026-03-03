@@ -21,7 +21,7 @@ pub struct Particle {
     pub flags: [f32; 4],
 }
 
-/// Particle simulation uniforms: 384 bytes.
+/// Particle simulation uniforms: 400 bytes.
 /// Separate from the main 256-byte ShaderUniforms.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
@@ -121,7 +121,39 @@ pub struct ParticleUniforms {
 
     // Effect params forwarded from ParamStore (32 bytes) [352..383]
     pub effect_params: [f32; 8],
-    // Total = 384 bytes
+
+    // Obstacle collision (16 bytes) [384..399]
+    pub obstacle_enabled: f32,    // 0.0 or 1.0
+    pub obstacle_threshold: f32,  // alpha cutoff (default 0.5)
+    pub obstacle_mode: u32,       // 0=bounce, 1=stick, 2=flow
+    pub obstacle_elasticity: f32, // restitution/friction (default 0.7)
+    // Total = 400 bytes
+}
+
+/// Obstacle collision mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ObstacleMode {
+    Bounce = 0,
+    Stick = 1,
+    Flow = 2,
+}
+
+impl ObstacleMode {
+    pub fn from_u32(v: u32) -> Self {
+        match v {
+            1 => Self::Stick,
+            2 => Self::Flow,
+            _ => Self::Bounce,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Bounce => "Bounce",
+            Self::Stick => "Stick",
+            Self::Flow => "Flow Around",
+        }
+    }
 }
 
 /// Auxiliary particle data: 16 bytes (1 x vec4f).
@@ -616,8 +648,8 @@ mod tests {
     }
 
     #[test]
-    fn particle_uniforms_size_384() {
-        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 384);
+    fn particle_uniforms_size_400() {
+        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 400);
     }
 
     #[test]
@@ -797,5 +829,20 @@ mod tests {
         assert!((result[0].home[0] - 1.0).abs() < 1e-6);
         // Second entry: lerp from [0,0] (missing) to [7,8] at t=0 → [0,0]
         assert!((result[1].home[0] - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn obstacle_mode_from_u32() {
+        assert_eq!(ObstacleMode::from_u32(0), ObstacleMode::Bounce);
+        assert_eq!(ObstacleMode::from_u32(1), ObstacleMode::Stick);
+        assert_eq!(ObstacleMode::from_u32(2), ObstacleMode::Flow);
+        assert_eq!(ObstacleMode::from_u32(99), ObstacleMode::Bounce); // fallback
+    }
+
+    #[test]
+    fn obstacle_mode_labels() {
+        assert_eq!(ObstacleMode::Bounce.label(), "Bounce");
+        assert_eq!(ObstacleMode::Stick.label(), "Stick");
+        assert_eq!(ObstacleMode::Flow.label(), "Flow Around");
     }
 }

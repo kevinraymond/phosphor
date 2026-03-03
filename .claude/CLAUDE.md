@@ -19,6 +19,8 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 **Video Playback: COMPLETE** — feature-gated ffmpeg pre-decode to RAM, instant scrub, 60s max
 **NDI Output: COMPLETE** — feature-gated runtime-loaded NDI SDK, GPU capture with double-buffered staging, sender thread, UI panel
 **Per-Effect Alpha: COMPLETE** — effects write meaningful alpha, preserved through post-processing, delivered to NDI for downstream compositing
+**Obstacle Collision: COMPLETE** — image-based obstacle textures for particle collision with bounce/stick/flow modes
+**Monocular Depth: COMPLETE** — feature-gated MiDaS v2.1 via ort, background thread, webcam → depth map → obstacle texture
 
 ### What's Built
 
@@ -99,6 +101,36 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - `ndi_available()` cached runtime check (OnceLock), graceful "NDI not found" message in UI
 - NDI source name default: "Phosphor"
 
+#### Obstacle Collision
+- Image-based 2D obstacle textures for particle collision (PNG/JPEG/WebP with alpha)
+- 3 collision modes: Bounce (reflect velocity along surface normal), Stick (zero velocity at surface), Flow Around (tangent projection)
+- `ObstacleTexture` struct: placeholder (1x1 transparent), `from_rgba()`, `update()` (per-frame webcam)
+- Obstacle bindings extend group 1 (flow field): bindings 2+3 (texture_2d + sampler) alongside existing flow field 3D texture
+- WGSL helpers in `particle_lib.wgsl`: `obstacle_uv()`, `obstacle_alpha()`, `obstacle_normal()` (central-difference gradient, 5 samples), `apply_obstacle_collision()` (dispatches by mode)
+- `ParticleUniforms` extended 384→400 bytes: `obstacle_enabled`, `obstacle_threshold`, `obstacle_mode`, `obstacle_elasticity`
+- Per-particle system state: `obstacle_enabled`, `obstacle_mode`, `obstacle_threshold`, `obstacle_elasticity`, `obstacle_source`, `obstacle_image_path`
+- Methods: `set_obstacle_image()`, `update_obstacle_webcam()`, `clear_obstacle()` — each rebuilds group 1 bind group
+- UI: collapsible "Obstacle" section in right sidebar (below Particles), enable checkbox, Load Image (rfd), Clear, mode dropdown, threshold/elasticity sliders
+- Communication via egui temp data (`ObstacleCommand` enum with `Default` for `remove_temp`)
+- Integrated into `cascade_sim.wgsl` (3 lines: save prev_pos, integrate, apply collision). Same pattern works in any `*_sim.wgsl`.
+- Preset save/load: `obstacle_image_path`, `obstacle_mode`, `obstacle_threshold`, `obstacle_elasticity` on `LayerPreset` (all `#[serde(default)]`)
+- Performance: 5 texture samples per particle × 250K = 1.25M samples/frame (GPU-cache-friendly for 1080p obstacle)
+
+#### Monocular Depth Estimation
+- Feature-gated `depth`: `cargo run --features depth,webcam`
+- MiDaS v2.1 small (256×256 input, ~66MB ONNX) via `ort` crate (ONNX Runtime for Rust)
+- `DepthEstimator`: loads ONNX model, downscales RGBA → 256×256 RGB f32, CHW layout, runs inference, normalizes output min/max → grayscale
+- `DepthThread`: background "phosphor-depth" thread, bounded(1) channels (try_send drops stale), 100ms recv_timeout, AtomicBool shutdown
+- Model download: `~/.config/phosphor/models/midas_v21_small_256.onnx`, downloaded from HuggingFace via `ureq`, user-initiated only
+- `DownloadProgress`: AtomicU8 (0-100=percent, 101=complete, 102=error), AtomicBool cancel, Mutex<Option<String>> error_message
+- Pipeline: webcam frame → depth_tx.try_send → DepthThread → depth map → RGBA (white + depth as alpha) → update_obstacle_webcam()
+- UI: "Depth" button in Obstacle panel; if model missing, shows download button with progress; if downloaded, activates depth thread
+- `ObstacleCommand::UseDepth` and `ObstacleCommand::DownloadDepthModel` variants
+- `ObstacleInfo` extended: `depth_available`, `depth_model_downloaded`, `depth_downloading`, `depth_download_error`
+- App fields (cfg-gated): `depth_thread: Option<DepthThread>`, `depth_download: Option<Arc<DownloadProgress>>`
+- Preset: `obstacle_depth: Option<bool>` on `LayerPreset`, restore starts webcam + depth thread if model exists
+- Dependencies: `ort = "2.0.0-rc.11"` (optional), `ureq = "2"` (optional)
+
 #### Audio Upgrade + Beat Detection
 - Multi-resolution FFT: 4096-pt (sub_bass, bass, kick), 1024-pt (low_mid, mid, upper_mid), 512-pt (presence, brilliance)
 - 20-field AudioFeatures: 7 frequency bands, 2 aggregates (rms, kick), 6 spectral shape, 5 beat detection
@@ -114,7 +146,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - 7-band frequency visualization in audio panel
 - `treble` → `presence` + `brilliance`, `phase` → `beat_phase` in all shaders
 - ShaderUniforms: 256 bytes with 20 audio fields + params + feedback uniforms
-- ParticleUniforms: 384 bytes with 10 audio fields + forces (wind, vortex, ground) + noise (FBM octaves, curl mode) + emitter enhancements (cone, variance, velocity inherit) + lifetime curves (size, opacity, color gradient) + spin + depth sort + 8 effect params forwarded from ParamStore
+- ParticleUniforms: 400 bytes with 10 audio fields + forces (wind, vortex, ground) + noise (FBM octaves, curl mode) + emitter enhancements (cone, variance, velocity inherit) + lifetime curves (size, opacity, color gradient) + spin + depth sort + 8 effect params forwarded from ParamStore
 
 #### MIDI Input
 - midir 0.10 integration: callback thread → crossbeam bounded(64) channel → main thread drain in `App::update()`
@@ -249,6 +281,7 @@ Web Accept Thread: TcpListener → HTTP serve or WS upgrade → spawn client thr
 Web Client Thread(s): 50ms read timeout → parse JSON → WsInMessage via crossbeam bounded(64); drain outbound broadcast channel
 NDI Sender Thread: recv NdiFrame via crossbeam bounded(2) → NDIlib_send_send_video_v2 (clock_video paced)
 Preset Loader Thread: recv PresetDecodeRequest → decode media (load_media per layer, cancellation check between jobs) → send PresetDecodeResult
+Depth Thread (feature-gated `depth`): recv RGBA frame → DepthEstimator::estimate (downscale → ONNX → normalize) → send DepthFrame
 File Watcher Thread: notify → debounce → send changed paths
 ```
 
@@ -328,6 +361,12 @@ egui Overlay → Surface
 - NDI staging buffers use `align_to(width*4, COPY_BYTES_PER_ROW_ALIGNMENT)` for wgpu row padding, stripped on readback.
 - NDI frame channel is bounded(2) with `try_send` — drops frames if sender thread is behind (VJ performance > NDI latency).
 - NDI state passes through egui temp data (NdiInfo snapshot struct) to avoid `&mut NdiSystem` in `draw_panels` signature (feature-gated types can't be conditional function params).
+- Obstacle texture extends group 1 bind group (bindings 2+3) rather than adding a new group, avoiding contiguity issues with conditional groups 2–3 (trails, spatial hash).
+- Obstacle normal uses central-difference alpha gradient (5 texture samples: center + 4 neighbors at 2-texel offset) — points outward from solid regions.
+- `ObstacleCommand` enum requires `Default` trait for egui's `IdTypeMap::remove_temp`; uses `#[default] None` variant, filtered with `.filter(|c| !matches!(c, None))`.
+- Obstacle aspect ratio maps texture to full clip space (may stretch). Letterbox/fit mode can be added later.
+- Depth estimation: `ort` with `load-dynamic` feature — no build-time ONNX Runtime linking, loaded at runtime like NDI. `ort_available()` cached via `OnceLock`, tries `Session::builder()` to probe. Model downloaded via `ureq` to `~/.config/phosphor/models/`. `DepthThread` uses bounded(1) channels with try_send (drop stale). Depth map is 256×256 grayscale converted to RGBA (white + depth as alpha) and fed to existing `update_obstacle_webcam()`.
+- `DownloadProgress` uses `AtomicU8` (0-100=pct, 101=complete, 102=error) for lock-free UI polling. Background download thread writes to temp file then atomic rename.
 
 ### Controls
 - `D` — Toggle egui overlay
@@ -343,17 +382,18 @@ cargo run                          # debug build
 cargo run --release                # release build (much faster shaders)
 cargo run --features video         # with video playback (requires ffmpeg on PATH)
 cargo run --features ndi           # with NDI output (requires NDI runtime from ndi.video)
+cargo run --features depth,webcam  # with depth estimation (downloads MiDaS model on first use)
 cargo run --features "video,ndi"   # with both
 RUST_LOG=phosphor_app=debug cargo run  # verbose logging
 ```
 
 ### Test Coverage
-~337 unit tests covering pure logic, parsing, serde, and data transforms across 17 modules:
+~352 unit tests covering pure logic, parsing, serde, and data transforms across 17+ modules:
 - **Audio**: beat detection pipeline (onset → tempo → scheduler), adaptive normalization, BPM convergence
-- **Params**: ParamDef/ParamValue types, ParamStore CRUD, pack_to_buffer with all types
+- **Params**: ParamDef/ParamValue types, ParamStore CRUD, pack_to_buffer with all types, ObstacleMode enum conversions
 - **Effect loader**: `is_builtin`, `prepend_library` (with/without existing uniforms)
 - **GPU layer**: BlendMode serde/display, `adjusted_active_after_remove/move` edge cases
-- **Preset**: sanitize_name, LayerPreset serde defaults (incl. particle source fields), Preset roundtrip, PresetStore API, PresetLoader (generation tracking, loading state, empty/missing media, stale result discard), particle video/webcam preset serde
+- **Preset**: sanitize_name, LayerPreset serde defaults (incl. particle source fields), Preset roundtrip, PresetStore API, PresetLoader (generation tracking, loading state, empty/missing media, stale result discard), particle video/webcam preset serde, obstacle preset serde + backward compat
 - **Particle image source**: sample_rgba_buffer (empty, single pixel, grid mode, transparent skip, max particles), ParticleImageSource (static default, no advance), SourceTransition (interpolation, complete, mismatched lengths), EmitterDef serde with video field
 - **MIDI**: MidiMapping scale (inverted, custom range, zero range), matches (channel, omni, type), MidiConfig
 - **OSC**: parse all message types (param, layer, trigger, blend, enabled, raw), msg_address, OscConfig/OscLearnTarget
@@ -369,7 +409,7 @@ RUST_LOG=phosphor_app=debug cargo run  # verbose logging
 - File I/O in config load/save (tested implicitly via serde roundtrips)
 
 ```bash
-cargo test                         # run all tests (~337)
+cargo test                         # run all tests (~352)
 cargo test --features ndi          # include NDI tests
 cargo tarpaulin --features ndi     # line coverage report
 ```
