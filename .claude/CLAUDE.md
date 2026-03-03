@@ -197,7 +197,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - `MidiSystem::update_triggers_only()`: drains MIDI but skips CC→param when active layer is locked
 
 #### Effect Set
-18 curated audio-reactive effects designed for compositing across layers:
+19 curated audio-reactive effects designed for compositing across layers:
 
 **Shader-only effects:**
 1. **Aurora** (`aurora.wgsl`) — 7 frequency bands as horizontal flowing northern light curtains. Params: curtain_speed, band_spread, glow_width. No feedback.
@@ -220,6 +220,8 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 16. **Veil** (`veil_bg.wgsl` + `veil_sim.wgsl`) — Flowing silk curtain with 5000 particles on screen emitter. Multi-layer displacement field (bass billow + mid ripple + noise flutter) with spring-return physics for coherent sheet motion. Params: flow_speed, trail_decay, wind_strength, color_shift, density. Uses feedback + particles.
 17. **Tesla** (`tesla_bg.wgsl` + `tesla_sim.wgsl`) — Charged particles follow magnetic monopole flow field through dipole arrangements. 200K particles with interweaving helical trajectories, 4 dipole modes (parallel/antiparallel/ring/quadrupole), orbital correction near poles, proximity dimming. Audio: bass drives flow speed, beats trigger polarity flips (cyan↔magenta). Params: trail_decay, field_strength, charge_ratio, dipole_mode, field_rotation, color_mode, helix_tightness, flip_sensitivity. Uses feedback + particles.
 18. **Genesis** (`genesis_bg.wgsl` + `genesis_sim.wgsl`) — Multi-species Particle Lenia continuous cellular automaton. 3K particles (2 species, 50/50 split) interact through 2×2 kernel matrix, self-organizing into predator/prey, symbiosis, or competition dynamics. Species stored in `vel_size.z`. Species 1 params are complementary to species 0 (peak→1-peak, width×0.7). Cross-species kernels have asymmetric widths (1.2× vs 0.8×) for predator/prey-like awareness. Species-based coloring: teal/cyan (sp0) vs magenta/amber (sp1). Beat seed drops alternate species. Weaker cross-species repulsion (0.06 vs 0.12) allows mixing at boundaries. Audio: bass modulates kernel peak (organisms breathe), sub_bass shifts target density (morphological changes), onset destabilizes (organisms scatter and reform). Params: trail_decay, radius, kernel_peak, kernel_width, target_density, density_width, step_size, cross_affinity. Uses feedback + particles (alpha blend, spatial hash).
+
+19. **Cascade** (`cascade_bg.wgsl` + `cascade_sim.wgsl`) — Solid walls of particles emit inward from all 4 screen edges, audio-segmented by frequency band. 250K particles with pixel-perfect deterministic perimeter emission (one emitter per pixel, scales with resolution). Bottom=bass (red-orange), left=mid (teal), right=mid (blue-violet), top=centroid (white-cyan). Audio energy directly drives wall penetration depth (speed) like Aurora's ribbons + continuous audio push force. Curl noise, beat pulse, onset jitter. 3 color modes. Params: trail_decay, inward_speed, spread, curl_strength, color_mode, edge_glow, convergence, beat_sync. Uses feedback + particles.
 
 **Bundled preset**: "Crucible" (`~/.config/phosphor/presets/Crucible.json`) — all 8 layers composited with tuned blend modes, opacities, and params.
 

@@ -5,6 +5,18 @@
 
 ## Unreleased
 
+### Cascade Effect (New)
+- **Cascade**: solid walls of particles emit inward from all 4 screen edges, audio-segmented by frequency band
+- Pixel-perfect wall emission: particle index maps deterministically to perimeter pixels (1920 top/bottom + 1080 left/right at 1080p), guaranteeing gap-free solid walls that scale with resolution
+- Band-to-edge mapping: bottom=bass+sub_bass (red-orange), left=mid (teal), right=mid (blue-violet), top=centroid (white-cyan)
+- Audio directly drives wall penetration depth: band energy controls particle speed, so walls extend/retract with the music like Aurora's ribbons
+- Continuous audio push force during simulation keeps accelerating particles when their band is active
+- Curl noise turbulence for organic lateral drift, beat-triggered velocity pulse, onset jitter
+- 3 color modes: band colors (4 distinct per edge), monochrome white-blue, speed/energy gradient
+- Background shader: feedback trails with directional inward UV warp, per-band audio-reactive edge glow strips (width scales with audio), beat flash
+- Functions as both standalone effect and layerable edge frame via convergence param + brightness alpha compositing
+- 8 params: trail_decay, inward_speed, spread, curl_strength, color_mode, edge_glow, convergence, beat_sync
+
 ### Genesis Effect (Retuned)
 - **Genesis** (Particle Lenia): retuned from reference implementation (znah.net/lenia) for proper self-organizing behavior
 - Ring kernel calibrated to reference ratios: peak at 30% of R, width 23% of R (proper ring with falloff)
