@@ -5,6 +5,16 @@
 
 ## Unreleased
 
+### Accretion Effect (New)
+- **Tiled N-body gravity**: O(N²) gravitational simulation using workgroup shared-memory tiling (GPU Gems 3 Ch. 31) — every particle attracts every other, forming orbital systems, accretion discs, and slingshot ejections
+- **Angular-momentum-preserving damping**: only radial velocity is damped, preserving tangential (orbital) velocity for stable long-lived disc structure
+- **Audio seed injection**: beat onsets inject "seed" particles (local attractors within the disc); seed mass scales with `mid`, gravity strength modulated by `bass`
+- **Spiral feedback trails**: background shader warps trails with inward pull + rotation, creating galaxy-like spiral arms; differential RGB decay shifts aging trails from warm gold to cool blue
+- **4 init patterns**: disc (tangential orbits), ring (near-circular), two-body (binary system), collapse (zero-velocity infall)
+- **3 color modes**: velocity (blue→gold), proximity to seeds (blue→orange), orbital energy (blue=bound, red=escaping)
+- **Audio reactivity**: onset brightness flash (warm-tinted), bass particle size breathing, RMS glow, bass/mid drive feedback warp strength
+- 30K particles, 8 params, additive blending, central pressure support, obstacle collision
+
 ### Array Effect (New)
 - **Audio-band speaker emitters**: 5 toroidal ring emitters, one per frequency band (sub-bass through brilliance), each firing disc-shaped particle rings outward like speaker cones pushing air
 - **Two layout modes**: vertical speaker stack (default) and concentric rings — crossfade with `layout` param
