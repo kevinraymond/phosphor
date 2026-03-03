@@ -5,6 +5,19 @@
 
 ## Unreleased
 
+### Tesla Effect (New)
+- **Tesla** (magnetic field): 200K charged particles follow magnetic field lines as a flow field, creating interweaving helical trajectories
+- Magnetic monopole flow field: particles follow superposition of dipole field directions; charge sign determines direction along field lines (+charge follows B, -charge follows -B)
+- 4 dipole arrangements via `dipole_mode` param: parallel (same polarity), antiparallel (bar magnet, default), ring (4 alternating), quadrupole (4 + oscillating center)
+- Orbital correction near poles: smoothly blends field-following to tangential orbit, preventing convergence at sink poles
+- Helical oscillation: per-particle perpendicular sine wave with random phase, controlled by `helix_tightness`
+- Proximity dimming: particles near dipoles render dim, brightening as they arc away
+- Charge-based coloring: cyan for positive, magenta for negative; `charge_ratio` controls mix
+- Audio-reactive: bass drives flow speed, onset triggers velocity jitter, beat triggers per-particle polarity flips (cyan↔magenta)
+- 3 color modes: charge-based (cyan/magenta), speed-based (cool→hot), lifetime gradient (cool→warm)
+- Feedback trails with electric UV shimmer, dim background field line visualization
+- 8 params: trail_decay, field_strength, charge_ratio, dipole_mode, field_rotation, color_mode, helix_tightness, flip_sensitivity
+
 ### AoS → SoA Particle Buffer Refactor
 - **Structure of Arrays layout**: split single 64-byte `Particle` storage buffer into 4 separate 16-byte SoA buffers (`pos_life`, `vel_size`, `color`, `flags`) — position-only reads (spatial hash, sort keygen) now load 16 instead of 64 bytes per particle (4× bandwidth savings)
 - **13-entry compute bind group**: bindings 1-4 read, 5-8 write, 9 counters, 10 aux, 11 dead, 12 alive indices
