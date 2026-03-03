@@ -894,6 +894,10 @@ impl App {
                         self.uniforms.flux,
                         self.uniforms.beat,
                         self.uniforms.beat_phase,
+                        self.uniforms.low_mid,
+                        self.uniforms.upper_mid,
+                        self.uniforms.presence,
+                        self.uniforms.brilliance,
                     );
                 }
             }

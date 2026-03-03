@@ -1009,6 +1009,10 @@ impl ParticleSystem {
         flux: f32,
         beat: f32,
         beat_phase: f32,
+        low_mid: f32,
+        upper_mid: f32,
+        presence: f32,
+        brilliance: f32,
     ) {
         self.uniforms.sub_bass = sub_bass;
         self.uniforms.bass = bass;
@@ -1020,6 +1024,10 @@ impl ParticleSystem {
         self.uniforms.flux = flux;
         self.uniforms.beat = beat;
         self.uniforms.beat_phase = beat_phase;
+        self.uniforms.low_mid = low_mid;
+        self.uniforms.upper_mid = upper_mid;
+        self.uniforms.presence = presence;
+        self.uniforms.brilliance = brilliance;
     }
 
     /// Run the compute dispatch (particle simulation + prepare indirect args).

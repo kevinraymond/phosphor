@@ -5,6 +5,14 @@
 
 ## Unreleased
 
+### Array Effect (New)
+- **Audio-band speaker emitters**: 5 toroidal ring emitters, one per frequency band (sub-bass through brilliance), each firing disc-shaped particle rings outward like speaker cones pushing air
+- **Two layout modes**: vertical speaker stack (default) and concentric rings — crossfade with `layout` param
+- **Per-band audio reactivity**: each emitter responds to its own frequency band for emission density, speed, and glow
+- **Beat-phase breathing**: ring radii modulate with beat phase for rhythmic pulsing
+- **ParticleUniforms expanded** 400→416 bytes: added `low_mid`, `upper_mid`, `presence`, `brilliance` audio fields to compute shaders (all 7 bands now available)
+- 300K particles, 8 params (trail_decay, ring_radius, spread, layout, color_mode, speed_mult, beat_pulse, emitter_glow)
+
 ### Obstacle Refinements
 - **Contain mode**: new collision mode that traps particles inside the obstacle shape — inverted collision test, binary search, and normals
 - **Flow Around improvement**: redirects approach energy into tangential direction instead of stripping it, preventing pile-ups

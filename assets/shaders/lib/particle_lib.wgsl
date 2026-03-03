@@ -34,6 +34,10 @@ struct ParticleUniforms {
     flux: f32,
     beat: f32,
     beat_phase: f32,
+    low_mid: f32,
+    upper_mid: f32,
+    presence: f32,
+    brilliance: f32,
 
     resolution: vec2f,
 

@@ -21,7 +21,7 @@ pub struct Particle {
     pub flags: [f32; 4],
 }
 
-/// Particle simulation uniforms: 400 bytes.
+/// Particle simulation uniforms: 416 bytes.
 /// Separate from the main 256-byte ShaderUniforms.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
@@ -53,7 +53,7 @@ pub struct ParticleUniforms {
     pub attraction_strength: f32,
     pub seed: f32,
 
-    // Audio features (40 bytes = 10 floats) [80..119]
+    // Audio features (56 bytes = 14 floats) [80..135]
     pub sub_bass: f32,
     pub bass: f32,
     pub mid: f32,
@@ -64,10 +64,14 @@ pub struct ParticleUniforms {
     pub flux: f32,
     pub beat: f32,
     pub beat_phase: f32,
+    pub low_mid: f32,
+    pub upper_mid: f32,
+    pub presence: f32,
+    pub brilliance: f32,
 
-    // Resolution (8 bytes) [120..127]
+    // Resolution (8 bytes) [136..143]
     pub resolution: [f32; 2],
-    // --- 128 bytes above ---
+    // --- 144 bytes above ---
 
     // Flow field params (16 bytes) [128..143]
     pub flow_strength: f32,
@@ -127,7 +131,7 @@ pub struct ParticleUniforms {
     pub obstacle_threshold: f32,  // alpha cutoff (default 0.5)
     pub obstacle_mode: u32,       // 0=bounce, 1=stick, 2=flow, 3=contain
     pub obstacle_elasticity: f32, // restitution/friction (default 0.7)
-    // Total = 400 bytes
+    // Total = 416 bytes
 }
 
 /// Obstacle collision mode.
@@ -651,8 +655,8 @@ mod tests {
     }
 
     #[test]
-    fn particle_uniforms_size_400() {
-        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 400);
+    fn particle_uniforms_size_416() {
+        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 416);
     }
 
     #[test]
