@@ -5,6 +5,18 @@
 
 ## Unreleased
 
+### Genesis Effect (Retuned)
+- **Genesis** (Particle Lenia): retuned from reference implementation (znah.net/lenia) for proper self-organizing behavior
+- Ring kernel calibrated to reference ratios: peak at 30% of R, width 23% of R (proper ring with falloff)
+- Kernel weight W_K scaled from 0.003 → 0.02 for correct field density at particle count
+- Interaction radius narrowed to [0.05, 0.20] from [0.10, 0.50] — manageable search radius
+- Removed curl rotation (was compensating for over-smooth density field at 20K)
+- Stronger growth forces (step×0.10) and higher speed cap (MAX_SPEED=0.25) for VJ-paced dynamics
+- Soft radial containment spring past screen edge + hard clamp safety net (replaces square boundary)
+- Beat-triggered seed drops: ~3% of particles teleport to a random screen location on each beat, creating fresh organisms that self-organize from the music
+- 9 initial seed clusters in 3×3 grid (fills screen), zero-mean paired-hash noise (no drift bias)
+- Stronger bloom (threshold 0.15, intensity 0.55) for visual presence
+
 ### Tesla Effect (New)
 - **Tesla** (magnetic field): 200K charged particles follow magnetic field lines as a flow field, creating interweaving helical trajectories
 - Magnetic monopole flow field: particles follow superposition of dipole field directions; charge sign determines direction along field lines (+charge follows B, -charge follows -B)

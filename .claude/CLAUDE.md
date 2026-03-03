@@ -197,7 +197,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - `MidiSystem::update_triggers_only()`: drains MIDI but skips CC→param when active layer is locked
 
 #### Effect Set
-17 curated audio-reactive effects designed for compositing across layers:
+18 curated audio-reactive effects designed for compositing across layers:
 
 **Shader-only effects:**
 1. **Aurora** (`aurora.wgsl`) — 7 frequency bands as horizontal flowing northern light curtains. Params: curtain_speed, band_spread, glow_width. No feedback.
@@ -219,6 +219,7 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 15. **Raster** (`raster_bg.wgsl` + `raster_sim.wgsl`) — Video wall with 500K particles mapped to image pixel positions. Audio displacement: bass=radial push, mids=sinusoidal wave, highs=scatter, beat=burst impulse. Spring-return physics, luminance-based sizing. Params: trail_decay, spring_k, bass_push, mid_wave, high_scatter, burst_force, depth_scale, wave_freq. Uses feedback + particles (alpha blend, image emitter).
 16. **Veil** (`veil_bg.wgsl` + `veil_sim.wgsl`) — Flowing silk curtain with 5000 particles on screen emitter. Multi-layer displacement field (bass billow + mid ripple + noise flutter) with spring-return physics for coherent sheet motion. Params: flow_speed, trail_decay, wind_strength, color_shift, density. Uses feedback + particles.
 17. **Tesla** (`tesla_bg.wgsl` + `tesla_sim.wgsl`) — Charged particles follow magnetic monopole flow field through dipole arrangements. 200K particles with interweaving helical trajectories, 4 dipole modes (parallel/antiparallel/ring/quadrupole), orbital correction near poles, proximity dimming. Audio: bass drives flow speed, beats trigger polarity flips (cyan↔magenta). Params: trail_decay, field_strength, charge_ratio, dipole_mode, field_rotation, color_mode, helix_tightness, flip_sensitivity. Uses feedback + particles.
+18. **Genesis** (`genesis_bg.wgsl` + `genesis_sim.wgsl`) — Particle Lenia continuous cellular automaton. 3K particles interact through ring-shaped kernel fields, self-organizing into lifelike creatures (gliders, oscillators, pulsing blobs). Parameters calibrated from znah.net/lenia reference: ring kernel peak at 30% of R, circular petri-dish boundary, granular density field enables natural instabilities without curl rotation. Growth function maps field density to attract/repel dynamics. Audio: bass modulates kernel peak (organisms breathe), sub_bass shifts target density (morphological changes), onset destabilizes (organisms scatter and reform). Params: trail_decay, radius, kernel_peak, kernel_width, target_density, density_width, step_size, color_mode. Uses feedback + particles (alpha blend, spatial hash).
 
 **Bundled preset**: "Crucible" (`~/.config/phosphor/presets/Crucible.json`) — all 8 layers composited with tuned blend modes, opacities, and params.
 
