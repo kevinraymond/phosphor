@@ -61,7 +61,7 @@ impl ApplicationHandler for PhosphorApp {
 
         let mut attrs = WindowAttributes::default()
             .with_title("Phosphor")
-            .with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
+            .with_inner_size(winit::dpi::LogicalSize::new(1920, 1080));
 
         // Center window on primary monitor via initial position hint.
         // On Wayland, set_outer_position is a no-op and compositors handle placement,
@@ -72,10 +72,9 @@ impl ApplicationHandler for PhosphorApp {
         {
             let monitor_size = monitor.size();
             let monitor_pos = monitor.position();
-            // Use the requested inner size (1280x720 logical → physical)
             let scale = monitor.scale_factor();
-            let win_w = (1280.0 * scale) as u32;
-            let win_h = (720.0 * scale) as u32;
+            let win_w = (1920.0 * scale) as u32;
+            let win_h = (1080.0 * scale) as u32;
             let x = (monitor_size.width.saturating_sub(win_w)) / 2;
             let y = (monitor_size.height.saturating_sub(win_h)) / 2;
             attrs = attrs.with_position(winit::dpi::PhysicalPosition::new(
@@ -262,6 +261,7 @@ impl ApplicationHandler for PhosphorApp {
                                 trail_length: ps.def.trail_length,
                                 has_interaction: ps.def.interaction,
                                 has_sprite: ps.sprite.is_some(),
+                                is_compute_raster: ps.is_compute_raster(),
                                 has_image_source: ps.has_aux_data
                                     || ps.def.emitter.shape == "image",
                                 source_type,

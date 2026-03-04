@@ -5,6 +5,17 @@
 
 ## Unreleased
 
+### Window Size
+- **Default window size changed to 1920×1080** (was 1280×720)
+
+### Compute Rasterization (New)
+- **Atomic framebuffer rendering**: 3-pass compute raster pipeline bypasses vertex→rasterizer→fragment for sub-pixel particles. Eliminates 2×2 fragment quad waste and rasterizer bottleneck for high particle counts
+- **Fixed-point encoding**: 12-bit fractional precision (4096 scale) via `atomicAdd` on 4 separate i32 storage buffers (R/G/B/A), supporting up to ~1000 overlapping particles per pixel within i32 range
+- **Size-adaptive kernel**: single-pixel fast path for particles ≤1.5px, Gaussian kernel footprint for 1.5–5px, billboard fallback for larger particles
+- **Render mode field**: `"render_mode"` in .pfx files — `"billboard"` (default), `"compute"`, or `"auto"` (auto-selects compute for ≥100K particles with no sprites/trails and size ≤0.005)
+- **Fullscreen resolve**: render pass with hardware blend state (additive or alpha) reads decoded framebuffer with Reinhard tonemapping for additive mode
+- **COMPUTE badge**: cyan badge in particle panel when compute rasterization is active
+
 ### Performance & Build Optimization
 - **Build profiles**: dev builds use opt-level 1 (deps at 2 for faster shader compilation), release uses thin LTO + codegen-units=1
 - **GPU buffer clears**: spatial hash dispatch uses `encoder.clear_buffer()` instead of allocating a zeroed Vec per frame (up to 262KB saved per frame at max grid)
