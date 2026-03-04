@@ -8,7 +8,11 @@ pub fn draw_settings_panel(ui: &mut Ui, current_theme: ThemeMode) {
     let tc = theme_colors(ui.ctx());
 
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Theme").size(SMALL_SIZE).color(tc.text_secondary));
+        ui.label(
+            RichText::new("Theme")
+                .size(SMALL_SIZE)
+                .color(tc.text_secondary),
+        );
         egui::ComboBox::from_id_salt("theme_selector")
             .selected_text(RichText::new(current_theme.display_name()).size(SMALL_SIZE))
             .width(ui.available_width() - 4.0)

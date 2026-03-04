@@ -6,10 +6,7 @@ pub enum PlaybackState {
     /// No playback — waiting for user action.
     Idle,
     /// Holding on a cue (counting time before next transition or waiting for manual advance).
-    Holding {
-        cue_index: usize,
-        elapsed: f32,
-    },
+    Holding { cue_index: usize, elapsed: f32 },
     /// Transitioning between two cues.
     Transitioning {
         from_cue: usize,
@@ -42,9 +39,7 @@ pub enum TimelineEvent {
         transition_type: TransitionType,
     },
     /// Transition completed — now holding on to_cue.
-    TransitionComplete {
-        cue_index: usize,
-    },
+    TransitionComplete { cue_index: usize },
 }
 
 /// Read-only snapshot for UI (avoids borrow conflicts).
@@ -61,8 +56,16 @@ pub struct TimelineInfo {
 #[derive(Debug, Clone)]
 pub enum TimelineInfoState {
     Idle,
-    Holding { elapsed: f32, hold_secs: Option<f32> },
-    Transitioning { from: usize, to: usize, progress: f32, transition_type: TransitionType },
+    Holding {
+        elapsed: f32,
+        hold_secs: Option<f32>,
+    },
+    Transitioning {
+        from: usize,
+        to: usize,
+        progress: f32,
+        transition_type: TransitionType,
+    },
 }
 
 /// The runtime timeline state machine.

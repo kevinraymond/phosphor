@@ -7,11 +7,7 @@ use crate::ui::theme::tokens::*;
 
 /// Draw a horizontal timeline bar showing cue blocks and playhead.
 /// Returns true if the timeline bar is visible and was drawn.
-pub fn draw_timeline_bar(
-    ui: &mut Ui,
-    timeline: &TimelineInfo,
-    cue_names: &[String],
-) -> bool {
+pub fn draw_timeline_bar(ui: &mut Ui, timeline: &TimelineInfo, cue_names: &[String]) -> bool {
     if !timeline.active || timeline.cue_count == 0 {
         return false;
     }
@@ -49,10 +45,8 @@ pub fn draw_timeline_bar(
                 tc.card_bg
             };
 
-            let (rect, response) = ui.allocate_exact_size(
-                Vec2::new(block_width, bar_height),
-                egui::Sense::click(),
-            );
+            let (rect, response) =
+                ui.allocate_exact_size(Vec2::new(block_width, bar_height), egui::Sense::click());
 
             // Draw block background
             let painter = ui.painter();
@@ -68,12 +62,19 @@ pub fn draw_timeline_bar(
 
             // Transition progress overlay
             if is_transitioning_to {
-                if let TimelineInfoState::Transitioning { progress, transition_type, .. } = &timeline.state {
+                if let TimelineInfoState::Transitioning {
+                    progress,
+                    transition_type,
+                    ..
+                } = &timeline.state
+                {
                     let overlay_color = match transition_type {
                         TransitionType::Cut => Color32::TRANSPARENT,
                         TransitionType::Dissolve => tc.accent.linear_multiply(0.2 * progress),
                         TransitionType::ParamMorph => Color32::from_rgba_unmultiplied(
-                            tc.success.r(), tc.success.g(), tc.success.b(),
+                            tc.success.r(),
+                            tc.success.g(),
+                            tc.success.b(),
                             (40.0 * progress) as u8,
                         ),
                     };
@@ -87,9 +88,13 @@ pub fn draw_timeline_bar(
 
             // Cue label
             let cue_label = cue_names.get(i).map(|s| s.as_str()).unwrap_or("?");
-            let label_color = if is_current { tc.text_primary } else { tc.text_secondary };
+            let label_color = if is_current {
+                tc.text_primary
+            } else {
+                tc.text_secondary
+            };
             let galley = painter.layout_no_wrap(
-                format!("{}", cue_label),
+                cue_label.to_string(),
                 egui::FontId::proportional(SMALL_SIZE),
                 label_color,
             );
@@ -110,7 +115,12 @@ pub fn draw_timeline_bar(
         // Playhead indicator
         let base_y = ui.min_rect().min.y;
         match &timeline.state {
-            TimelineInfoState::Transitioning { to, progress, transition_type, .. } => {
+            TimelineInfoState::Transitioning {
+                to,
+                progress,
+                transition_type,
+                ..
+            } => {
                 // Show playhead as progress within the target cue block
                 let cue_x = *to as f32 * block_width;
                 let playhead_x = cue_x + progress * block_width;
@@ -121,10 +131,8 @@ pub fn draw_timeline_bar(
                     TransitionType::ParamMorph => tc.success,
                     TransitionType::Cut => tc.accent,
                 };
-                ui.painter().line_segment(
-                    [top, bottom],
-                    egui::Stroke::new(2.0, playhead_color),
-                );
+                ui.painter()
+                    .line_segment([top, bottom], egui::Stroke::new(2.0, playhead_color));
 
                 // Transition label centered in the bar
                 let label = format!(
@@ -139,11 +147,8 @@ pub fn draw_timeline_bar(
                 );
                 let label_x = available_width * 0.5 - galley.size().x * 0.5;
                 let label_y = base_y + bar_height - galley.size().y - 2.0;
-                ui.painter().galley(
-                    egui::pos2(label_x, label_y),
-                    galley,
-                    tc.text_primary,
-                );
+                ui.painter()
+                    .galley(egui::pos2(label_x, label_y), galley, tc.text_primary);
             }
             TimelineInfoState::Holding { elapsed, hold_secs } => {
                 // Playhead within the current cue block
@@ -156,10 +161,8 @@ pub fn draw_timeline_bar(
                 };
                 let top = egui::pos2(playhead_x, base_y);
                 let bottom = egui::pos2(playhead_x, base_y + bar_height);
-                ui.painter().line_segment(
-                    [top, bottom],
-                    egui::Stroke::new(2.0, tc.accent),
-                );
+                ui.painter()
+                    .line_segment([top, bottom], egui::Stroke::new(2.0, tc.accent));
             }
             _ => {}
         }

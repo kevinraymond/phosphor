@@ -201,11 +201,7 @@ impl EffectLoader {
             .into_iter()
             .flatten()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .is_some_and(|ext| ext == "pfx")
-            })
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "pfx"))
             .collect();
         entries.sort_by_key(|e| e.file_name());
 
@@ -253,9 +249,16 @@ impl EffectLoader {
     /// Patches spatial hash grid constants (SH_GRID_W/H) to match current grid_dims.
     pub fn prepend_compute_libraries(&self, source: &str) -> String {
         let (w, h) = self.grid_dims;
-        let patched_plib = self.particle_lib_source
-            .replace("const SH_GRID_W: u32 = 40u;", &format!("const SH_GRID_W: u32 = {w}u;"))
-            .replace("const SH_GRID_H: u32 = 40u;", &format!("const SH_GRID_H: u32 = {h}u;"));
+        let patched_plib = self
+            .particle_lib_source
+            .replace(
+                "const SH_GRID_W: u32 = 40u;",
+                &format!("const SH_GRID_W: u32 = {w}u;"),
+            )
+            .replace(
+                "const SH_GRID_H: u32 = 40u;",
+                &format!("const SH_GRID_H: u32 = {h}u;"),
+            );
         format!("{}\n{}\n{}", self.lib_source, patched_plib, source)
     }
 
@@ -289,7 +292,9 @@ impl EffectLoader {
 
     /// Delete a user effect: removes the .pfx and its .wgsl shader files, then rescans.
     pub fn delete_effect(&mut self, index: usize) -> Result<String> {
-        let effect = self.effects.get(index)
+        let effect = self
+            .effects
+            .get(index)
             .ok_or_else(|| anyhow::anyhow!("Effect index {} out of range", index))?;
         if Self::is_builtin(effect) {
             anyhow::bail!("Cannot delete built-in effect '{}'", effect.name);
@@ -315,7 +320,9 @@ impl EffectLoader {
             }
         }
         if let Some(ref particles) = effect.particles {
-            if !particles.compute_shader.is_empty() && !shader_files.contains(&particles.compute_shader) {
+            if !particles.compute_shader.is_empty()
+                && !shader_files.contains(&particles.compute_shader)
+            {
                 shader_files.push(particles.compute_shader.clone());
             }
             if let Some(ref rd) = particles.reaction_diffusion {
@@ -340,7 +347,9 @@ impl EffectLoader {
     /// Copy a built-in effect to a new user effect with the given name.
     /// Returns (pfx_path, first_wgsl_path) so the caller can load + open editor.
     pub fn copy_builtin_effect(&self, index: usize, new_name: &str) -> Result<(PathBuf, PathBuf)> {
-        let effect = self.effects.get(index)
+        let effect = self
+            .effects
+            .get(index)
             .ok_or_else(|| anyhow::anyhow!("Effect index {} out of range", index))?;
         if !Self::is_builtin(effect) {
             anyhow::bail!("Effect '{}' is not a built-in", effect.name);
@@ -354,7 +363,13 @@ impl EffectLoader {
         // Sanitize to snake_case filename
         let snake: String = new_name
             .chars()
-            .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    '_'
+                }
+            })
             .collect();
         let snake = snake.trim_matches('_').to_string();
         if snake.is_empty() {
@@ -376,8 +391,16 @@ impl EffectLoader {
                 let new_shader = format!("{snake}.wgsl");
                 // If multi-pass, use {snake}_{pass_name}.wgsl
                 let new_rel = if passes.len() > 1 {
-                    let pass_snake: String = pass.name.chars()
-                        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+                    let pass_snake: String = pass
+                        .name
+                        .chars()
+                        .map(|c| {
+                            if c.is_alphanumeric() {
+                                c.to_ascii_lowercase()
+                            } else {
+                                '_'
+                            }
+                        })
                         .collect();
                     format!("{snake}_{pass_snake}.wgsl")
                 } else {
@@ -429,7 +452,11 @@ impl EffectLoader {
                 let compute_dst = shaders_dir.join(&compute_new);
                 if !compute_dst.exists() {
                     std::fs::copy(&compute_src, &compute_dst)?;
-                    log::info!("Copied compute shader: {} -> {}", compute_src.display(), compute_dst.display());
+                    log::info!(
+                        "Copied compute shader: {} -> {}",
+                        compute_src.display(),
+                        compute_dst.display()
+                    );
                 }
                 particles.compute_shader = compute_new;
             }
@@ -440,7 +467,11 @@ impl EffectLoader {
                     let rd_dst = shaders_dir.join(&rd_new);
                     if !rd_dst.exists() {
                         std::fs::copy(&rd_src, &rd_dst)?;
-                        log::info!("Copied R-D shader: {} -> {}", rd_src.display(), rd_dst.display());
+                        log::info!(
+                            "Copied R-D shader: {} -> {}",
+                            rd_src.display(),
+                            rd_dst.display()
+                        );
                     }
                     rd.compute_shader = rd_new;
                 }
@@ -449,7 +480,11 @@ impl EffectLoader {
 
         let pfx_json = serde_json::to_string_pretty(&new_effect)?;
         std::fs::write(&new_pfx_path, pfx_json)?;
-        log::info!("Created effect copy: {} -> {}", effect.name, new_pfx_path.display());
+        log::info!(
+            "Created effect copy: {} -> {}",
+            effect.name,
+            new_pfx_path.display()
+        );
 
         Ok((new_pfx_path, first_wgsl))
     }
@@ -463,7 +498,8 @@ mod tests {
         serde_json::from_str(&format!(
             r#"{{"name":"Test","author":"{}","shader":"test.wgsl"}}"#,
             author
-        )).unwrap()
+        ))
+        .unwrap()
     }
 
     #[test]

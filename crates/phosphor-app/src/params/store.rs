@@ -67,8 +67,7 @@ impl ParamStore {
 
     pub fn reset(&mut self, name: &str) {
         if let Some(def) = self.defs.iter().find(|d| d.name() == name) {
-            self.values
-                .insert(name.to_string(), def.default_value());
+            self.values.insert(name.to_string(), def.default_value());
         }
     }
 
@@ -249,8 +248,18 @@ mod tests {
     #[test]
     fn pack_to_buffer_with_point2d() {
         let defs = vec![
-            ParamDef::Float { name: "x".into(), default: 1.0, min: 0.0, max: 2.0 },
-            ParamDef::Point2D { name: "pos".into(), default: [0.3, 0.7], min: [0.0, 0.0], max: [1.0, 1.0] },
+            ParamDef::Float {
+                name: "x".into(),
+                default: 1.0,
+                min: 0.0,
+                max: 2.0,
+            },
+            ParamDef::Point2D {
+                name: "pos".into(),
+                default: [0.3, 0.7],
+                min: [0.0, 0.0],
+                max: [1.0, 1.0],
+            },
         ];
         let mut s = ParamStore::new();
         s.load_from_defs(&defs);

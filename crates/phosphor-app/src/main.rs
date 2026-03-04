@@ -88,7 +88,11 @@ impl ApplicationHandler for PhosphorApp {
             attrs = attrs.with_window_icon(Some(icon));
         }
 
-        let window = Arc::new(event_loop.create_window(attrs).expect("Failed to create window"));
+        let window = Arc::new(
+            event_loop
+                .create_window(attrs)
+                .expect("Failed to create window"),
+        );
 
         self.window = Some(window.clone());
 
@@ -212,7 +216,10 @@ impl ApplicationHandler for PhosphorApp {
                         .and_then(|e| e.pass_executor.particle_system.as_ref())
                         .map(|ps| {
                             let (source_type, source_name) = if ps.image_source.is_video() {
-                                ("video".to_string(), ps.video_path.clone().unwrap_or_default())
+                                (
+                                    "video".to_string(),
+                                    ps.video_path.clone().unwrap_or_default(),
+                                )
                             } else if ps.image_source.is_webcam() {
                                 ("webcam".to_string(), "webcam".to_string())
                             } else {
@@ -222,7 +229,10 @@ impl ApplicationHandler for PhosphorApp {
                                 #[cfg(feature = "video")]
                                 {
                                     if let crate::gpu::particle::ParticleImageSource::Video {
-                                        playing, looping, speed, ..
+                                        playing,
+                                        looping,
+                                        speed,
+                                        ..
                                     } = &ps.image_source
                                     {
                                         (*playing, *looping, *speed)
@@ -231,7 +241,9 @@ impl ApplicationHandler for PhosphorApp {
                                     }
                                 }
                                 #[cfg(not(feature = "video"))]
-                                { (false, true, 1.0) }
+                                {
+                                    (false, true, 1.0)
+                                }
                             };
                             crate::ui::panels::particle_panel::ParticleInfo {
                                 alive_count: ps.alive_count,
@@ -250,7 +262,8 @@ impl ApplicationHandler for PhosphorApp {
                                 trail_length: ps.def.trail_length,
                                 has_interaction: ps.def.interaction,
                                 has_sprite: ps.sprite.is_some(),
-                                has_image_source: ps.has_aux_data || ps.def.emitter.shape == "image",
+                                has_image_source: ps.has_aux_data
+                                    || ps.def.emitter.shape == "image",
                                 source_type,
                                 source_name,
                                 video_playing,
@@ -269,86 +282,104 @@ impl ApplicationHandler for PhosphorApp {
                         pi.source_loading = app.particle_source_loader.loading;
                         pi.source_loading_name = app.particle_source_loader.loading_name.clone();
                         if pi.has_image_source {
-                            pi.builtin_images = crate::gpu::particle::builtin_raster_images().clone();
+                            pi.builtin_images =
+                                crate::gpu::particle::builtin_raster_images().clone();
                         }
                     }
                     let particle_count = particle_info.as_ref().map(|p| p.max_count);
 
                     // Get obstacle info from active layer
-                    let obstacle_info = app
-                        .layer_stack
-                        .active()
-                        .and_then(|l| l.as_effect())
-                        .map(|e| {
-                            let has_particles = e.pass_executor.particle_system.is_some();
-                            let webcam_available = cfg!(feature = "webcam");
-                            let video_available = cfg!(feature = "video") && {
-                                #[cfg(feature = "video")]
-                                { crate::media::video::ffmpeg_available() }
-                                #[cfg(not(feature = "video"))]
-                                { false }
-                            };
-                            let depth_available = cfg!(feature = "depth");
-                            let depth_model_downloaded = {
-                                #[cfg(feature = "depth")]
-                                { crate::depth::model::depth_ready() }
-                                #[cfg(not(feature = "depth"))]
-                                { false }
-                            };
-                            let depth_downloading = {
-                                #[cfg(feature = "depth")]
-                                {
-                                    app.depth_download.as_ref()
-                                        .filter(|p| p.is_downloading())
-                                        .map(|p| p.percent())
+                    let obstacle_info =
+                        app.layer_stack
+                            .active()
+                            .and_then(|l| l.as_effect())
+                            .map(|e| {
+                                let has_particles = e.pass_executor.particle_system.is_some();
+                                let webcam_available = cfg!(feature = "webcam");
+                                let video_available = cfg!(feature = "video") && {
+                                    #[cfg(feature = "video")]
+                                    {
+                                        crate::media::video::ffmpeg_available()
+                                    }
+                                    #[cfg(not(feature = "video"))]
+                                    {
+                                        false
+                                    }
+                                };
+                                let depth_available = cfg!(feature = "depth");
+                                let depth_model_downloaded = {
+                                    #[cfg(feature = "depth")]
+                                    {
+                                        crate::depth::model::depth_ready()
+                                    }
+                                    #[cfg(not(feature = "depth"))]
+                                    {
+                                        false
+                                    }
+                                };
+                                let depth_downloading = {
+                                    #[cfg(feature = "depth")]
+                                    {
+                                        app.depth_download
+                                            .as_ref()
+                                            .filter(|p| p.is_downloading())
+                                            .map(|p| p.percent())
+                                    }
+                                    #[cfg(not(feature = "depth"))]
+                                    {
+                                        let _ = &app;
+                                        None::<u8>
+                                    }
+                                };
+                                let depth_download_error = {
+                                    #[cfg(feature = "depth")]
+                                    {
+                                        app.depth_download
+                                            .as_ref()
+                                            .filter(|p| p.is_error())
+                                            .and_then(|p| {
+                                                p.error_message.lock().ok().and_then(|m| m.clone())
+                                            })
+                                    }
+                                    #[cfg(not(feature = "depth"))]
+                                    {
+                                        None::<String>
+                                    }
+                                };
+                                if let Some(ps) = &e.pass_executor.particle_system {
+                                    crate::ui::panels::obstacle_panel::ObstacleInfo {
+                                        enabled: ps.obstacle_enabled,
+                                        mode: ps.obstacle_mode,
+                                        threshold: ps.obstacle_threshold,
+                                        elasticity: ps.obstacle_elasticity,
+                                        source: ps.obstacle_source.clone(),
+                                        image_path: ps.obstacle_image_path.clone(),
+                                        has_particles,
+                                        webcam_available,
+                                        video_available,
+                                        depth_available,
+                                        depth_model_downloaded,
+                                        depth_downloading,
+                                        depth_download_error,
+                                    }
+                                } else {
+                                    crate::ui::panels::obstacle_panel::ObstacleInfo {
+                                        enabled: false,
+                                        mode: crate::gpu::particle::ObstacleMode::Bounce,
+                                        threshold: 0.5,
+                                        elasticity: 0.7,
+                                        source: String::new(),
+                                        image_path: None,
+                                        has_particles,
+                                        webcam_available,
+                                        video_available,
+                                        depth_available,
+                                        depth_model_downloaded,
+                                        depth_downloading,
+                                        depth_download_error,
+                                    }
                                 }
-                                #[cfg(not(feature = "depth"))]
-                                { let _ = &app; None::<u8> }
-                            };
-                            let depth_download_error = {
-                                #[cfg(feature = "depth")]
-                                {
-                                    app.depth_download.as_ref()
-                                        .filter(|p| p.is_error())
-                                        .and_then(|p| p.error_message.lock().ok().and_then(|m| m.clone()))
-                                }
-                                #[cfg(not(feature = "depth"))]
-                                { None::<String> }
-                            };
-                            if let Some(ps) = &e.pass_executor.particle_system {
-                                crate::ui::panels::obstacle_panel::ObstacleInfo {
-                                    enabled: ps.obstacle_enabled,
-                                    mode: ps.obstacle_mode,
-                                    threshold: ps.obstacle_threshold,
-                                    elasticity: ps.obstacle_elasticity,
-                                    source: ps.obstacle_source.clone(),
-                                    image_path: ps.obstacle_image_path.clone(),
-                                    has_particles,
-                                    webcam_available,
-                                    video_available,
-                                    depth_available,
-                                    depth_model_downloaded,
-                                    depth_downloading,
-                                    depth_download_error,
-                                }
-                            } else {
-                                crate::ui::panels::obstacle_panel::ObstacleInfo {
-                                    enabled: false,
-                                    mode: crate::gpu::particle::ObstacleMode::Bounce,
-                                    threshold: 0.5,
-                                    elasticity: 0.7,
-                                    source: String::new(),
-                                    image_path: None,
-                                    has_particles,
-                                    webcam_available,
-                                    video_available,
-                                    depth_available,
-                                    depth_model_downloaded,
-                                    depth_downloading,
-                                    depth_download_error,
-                                }
-                            }
-                        });
+                            });
 
                     // Get active layer's shader error
                     let shader_error = app
@@ -475,6 +506,19 @@ impl ApplicationHandler for PhosphorApp {
                         &mut app.shader_editor,
                     );
 
+                    // GPU profiler panel
+                    #[cfg(feature = "profiling")]
+                    if app.egui_overlay.visible {
+                        egui::Window::new("GPU Profiler")
+                            .default_pos([10.0, 10.0])
+                            .default_size([250.0, 300.0])
+                            .resizable(true)
+                            .collapsible(true)
+                            .show(&ctx, |ui| {
+                                app.gpu_profiler.ui(ui);
+                            });
+                    }
+
                     // Draw depth download confirmation modal
                     crate::ui::panels::obstacle_panel::draw_depth_download_modal(&ctx);
 
@@ -502,29 +546,41 @@ impl ApplicationHandler for PhosphorApp {
                                 );
                                 ui.add_space(12.0);
                                 let btn_size = egui::Vec2::new(100.0, 32.0);
-                                let esc_cancel = was_shown
-                                    && ui.input(|i| i.key_pressed(egui::Key::Escape));
+                                let esc_cancel =
+                                    was_shown && ui.input(|i| i.key_pressed(egui::Key::Escape));
                                 ui.horizontal(|ui| {
                                     let quit_fill = egui::Color32::from_rgba_unmultiplied(
-                                        tc.error.r(), tc.error.g(), tc.error.b(), 60,
+                                        tc.error.r(),
+                                        tc.error.g(),
+                                        tc.error.b(),
+                                        60,
                                     );
                                     if ui
-                                        .add(egui::Button::new(
-                                            egui::RichText::new("Quit").color(tc.error),
-                                        ).fill(quit_fill).min_size(btn_size))
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new("Quit").color(tc.error),
+                                            )
+                                            .fill(quit_fill)
+                                            .min_size(btn_size),
+                                        )
                                         .clicked()
                                     {
                                         ui.ctx().data_mut(|d| {
                                             d.insert_temp(egui::Id::new("confirm_quit"), true);
                                         });
                                     }
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if ui.add(egui::Button::new("Cancel").min_size(btn_size)).clicked()
-                                            || esc_cancel
-                                        {
-                                            app.quit_requested = false;
-                                        }
-                                    });
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui
+                                                .add(egui::Button::new("Cancel").min_size(btn_size))
+                                                .clicked()
+                                                || esc_cancel
+                                            {
+                                                app.quit_requested = false;
+                                            }
+                                        },
+                                    );
                                 });
                             });
                     } else {
@@ -535,24 +591,23 @@ impl ApplicationHandler for PhosphorApp {
                 app.egui_overlay.end_frame(&app.window);
 
                 // Handle quit confirmation
-                let confirm_quit: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("confirm_quit"))
-                });
+                let confirm_quit: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("confirm_quit")));
                 if confirm_quit.is_some() {
+                    app.gpu.save_pipeline_cache();
                     event_loop.exit();
                 }
 
                 // Handle shader editor signals
-                let open_editor: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("open_shader_editor"))
-                });
+                let open_editor: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("open_shader_editor")));
                 if open_editor.is_some() {
                     // Resolve active layer's shader path
-                    if let Some(idx) = app
-                        .layer_stack
-                        .active()
-                        .and_then(|l| l.effect_index())
-                    {
+                    if let Some(idx) = app.layer_stack.active().and_then(|l| l.effect_index()) {
                         if let Some(effect) = app.effect_loader.effects.get(idx).cloned() {
                             let passes = effect.normalized_passes();
                             if let Some(pass) = passes.first() {
@@ -562,7 +617,8 @@ impl ApplicationHandler for PhosphorApp {
                                     // Load paired .pfx file for tab switching
                                     if let Some(ref pfx_path) = effect.source_path {
                                         if let Ok(pfx_content) = std::fs::read_to_string(pfx_path) {
-                                            app.shader_editor.load_paired_pfx(pfx_path.clone(), pfx_content);
+                                            app.shader_editor
+                                                .load_paired_pfx(pfx_path.clone(), pfx_content);
                                         }
                                     }
                                 } else {
@@ -573,9 +629,10 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
 
-                let save_editor: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("shader_editor_save"))
-                });
+                let save_editor: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("shader_editor_save")));
                 if save_editor.is_some() {
                     // Save the active tab
                     if let Some(ref path) = app.shader_editor.file_path {
@@ -586,7 +643,8 @@ impl ApplicationHandler for PhosphorApp {
                             }
                             Err(e) => {
                                 log::error!("Failed to save shader: {e}");
-                                app.status_error = Some((format!("Save failed: {e}"), std::time::Instant::now()));
+                                app.status_error =
+                                    Some((format!("Save failed: {e}"), std::time::Instant::now()));
                             }
                         }
                     }
@@ -601,7 +659,10 @@ impl ApplicationHandler for PhosphorApp {
                                 }
                                 Err(e) => {
                                     log::error!("Failed to save paired file: {e}");
-                                    app.status_error = Some((format!("Save failed: {e}"), std::time::Instant::now()));
+                                    app.status_error = Some((
+                                        format!("Save failed: {e}"),
+                                        std::time::Instant::now(),
+                                    ));
                                 }
                             }
                         }
@@ -609,9 +670,10 @@ impl ApplicationHandler for PhosphorApp {
                 }
 
                 // Handle shader error dismiss from status bar
-                let dismiss_error: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("dismiss_shader_error"))
-                });
+                let dismiss_error: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("dismiss_shader_error")));
                 if dismiss_error.is_some() {
                     if let Some(layer) = app.layer_stack.active_mut() {
                         if let Some(e) = layer.as_effect_mut() {
@@ -621,37 +683,42 @@ impl ApplicationHandler for PhosphorApp {
                     app.shader_editor.compile_error = None;
                 }
 
-                let new_prompt: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("new_effect_prompt"))
-                });
+                let new_prompt: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("new_effect_prompt")));
                 if new_prompt.is_some() {
                     app.shader_editor.new_effect_prompt = true;
                 }
 
                 // Handle "Copy Shader" prompt for built-in effects
-                let copy_prompt: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("copy_builtin_prompt"))
-                });
+                let copy_prompt: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("copy_builtin_prompt")));
                 if copy_prompt.is_some() {
                     app.shader_editor.new_effect_prompt = true;
                     app.shader_editor.copy_builtin_mode = true;
                 }
 
                 // Handle copy built-in effect creation
-                let copy_effect: Option<String> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("create_copy_effect"))
-                });
+                let copy_effect: Option<String> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("create_copy_effect")));
                 if let Some(name) = copy_effect {
                     if let Err(e) = app.copy_builtin_effect(&name) {
                         log::error!("Failed to copy effect: {e}");
-                        app.status_error = Some((format!("Copy failed: {e}"), std::time::Instant::now()));
+                        app.status_error =
+                            Some((format!("Copy failed: {e}"), std::time::Instant::now()));
                     }
                 }
 
                 // Handle delete effect signal
-                let delete_effect: Option<usize> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("delete_effect"))
-                });
+                let delete_effect: Option<usize> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("delete_effect")));
                 if let Some(idx) = delete_effect {
                     match app.effect_loader.delete_effect(idx) {
                         Ok(name) => {
@@ -667,26 +734,29 @@ impl ApplicationHandler for PhosphorApp {
                         }
                         Err(e) => {
                             log::error!("Failed to delete effect: {e}");
-                            app.status_error = Some((format!("Delete failed: {e}"), std::time::Instant::now()));
+                            app.status_error =
+                                Some((format!("Delete failed: {e}"), std::time::Instant::now()));
                         }
                     }
                 }
 
-                let create_effect: Option<String> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("create_new_effect"))
-                });
+                let create_effect: Option<String> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("create_new_effect")));
                 if let Some(name) = create_effect {
                     if let Err(e) = app.create_new_effect(&name) {
                         log::error!("Failed to create effect: {e}");
-                        app.status_error = Some((format!("Create failed: {e}"), std::time::Instant::now()));
+                        app.status_error =
+                            Some((format!("Create failed: {e}"), std::time::Instant::now()));
                     }
                 }
 
                 // Handle theme change from settings panel
-                let set_theme: Option<crate::ui::theme::ThemeMode> =
-                    app.egui_overlay.context().data_mut(|d| {
-                        d.remove_temp(egui::Id::new("set_theme"))
-                    });
+                let set_theme: Option<crate::ui::theme::ThemeMode> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("set_theme")));
                 if let Some(theme) = set_theme {
                     app.egui_overlay.set_theme(theme);
                     app.settings.theme = theme;
@@ -694,22 +764,32 @@ impl ApplicationHandler for PhosphorApp {
                 }
 
                 // Handle audio device switch from UI
-                let switch_audio: Option<String> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("switch_audio_device"))
-                });
+                let switch_audio: Option<String> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("switch_audio_device")));
                 if let Some(device_str) = switch_audio {
-                    let device_name = if device_str.is_empty() { None } else { Some(device_str.as_str()) };
+                    let device_name = if device_str.is_empty() {
+                        None
+                    } else {
+                        Some(device_str.as_str())
+                    };
                     app.audio.switch_device(device_name);
-                    app.settings.audio_device = if device_str.is_empty() { None } else { Some(device_str) };
+                    app.settings.audio_device = if device_str.is_empty() {
+                        None
+                    } else {
+                        Some(device_str)
+                    };
                     app.settings.save();
                 }
 
                 // Handle NDI signals from UI
                 #[cfg(feature = "ndi")]
                 {
-                    let ndi_enable: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                        d.remove_temp(egui::Id::new("ndi_set_enabled"))
-                    });
+                    let ndi_enable: Option<bool> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("ndi_set_enabled")));
                     if let Some(enabled) = ndi_enable {
                         app.ndi.set_enabled(
                             enabled,
@@ -720,9 +800,10 @@ impl ApplicationHandler for PhosphorApp {
                         );
                     }
 
-                    let ndi_source: Option<String> = app.egui_overlay.context().data_mut(|d| {
-                        d.remove_temp(egui::Id::new("ndi_source_name"))
-                    });
+                    let ndi_source: Option<String> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("ndi_source_name")));
                     if let Some(name) = ndi_source {
                         app.ndi.config.source_name = name;
                         app.ndi.config.save();
@@ -734,9 +815,10 @@ impl ApplicationHandler for PhosphorApp {
                         );
                     }
 
-                    let ndi_res: Option<u8> = app.egui_overlay.context().data_mut(|d| {
-                        d.remove_temp(egui::Id::new("ndi_resolution_change"))
-                    });
+                    let ndi_res: Option<u8> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("ndi_resolution_change")));
                     if let Some(res_u8) = ndi_res {
                         let res = match res_u8 {
                             0 => crate::ndi::types::OutputResolution::Match,
@@ -755,17 +837,19 @@ impl ApplicationHandler for PhosphorApp {
                         );
                     }
 
-                    let ndi_alpha_luma: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                        d.remove_temp(egui::Id::new("ndi_alpha_from_luma"))
-                    });
+                    let ndi_alpha_luma: Option<bool> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("ndi_alpha_from_luma")));
                     if let Some(val) = ndi_alpha_luma {
                         app.ndi.config.alpha_from_luma = val;
                         app.ndi.config.save();
                     }
 
-                    let ndi_restart: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                        d.remove_temp(egui::Id::new("ndi_restart"))
-                    });
+                    let ndi_restart: Option<bool> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("ndi_restart")));
                     if ndi_restart.is_some() {
                         app.ndi.restart(
                             &app.gpu.device,
@@ -777,9 +861,10 @@ impl ApplicationHandler for PhosphorApp {
                 }
 
                 // Handle effect loading from UI → loads on active layer
-                let pending: Option<usize> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("pending_effect"))
-                });
+                let pending: Option<usize> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("pending_effect")));
                 if let Some(idx) = pending.or(app.egui_overlay.pending_effect_load.take()) {
                     let active_locked = app.layer_stack.active().map_or(false, |l| l.locked);
                     if !active_locked {
@@ -789,41 +874,51 @@ impl ApplicationHandler for PhosphorApp {
                 }
 
                 // Handle preset signals from UI
-                let pending_preset: Option<usize> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("pending_preset"))
-                });
+                let pending_preset: Option<usize> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("pending_preset")));
                 if let Some(idx) = pending_preset {
                     app.load_preset(idx);
                 }
-                let save_preset: Option<String> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("save_preset"))
-                });
+                let save_preset: Option<String> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("save_preset")));
                 if let Some(name) = save_preset {
                     app.save_preset(&name);
                 }
-                let delete_preset: Option<usize> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("delete_preset"))
-                });
+                let delete_preset: Option<usize> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("delete_preset")));
                 if let Some(idx) = delete_preset {
                     if let Err(e) = app.preset_store.delete(idx) {
                         log::error!("Failed to delete preset: {e}");
                     }
                 }
-                let deselect_preset: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("deselect_preset"))
-                });
+                let deselect_preset: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("deselect_preset")));
                 if deselect_preset.is_some() {
                     app.preset_store.current_preset = None;
                     app.preset_store.dirty = false;
                 }
-                let copy_preset_index: Option<usize> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("copy_preset_index"))
-                });
+                let copy_preset_index: Option<usize> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("copy_preset_index")));
                 if let Some(src_idx) = copy_preset_index {
                     if let Some((src_name, _)) = app.preset_store.presets.get(src_idx) {
                         let base = format!("{} Copy", src_name);
                         // Generate unique name
-                        let existing: Vec<&str> = app.preset_store.presets.iter().map(|(n, _)| n.as_str()).collect();
+                        let existing: Vec<&str> = app
+                            .preset_store
+                            .presets
+                            .iter()
+                            .map(|(n, _)| n.as_str())
+                            .collect();
                         let copy_name = if !existing.contains(&base.as_str()) {
                             base.clone()
                         } else {
@@ -848,9 +943,10 @@ impl ApplicationHandler for PhosphorApp {
                 }
 
                 // Handle scene UI signals
-                let save_scene: Option<String> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("save_scene"))
-                });
+                let save_scene: Option<String> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("save_scene")));
                 if let Some(name) = save_scene {
                     let is_new = !app.scene_store.scenes.iter().any(|(n, _)| n == &name);
                     if is_new {
@@ -871,37 +967,42 @@ impl ApplicationHandler for PhosphorApp {
                         log::error!("Failed to save scene: {e}");
                     }
                 }
-                let load_scene_idx: Option<usize> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("load_scene"))
-                });
+                let load_scene_idx: Option<usize> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("load_scene")));
                 if let Some(idx) = load_scene_idx {
                     app.load_scene(idx);
                 }
-                let delete_scene: Option<usize> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("delete_scene"))
-                });
+                let delete_scene: Option<usize> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("delete_scene")));
                 if let Some(idx) = delete_scene {
                     if let Err(e) = app.scene_store.delete(idx) {
                         log::error!("Failed to delete scene: {e}");
                     }
                 }
-                let scene_go_next: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("scene_go_next"))
-                });
+                let scene_go_next: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("scene_go_next")));
                 if scene_go_next.is_some() {
                     let event = app.timeline.go_next();
                     app.process_timeline_event(event);
                 }
-                let scene_go_prev: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("scene_go_prev"))
-                });
+                let scene_go_prev: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("scene_go_prev")));
                 if scene_go_prev.is_some() {
                     let event = app.timeline.go_prev();
                     app.process_timeline_event(event);
                 }
-                let scene_toggle_play: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("scene_toggle_play"))
-                });
+                let scene_toggle_play: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("scene_toggle_play")));
                 if scene_toggle_play.is_some() {
                     if app.timeline.active {
                         app.timeline.stop();
@@ -910,13 +1011,17 @@ impl ApplicationHandler for PhosphorApp {
                         app.process_timeline_event(event);
                     }
                 }
-                let add_cue: Option<String> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("scene_add_cue"))
-                });
+                let add_cue: Option<String> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("scene_add_cue")));
                 let mut scene_dirty = false;
                 if let Some(preset_name) = add_cue {
                     // In Timer mode, default hold_secs so the timer can advance
-                    let hold_secs = if matches!(app.timeline.advance_mode, crate::scene::types::AdvanceMode::Timer) {
+                    let hold_secs = if matches!(
+                        app.timeline.advance_mode,
+                        crate::scene::types::AdvanceMode::Timer
+                    ) {
                         Some(4.0)
                     } else {
                         None
@@ -933,23 +1038,26 @@ impl ApplicationHandler for PhosphorApp {
                     app.timeline.cues.push(cue);
                     scene_dirty = true;
                 }
-                let scene_jump: Option<usize> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("scene_jump_to_cue"))
-                });
+                let scene_jump: Option<usize> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("scene_jump_to_cue")));
                 if let Some(cue_idx) = scene_jump {
                     let event = app.timeline.go_to_cue(cue_idx);
                     app.process_timeline_event(event);
                 }
-                let scene_loop: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("scene_set_loop"))
-                });
+                let scene_loop: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_loop")));
                 if let Some(loop_mode) = scene_loop {
                     app.timeline.loop_mode = loop_mode;
                     scene_dirty = true;
                 }
-                let scene_remove_cue: Option<usize> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("scene_remove_cue"))
-                });
+                let scene_remove_cue: Option<usize> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("scene_remove_cue")));
                 if let Some(cue_idx) = scene_remove_cue {
                     if cue_idx < app.timeline.cues.len() {
                         app.timeline.cues.remove(cue_idx);
@@ -957,10 +1065,10 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
                 // Per-cue transition type
-                let set_cue_transition: Option<(usize, crate::scene::types::TransitionType)> =
-                    app.egui_overlay.context().data_mut(|d| {
-                        d.remove_temp(egui::Id::new("scene_set_cue_transition"))
-                    });
+                let set_cue_transition: Option<(usize, crate::scene::types::TransitionType)> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_cue_transition")));
                 if let Some((idx, tt)) = set_cue_transition {
                     if let Some(cue) = app.timeline.cues.get_mut(idx) {
                         cue.transition = tt;
@@ -968,10 +1076,10 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
                 // Per-cue transition duration
-                let set_cue_dur: Option<(usize, f32)> =
-                    app.egui_overlay.context().data_mut(|d| {
-                        d.remove_temp(egui::Id::new("scene_set_cue_transition_secs"))
-                    });
+                let set_cue_dur: Option<(usize, f32)> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_cue_transition_secs")));
                 if let Some((idx, secs)) = set_cue_dur {
                     if let Some(cue) = app.timeline.cues.get_mut(idx) {
                         cue.transition_secs = secs;
@@ -979,9 +1087,10 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
                 // Advance mode
-                let set_advance: Option<u32> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("scene_set_advance_mode"))
-                });
+                let set_advance: Option<u32> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_advance_mode")));
                 if let Some(mode_id) = set_advance {
                     app.timeline.advance_mode = match mode_id {
                         1 => {
@@ -999,19 +1108,24 @@ impl ApplicationHandler for PhosphorApp {
                     scene_dirty = true;
                 }
                 // Beats per cue (BeatSync)
-                let set_bpc: Option<u32> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("scene_set_beats_per_cue"))
-                });
+                let set_bpc: Option<u32> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_beats_per_cue")));
                 if let Some(bpc) = set_bpc {
-                    if let crate::scene::types::AdvanceMode::BeatSync { ref mut beats_per_cue } = app.timeline.advance_mode {
+                    if let crate::scene::types::AdvanceMode::BeatSync {
+                        ref mut beats_per_cue,
+                    } = app.timeline.advance_mode
+                    {
                         *beats_per_cue = bpc;
                         scene_dirty = true;
                     }
                 }
                 // Per-cue hold seconds (Timer mode)
-                let set_hold: Option<(usize, f32)> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("scene_set_cue_hold_secs"))
-                });
+                let set_hold: Option<(usize, f32)> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_cue_hold_secs")));
                 if let Some((idx, hold)) = set_hold {
                     if let Some(cue) = app.timeline.cues.get_mut(idx) {
                         cue.hold_secs = Some(hold);
@@ -1027,11 +1141,12 @@ impl ApplicationHandler for PhosphorApp {
                 // Handle obstacle panel signals
                 {
                     use crate::ui::panels::obstacle_panel::ObstacleCommand;
-                    let obstacle_cmd: Option<ObstacleCommand> =
-                        app.egui_overlay.context().data_mut(|d| {
-                            d.remove_temp(egui::Id::new("obstacle_cmd"))
-                        });
-                    if let Some(cmd) = obstacle_cmd.filter(|c| !matches!(c, ObstacleCommand::None)) {
+                    let obstacle_cmd: Option<ObstacleCommand> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("obstacle_cmd")));
+                    if let Some(cmd) = obstacle_cmd.filter(|c| !matches!(c, ObstacleCommand::None))
+                    {
                         if let Some(layer) = app.layer_stack.active_mut() {
                             if let Some(e) = layer.as_effect_mut() {
                                 if let Some(ps) = &mut e.pass_executor.particle_system {
@@ -1057,7 +1172,13 @@ impl ApplicationHandler for PhosphorApp {
                                                     .name("obstacle-dialog".into())
                                                     .spawn(move || {
                                                         let dialog = rfd::FileDialog::new()
-                                                            .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp"]);
+                                                            .add_filter(
+                                                                "Images",
+                                                                &[
+                                                                    "png", "jpg", "jpeg", "webp",
+                                                                    "bmp",
+                                                                ],
+                                                            );
                                                         if let Some(path) = dialog.pick_file() {
                                                             let _ = tx.send(path);
                                                         }
@@ -1073,7 +1194,8 @@ impl ApplicationHandler for PhosphorApp {
                                                 std::thread::Builder::new()
                                                     .name("obstacle-video-dialog".into())
                                                     .spawn(move || {
-                                                        let video_exts = crate::media::decoder::VIDEO_EXTENSIONS;
+                                                        let video_exts =
+                                                            crate::media::decoder::VIDEO_EXTENSIONS;
                                                         let dialog = rfd::FileDialog::new()
                                                             .add_filter("Video", video_exts);
                                                         if let Some(path) = dialog.pick_file() {
@@ -1088,12 +1210,17 @@ impl ApplicationHandler for PhosphorApp {
                                             #[cfg(feature = "webcam")]
                                             {
                                                 if app.webcam_capture.is_none() {
-                                                    match crate::media::webcam::WebcamCapture::start(0, Some((1280, 720))) {
+                                                    match crate::media::webcam::WebcamCapture::start(
+                                                        0,
+                                                        Some((1280, 720)),
+                                                    ) {
                                                         Ok(capture) => {
                                                             app.webcam_capture = Some(capture);
                                                         }
                                                         Err(e) => {
-                                                            log::error!("Failed to start webcam for obstacle: {e}");
+                                                            log::error!(
+                                                                "Failed to start webcam for obstacle: {e}"
+                                                            );
                                                         }
                                                     }
                                                 }
@@ -1107,7 +1234,9 @@ impl ApplicationHandler for PhosphorApp {
                                             {
                                                 // Ensure ONNX Runtime is loaded (init_from our bundled dylib)
                                                 if !crate::depth::model::ort_available() {
-                                                    log::error!("ONNX Runtime not available for depth estimation");
+                                                    log::error!(
+                                                        "ONNX Runtime not available for depth estimation"
+                                                    );
                                                 } else {
                                                     // Start webcam capture if not already running
                                                     #[cfg(feature = "webcam")]
@@ -1123,7 +1252,8 @@ impl ApplicationHandler for PhosphorApp {
                                                     }
                                                     // Start depth thread if not running
                                                     if app.depth_thread.is_none() {
-                                                        let model_path = crate::depth::model::model_path();
+                                                        let model_path =
+                                                            crate::depth::model::model_path();
                                                         match crate::depth::thread::DepthThread::start(model_path) {
                                                             Ok(dt) => {
                                                                 app.depth_thread = Some(dt);
@@ -1144,9 +1274,13 @@ impl ApplicationHandler for PhosphorApp {
                                             #[cfg(feature = "depth")]
                                             {
                                                 if app.depth_download.is_none()
-                                                    || app.depth_download.as_ref().map_or(false, |p| !p.is_downloading())
+                                                    || app
+                                                        .depth_download
+                                                        .as_ref()
+                                                        .map_or(false, |p| !p.is_downloading())
                                                 {
-                                                    app.depth_download = Some(crate::depth::model::download_model());
+                                                    app.depth_download =
+                                                        Some(crate::depth::model::download_model());
                                                     log::info!("Starting depth model download");
                                                 }
                                             }
@@ -1173,14 +1307,20 @@ impl ApplicationHandler for PhosphorApp {
                 if let Some(ref rx) = self.obstacle_dialog_rx {
                     if let Ok(path) = rx.try_recv() {
                         self.obstacle_dialog_rx = None;
-                        let ext = path.extension()
+                        let ext = path
+                            .extension()
                             .map(|e| e.to_string_lossy().to_lowercase())
                             .unwrap_or_default();
                         let is_video = {
                             #[cfg(feature = "video")]
-                            { crate::media::decoder::VIDEO_EXTENSIONS.contains(&ext.as_str()) }
+                            {
+                                crate::media::decoder::VIDEO_EXTENSIONS.contains(&ext.as_str())
+                            }
                             #[cfg(not(feature = "video"))]
-                            { let _ = &ext; false }
+                            {
+                                let _ = &ext;
+                                false
+                            }
                         };
                         if is_video {
                             #[cfg(feature = "video")]
@@ -1192,7 +1332,9 @@ impl ApplicationHandler for PhosphorApp {
                                                 let path_str = path.to_string_lossy().to_string();
                                                 if let Some(layer) = app.layer_stack.active_mut() {
                                                     if let Some(e) = layer.as_effect_mut() {
-                                                        if let Some(ps) = &mut e.pass_executor.particle_system {
+                                                        if let Some(ps) =
+                                                            &mut e.pass_executor.particle_system
+                                                        {
                                                             ps.set_obstacle_video(
                                                                 &app.gpu.device,
                                                                 &app.gpu.queue,
@@ -1204,7 +1346,9 @@ impl ApplicationHandler for PhosphorApp {
                                                     }
                                                 }
                                             }
-                                            Err(e) => log::error!("Failed to decode obstacle video: {e}"),
+                                            Err(e) => {
+                                                log::error!("Failed to decode obstacle video: {e}")
+                                            }
                                         }
                                     }
                                     Err(e) => log::error!("Failed to probe obstacle video: {e}"),
@@ -1245,9 +1389,10 @@ impl ApplicationHandler for PhosphorApp {
                 }
 
                 // Handle media layer signals
-                let add_media: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("add_media_layer"))
-                });
+                let add_media: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("add_media_layer")));
                 if add_media.is_some() && self.file_dialog_rx.is_none() {
                     let (tx, rx) = crossbeam_channel::bounded(1);
                     self.file_dialog_rx = Some(rx);
@@ -1259,9 +1404,12 @@ impl ApplicationHandler for PhosphorApp {
                             #[cfg(feature = "video")]
                             {
                                 if crate::media::video::ffmpeg_available() {
-                                    let image_exts: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp"];
+                                    let image_exts: &[&str] =
+                                        &["png", "jpg", "jpeg", "gif", "bmp", "webp"];
                                     let video_exts = crate::media::decoder::VIDEO_EXTENSIONS;
-                                    let all: Vec<&str> = image_exts.iter().copied()
+                                    let all: Vec<&str> = image_exts
+                                        .iter()
+                                        .copied()
                                         .chain(video_exts.iter().copied())
                                         .collect();
                                     dialog = dialog
@@ -1269,12 +1417,18 @@ impl ApplicationHandler for PhosphorApp {
                                         .add_filter("Images", image_exts)
                                         .add_filter("Video", video_exts);
                                 } else {
-                                    dialog = dialog.add_filter("Images", &["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
+                                    dialog = dialog.add_filter(
+                                        "Images",
+                                        &["png", "jpg", "jpeg", "gif", "bmp", "webp"],
+                                    );
                                 }
                             }
                             #[cfg(not(feature = "video"))]
                             {
-                                dialog = dialog.add_filter("Images", &["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
+                                dialog = dialog.add_filter(
+                                    "Images",
+                                    &["png", "jpg", "jpeg", "gif", "bmp", "webp"],
+                                );
                             }
                             if let Some(path) = dialog.pick_file() {
                                 let _ = tx.send(path);
@@ -1304,17 +1458,19 @@ impl ApplicationHandler for PhosphorApp {
                 // Handle webcam layer signals
                 #[cfg(feature = "webcam")]
                 {
-                    let add_webcam: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                        d.remove_temp(egui::Id::new("add_webcam_layer"))
-                    });
+                    let add_webcam: Option<bool> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("add_webcam_layer")));
                     if add_webcam.is_some() {
                         app.add_webcam_layer(0); // Default to first camera
                         app.preset_store.mark_dirty();
                     }
 
-                    let webcam_mirror: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                        d.remove_temp(egui::Id::new("webcam_mirror"))
-                    });
+                    let webcam_mirror: Option<bool> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("webcam_mirror")));
                     if let Some(mirror) = webcam_mirror {
                         if let Some(layer) = app.layer_stack.active_mut() {
                             if let Some(m) = layer.as_media_mut() {
@@ -1323,9 +1479,10 @@ impl ApplicationHandler for PhosphorApp {
                         }
                     }
 
-                    let webcam_disconnect: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                        d.remove_temp(egui::Id::new("webcam_disconnect"))
-                    });
+                    let webcam_disconnect: Option<bool> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("webcam_disconnect")));
                     if webcam_disconnect.is_some() {
                         // Stop capture and remove the active webcam layer
                         app.webcam_capture = None;
@@ -1337,9 +1494,10 @@ impl ApplicationHandler for PhosphorApp {
                 }
 
                 // Handle media transport signals
-                let play_pause: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("media_play_pause"))
-                });
+                let play_pause: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("media_play_pause")));
                 if play_pause.is_some() {
                     if let Some(layer) = app.layer_stack.active_mut() {
                         if let Some(m) = layer.as_media_mut() {
@@ -1347,9 +1505,10 @@ impl ApplicationHandler for PhosphorApp {
                         }
                     }
                 }
-                let media_loop: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("media_loop"))
-                });
+                let media_loop: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("media_loop")));
                 if let Some(looping) = media_loop {
                     if let Some(layer) = app.layer_stack.active_mut() {
                         if let Some(m) = layer.as_media_mut() {
@@ -1357,9 +1516,10 @@ impl ApplicationHandler for PhosphorApp {
                         }
                     }
                 }
-                let media_speed: Option<f32> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("media_speed"))
-                });
+                let media_speed: Option<f32> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("media_speed")));
                 if let Some(speed) = media_speed {
                     if let Some(layer) = app.layer_stack.active_mut() {
                         if let Some(m) = layer.as_media_mut() {
@@ -1367,9 +1527,10 @@ impl ApplicationHandler for PhosphorApp {
                         }
                     }
                 }
-                let media_direction: Option<u8> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("media_direction"))
-                });
+                let media_direction: Option<u8> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("media_direction")));
                 if let Some(dir) = media_direction {
                     if let Some(layer) = app.layer_stack.active_mut() {
                         if let Some(m) = layer.as_media_mut() {
@@ -1384,9 +1545,10 @@ impl ApplicationHandler for PhosphorApp {
                 }
 
                 // Handle media seek signal (video scrubber)
-                let media_seek: Option<f64> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("media_seek"))
-                });
+                let media_seek: Option<f64> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("media_seek")));
                 if let Some(secs) = media_seek {
                     if let Some(layer) = app.layer_stack.active_mut() {
                         if let Some(m) = layer.as_media_mut() {
@@ -1398,27 +1560,52 @@ impl ApplicationHandler for PhosphorApp {
                 // Handle particle panel signals
                 {
                     let ctx = app.egui_overlay.context();
-                    let emit_rate: Option<f32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_emit_rate")));
-                    let burst: Option<u32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_burst")));
-                    let lifetime: Option<f32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_lifetime")));
-                    let speed: Option<f32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_speed")));
-                    let size: Option<f32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_size")));
-                    let drag: Option<f32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_drag")));
+                    let emit_rate: Option<f32> =
+                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_emit_rate")));
+                    let burst: Option<u32> =
+                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_burst")));
+                    let lifetime: Option<f32> =
+                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_lifetime")));
+                    let speed: Option<f32> =
+                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_speed")));
+                    let size: Option<f32> =
+                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_size")));
+                    let drag: Option<f32> =
+                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_drag")));
 
-                    let mut particle_save_info: Option<(usize, gpu::particle::types::ParticleDef)> = None;
-                    if emit_rate.is_some() || burst.is_some() || lifetime.is_some()
-                        || speed.is_some() || size.is_some() || drag.is_some()
+                    let mut particle_save_info: Option<(usize, gpu::particle::types::ParticleDef)> =
+                        None;
+                    if emit_rate.is_some()
+                        || burst.is_some()
+                        || lifetime.is_some()
+                        || speed.is_some()
+                        || size.is_some()
+                        || drag.is_some()
                     {
                         if let Some(layer) = app.layer_stack.active_mut() {
                             if let Some(effect) = layer.as_effect_mut() {
                                 let eidx = effect.effect_index;
                                 if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
-                                    if let Some(v) = emit_rate { ps.emit_rate = v; ps.def.emit_rate = v; }
-                                    if let Some(v) = burst { ps.burst_on_beat = v; ps.def.burst_on_beat = v; }
-                                    if let Some(v) = lifetime { ps.def.lifetime = v; }
-                                    if let Some(v) = speed { ps.def.initial_speed = v; }
-                                    if let Some(v) = size { ps.def.initial_size = v; }
-                                    if let Some(v) = drag { ps.def.drag = v; }
+                                    if let Some(v) = emit_rate {
+                                        ps.emit_rate = v;
+                                        ps.def.emit_rate = v;
+                                    }
+                                    if let Some(v) = burst {
+                                        ps.burst_on_beat = v;
+                                        ps.def.burst_on_beat = v;
+                                    }
+                                    if let Some(v) = lifetime {
+                                        ps.def.lifetime = v;
+                                    }
+                                    if let Some(v) = speed {
+                                        ps.def.initial_speed = v;
+                                    }
+                                    if let Some(v) = size {
+                                        ps.def.initial_size = v;
+                                    }
+                                    if let Some(v) = drag {
+                                        ps.def.drag = v;
+                                    }
                                     if let Some(idx) = eidx {
                                         particle_save_info = Some((idx, ps.def.clone()));
                                     }
@@ -1512,18 +1699,14 @@ impl ApplicationHandler for PhosphorApp {
                     // Video transport controls
                     #[cfg(feature = "video")]
                     {
-                        let playing: Option<bool> = ctx.data_mut(|d| {
-                            d.remove_temp(egui::Id::new("particle_video_playing"))
-                        });
-                        let looping: Option<bool> = ctx.data_mut(|d| {
-                            d.remove_temp(egui::Id::new("particle_video_looping"))
-                        });
-                        let speed: Option<f32> = ctx.data_mut(|d| {
-                            d.remove_temp(egui::Id::new("particle_video_speed"))
-                        });
-                        let seek: Option<f64> = ctx.data_mut(|d| {
-                            d.remove_temp(egui::Id::new("particle_video_seek"))
-                        });
+                        let playing: Option<bool> = ctx
+                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_video_playing")));
+                        let looping: Option<bool> = ctx
+                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_video_looping")));
+                        let speed: Option<f32> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_video_speed")));
+                        let seek: Option<f64> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_video_seek")));
                         if playing.is_some()
                             || looping.is_some()
                             || speed.is_some()
@@ -1531,8 +1714,7 @@ impl ApplicationHandler for PhosphorApp {
                         {
                             if let Some(layer) = app.layer_stack.active_mut() {
                                 if let Some(effect) = layer.as_effect_mut() {
-                                    if let Some(ps) =
-                                        effect.pass_executor.particle_system.as_mut()
+                                    if let Some(ps) = effect.pass_executor.particle_system.as_mut()
                                     {
                                         if let crate::gpu::particle::ParticleImageSource::Video {
                                             playing: ref mut p,
@@ -1604,7 +1786,9 @@ impl ApplicationHandler for PhosphorApp {
                                             }
                                             log::info!(
                                                 "Loaded particle image source: {} ({}x{})",
-                                                path, width, height
+                                                path,
+                                                width,
+                                                height
                                             );
                                         }
                                         crate::gpu::particle::ParticleSourceResult::Animated {
@@ -1636,7 +1820,10 @@ impl ApplicationHandler for PhosphorApp {
                                                         ps.max_particles,
                                                     );
                                                     if !aux.is_empty() {
-                                                        ps.update_aux_in_place(&app.gpu.queue, &aux);
+                                                        ps.update_aux_in_place(
+                                                            &app.gpu.queue,
+                                                            &aux,
+                                                        );
                                                         ps.store_current_aux(aux);
                                                         ps.has_aux_data = true;
                                                     }
@@ -1659,17 +1846,19 @@ impl ApplicationHandler for PhosphorApp {
                 }
 
                 // Handle layer UI signals
-                let add_layer: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("add_layer"))
-                });
+                let add_layer: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("add_layer")));
                 if add_layer.is_some() {
                     app.add_layer();
                     app.preset_store.mark_dirty();
                 }
 
-                let remove_layer: Option<usize> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("remove_layer"))
-                });
+                let remove_layer: Option<usize> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("remove_layer")));
                 if let Some(idx) = remove_layer {
                     app.layer_stack.remove_layer(idx);
                     app.sync_active_layer();
@@ -1679,20 +1868,24 @@ impl ApplicationHandler for PhosphorApp {
                 }
 
                 // Handle clear all layers
-                let clear_all: Option<bool> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("clear_all_layers"))
-                });
+                let clear_all: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("clear_all_layers")));
                 if clear_all.is_some() {
                     #[cfg(feature = "webcam")]
-                    { app.webcam_capture = None; }
+                    {
+                        app.webcam_capture = None;
+                    }
                     app.clear_all_layers();
                     app.preset_store.mark_dirty();
                 }
 
                 // Handle layer rename
-                let layer_rename: Option<(usize, Option<String>)> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("layer_rename"))
-                });
+                let layer_rename: Option<(usize, Option<String>)> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("layer_rename")));
                 if let Some((idx, new_name)) = layer_rename {
                     if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
                         layer.custom_name = new_name;
@@ -1700,9 +1893,10 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
 
-                let select_layer: Option<usize> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("select_layer"))
-                });
+                let select_layer: Option<usize> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("select_layer")));
                 if let Some(idx) = select_layer {
                     if idx < app.layer_stack.layers.len() {
                         app.layer_stack.active_layer = idx;
@@ -1711,9 +1905,10 @@ impl ApplicationHandler for PhosphorApp {
                 }
 
                 // Handle lock/pin toggles
-                let toggle_lock: Option<(usize, bool)> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("layer_toggle_lock"))
-                });
+                let toggle_lock: Option<(usize, bool)> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("layer_toggle_lock")));
                 if let Some((idx, locked)) = toggle_lock {
                     if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
                         layer.locked = locked;
@@ -1721,9 +1916,10 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
 
-                let toggle_pin: Option<(usize, bool)> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("layer_toggle_pin"))
-                });
+                let toggle_pin: Option<(usize, bool)> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("layer_toggle_pin")));
                 if let Some((idx, pinned)) = toggle_pin {
                     if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
                         layer.pinned = pinned;
@@ -1731,9 +1927,10 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
 
-                let layer_blend: Option<u32> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("layer_blend"))
-                });
+                let layer_blend: Option<u32> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("layer_blend")));
                 if let Some(mode_u32) = layer_blend {
                     if let Some(layer) = app.layer_stack.active_mut() {
                         if !layer.locked {
@@ -1743,9 +1940,10 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
 
-                let layer_opacity: Option<f32> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("layer_opacity"))
-                });
+                let layer_opacity: Option<f32> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("layer_opacity")));
                 if let Some(opacity) = layer_opacity {
                     if let Some(layer) = app.layer_stack.active_mut() {
                         if !layer.locked {
@@ -1755,18 +1953,20 @@ impl ApplicationHandler for PhosphorApp {
                     }
                 }
 
-                let layer_move: Option<(usize, usize)> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("layer_move"))
-                });
+                let layer_move: Option<(usize, usize)> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("layer_move")));
                 if let Some((from, to)) = layer_move {
                     app.layer_stack.move_layer(from, to);
                     app.sync_active_layer();
                     app.preset_store.mark_dirty();
                 }
 
-                let toggle_enable: Option<(usize, bool)> = app.egui_overlay.context().data_mut(|d| {
-                    d.remove_temp(egui::Id::new("layer_toggle_enable"))
-                });
+                let toggle_enable: Option<(usize, bool)> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("layer_toggle_enable")));
                 if let Some((idx, enabled)) = toggle_enable {
                     if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
                         if !layer.locked {
@@ -1786,7 +1986,8 @@ impl ApplicationHandler for PhosphorApp {
                         if let Some(eidx) = layer.effect_index() {
                             if let Some(effect) = app.effect_loader.effects.get(eidx) {
                                 if !EffectLoader::is_builtin(effect) {
-                                    self.param_save_pending = Some((eidx, std::time::Instant::now()));
+                                    self.param_save_pending =
+                                        Some((eidx, std::time::Instant::now()));
                                 }
                             }
                         }
@@ -1798,15 +1999,18 @@ impl ApplicationHandler for PhosphorApp {
                     if last_change.elapsed() >= std::time::Duration::from_millis(500) {
                         self.param_save_pending = None;
                         // Gather current values from the layer using this effect
-                        let values: Option<std::collections::HashMap<String, crate::params::types::ParamValue>> =
-                            app.layer_stack.layers.iter().find_map(|l| {
-                                if l.effect_index() == Some(eidx) {
-                                    Some(l.param_store.values.clone())
-                                } else {
-                                    None
-                                }
-                            });
-                        if let (Some(values), Some(effect)) = (values, app.effect_loader.effects.get_mut(eidx)) {
+                        let values: Option<
+                            std::collections::HashMap<String, crate::params::types::ParamValue>,
+                        > = app.layer_stack.layers.iter().find_map(|l| {
+                            if l.effect_index() == Some(eidx) {
+                                Some(l.param_store.values.clone())
+                            } else {
+                                None
+                            }
+                        });
+                        if let (Some(values), Some(effect)) =
+                            (values, app.effect_loader.effects.get_mut(eidx))
+                        {
                             for input in &mut effect.inputs {
                                 if let Some(val) = values.get(input.name()) {
                                     input.set_default(val);
@@ -1817,9 +2021,12 @@ impl ApplicationHandler for PhosphorApp {
                                     let _ = std::fs::write(path, &json);
                                     // Update editor paired content if showing this .pfx
                                     if app.shader_editor.open {
-                                        let pfx_canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+                                        let pfx_canonical =
+                                            path.canonicalize().unwrap_or_else(|_| path.clone());
                                         if let Some(ref paired) = app.shader_editor.paired_path {
-                                            let paired_canonical = paired.canonicalize().unwrap_or_else(|_| paired.clone());
+                                            let paired_canonical = paired
+                                                .canonicalize()
+                                                .unwrap_or_else(|_| paired.clone());
                                             if paired_canonical == pfx_canonical {
                                                 app.shader_editor.paired_content = json.clone();
                                                 app.shader_editor.paired_disk_content = json;
@@ -1834,8 +2041,8 @@ impl ApplicationHandler for PhosphorApp {
 
                 // Handle MIDI + OSC triggers
                 let mut triggers: Vec<_> = app.pending_midi_triggers.drain(..).collect();
-                triggers.extend(app.pending_osc_triggers.drain(..));
-                triggers.extend(app.pending_web_triggers.drain(..));
+                triggers.append(&mut app.pending_osc_triggers);
+                triggers.append(&mut app.pending_web_triggers);
                 for trigger in triggers {
                     use crate::midi::types::TriggerAction;
                     // Build visible (non-hidden) effect indices for cycling

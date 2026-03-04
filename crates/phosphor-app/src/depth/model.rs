@@ -1,12 +1,13 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::Arc;
 
 use anyhow::Result;
 
 const MODEL_FILENAME: &str = "midas_v21_small_256.onnx";
-const MODEL_URL: &str = "https://huggingface.co/julienkay/sentis-MiDaS/resolve/main/onnx/midas_v21_small_256.onnx";
+const MODEL_URL: &str =
+    "https://huggingface.co/julienkay/sentis-MiDaS/resolve/main/onnx/midas_v21_small_256.onnx";
 
 /// ONNX Runtime shared library filename per platform.
 #[cfg(target_os = "linux")]
@@ -44,11 +45,12 @@ pub fn ort_available() -> bool {
         let prev_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
 
-        let result = std::panic::catch_unwind(|| {
-            match ort::init_from(&lib_path) {
-                Ok(builder) => { builder.commit(); Ok(true) }
-                Err(e) => Err(format!("{e}")),
+        let result = std::panic::catch_unwind(|| match ort::init_from(&lib_path) {
+            Ok(builder) => {
+                builder.commit();
+                Ok(true)
             }
+            Err(e) => Err(format!("{e}")),
         });
 
         std::panic::set_hook(prev_hook);
@@ -67,7 +69,10 @@ pub fn ort_available() -> bool {
                 false
             }
             Err(_) => {
-                log::info!("ONNX Runtime panicked during load from {}", lib_path.display());
+                log::info!(
+                    "ONNX Runtime panicked during load from {}",
+                    lib_path.display()
+                );
                 false
             }
         }
@@ -167,7 +172,9 @@ fn download_all(progress: &DownloadProgress) -> Result<()> {
     if !lib_path.is_file() {
         log::info!("Downloading ONNX Runtime from {ORT_LIB_URL}");
         download_ort_runtime(&dir, progress)?;
-        if progress.cancel.load(Ordering::Relaxed) { return Ok(()); }
+        if progress.cancel.load(Ordering::Relaxed) {
+            return Ok(());
+        }
     }
 
     // 2. Download MiDaS model if missing (~66MB)
@@ -182,7 +189,12 @@ fn download_all(progress: &DownloadProgress) -> Result<()> {
 }
 
 /// Download a single file with progress tracking.
-fn download_file(url: &str, final_path: &std::path::Path, name: &str, progress: &DownloadProgress) -> Result<()> {
+fn download_file(
+    url: &str,
+    final_path: &std::path::Path,
+    name: &str,
+    progress: &DownloadProgress,
+) -> Result<()> {
     let tmp_path = final_path.with_extension("tmp");
 
     let response = ureq::get(url).call()?;
@@ -206,7 +218,9 @@ fn download_file(url: &str, final_path: &std::path::Path, name: &str, progress: 
         }
 
         let n = std::io::Read::read(&mut reader, &mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
 
         std::io::Write::write_all(&mut file, &buf[..n])?;
         downloaded += n as u64;
@@ -219,7 +233,11 @@ fn download_file(url: &str, final_path: &std::path::Path, name: &str, progress: 
 
     drop(file);
     std::fs::rename(&tmp_path, final_path)?;
-    log::info!("Downloaded {} ({:.1} MB)", name, downloaded as f64 / 1_048_576.0);
+    log::info!(
+        "Downloaded {} ({:.1} MB)",
+        name,
+        downloaded as f64 / 1_048_576.0
+    );
     Ok(())
 }
 
@@ -260,7 +278,8 @@ fn extract_from_tgz(archive_path: &std::path::Path, target_path: &std::path::Pat
         let mut entry = entry?;
         let entry_size = entry.header().size().unwrap_or(0);
         let path = entry.path()?.to_path_buf();
-        let file_name = path.file_name()
+        let file_name = path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
@@ -268,7 +287,12 @@ fn extract_from_tgz(archive_path: &std::path::Path, target_path: &std::path::Pat
         if file_name.starts_with(prefix) && entry_size > 1024 {
             let mut out = std::fs::File::create(target_path)?;
             std::io::copy(&mut entry, &mut out)?;
-            log::info!("Extracted {} → {} ({:.1} MB)", file_name, ORT_LIB_FILENAME, entry_size as f64 / 1_048_576.0);
+            log::info!(
+                "Extracted {} → {} ({:.1} MB)",
+                file_name,
+                ORT_LIB_FILENAME,
+                entry_size as f64 / 1_048_576.0
+            );
             return Ok(true);
         }
     }
@@ -283,16 +307,16 @@ fn extract_from_zip(archive_path: &std::path::Path, target_path: &std::path::Pat
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
-        let file_name = entry.name()
-            .rsplit('/')
-            .next()
-            .unwrap_or("")
-            .to_string();
+        let file_name = entry.name().rsplit('/').next().unwrap_or("").to_string();
 
         if file_name == ORT_LIB_FILENAME && entry.size() > 1024 {
             let mut out = std::fs::File::create(target_path)?;
             std::io::copy(&mut entry, &mut out)?;
-            log::info!("Extracted {} ({:.1} MB)", ORT_LIB_FILENAME, entry.size() as f64 / 1_048_576.0);
+            log::info!(
+                "Extracted {} ({:.1} MB)",
+                ORT_LIB_FILENAME,
+                entry.size() as f64 / 1_048_576.0
+            );
             return Ok(true);
         }
     }

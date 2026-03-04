@@ -150,9 +150,12 @@ pub fn draw_ndi_panel(ui: &mut Ui, info: &NdiInfo) {
     // Show output dimensions when running
     if info.running && info.output_width > 0 {
         ui.label(
-            RichText::new(format!("Output: {}x{}", info.output_width, info.output_height))
-                .size(SMALL_SIZE)
-                .color(tc.text_secondary),
+            RichText::new(format!(
+                "Output: {}x{}",
+                info.output_width, info.output_height
+            ))
+            .size(SMALL_SIZE)
+            .color(tc.text_secondary),
         );
     }
 

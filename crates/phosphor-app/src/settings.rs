@@ -80,7 +80,11 @@ mod tests {
     #[test]
     fn settings_config_all_themes_roundtrip() {
         for mode in ThemeMode::ALL {
-            let c = SettingsConfig { version: 1, theme: *mode, audio_device: None };
+            let c = SettingsConfig {
+                version: 1,
+                theme: *mode,
+                audio_device: None,
+            };
             let json = serde_json::to_string(&c).unwrap();
             let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
             assert_eq!(c2.theme, *mode);
@@ -89,7 +93,11 @@ mod tests {
 
     #[test]
     fn settings_config_non_default_theme_persists() {
-        let c = SettingsConfig { version: 1, theme: ThemeMode::HighContrast, audio_device: None };
+        let c = SettingsConfig {
+            version: 1,
+            theme: ThemeMode::HighContrast,
+            audio_device: None,
+        };
         let json = serde_json::to_string(&c).unwrap();
         let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(c2.theme, ThemeMode::HighContrast);

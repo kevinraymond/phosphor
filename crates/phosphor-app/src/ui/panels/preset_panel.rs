@@ -10,9 +10,9 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
     let tc = theme_colors(ui.ctx());
     // Read async loading state
     let loading_index: Option<usize> = ui.ctx().data_mut(|d| {
-        d.get_temp::<crate::preset::loader::PresetLoadingState>(
-            egui::Id::new("preset_loading_state"),
-        )
+        d.get_temp::<crate::preset::loader::PresetLoadingState>(egui::Id::new(
+            "preset_loading_state",
+        ))
         .and_then(|s| match s {
             crate::preset::loader::PresetLoadingState::Loading { preset_index, .. } => {
                 Some(preset_index)
@@ -46,10 +46,7 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
                             .clicked()
                         {
                             ui.ctx().data_mut(|d| {
-                                d.insert_temp(
-                                    egui::Id::new("save_preset"),
-                                    current_name.clone(),
-                                );
+                                d.insert_temp(egui::Id::new("save_preset"), current_name.clone());
                             });
                         }
                         if ui
@@ -58,10 +55,7 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
                             .clicked()
                         {
                             ui.ctx().data_mut(|d| {
-                                d.insert_temp(
-                                    egui::Id::new("pending_preset"),
-                                    current_idx,
-                                );
+                                d.insert_temp(egui::Id::new("pending_preset"), current_idx);
                             });
                         }
                     });
@@ -102,7 +96,11 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
         .data_mut(|d| d.insert_temp(egui::Id::new("preset_save_name"), name));
 
     if store.presets.is_empty() {
-        ui.label(RichText::new("No presets").size(SMALL_SIZE).color(tc.text_secondary));
+        ui.label(
+            RichText::new("No presets")
+                .size(SMALL_SIZE)
+                .color(tc.text_secondary),
+        );
         return;
     }
 
@@ -139,7 +137,9 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
     // Built-in section
     if !builtin.is_empty() {
         egui::CollapsingHeader::new(
-            RichText::new("Built-in").size(SMALL_SIZE).color(tc.text_secondary),
+            RichText::new("Built-in")
+                .size(SMALL_SIZE)
+                .color(tc.text_secondary),
         )
         .id_salt("preset_builtin")
         .default_open(true)
@@ -162,13 +162,19 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
 
     // User section
     egui::CollapsingHeader::new(
-        RichText::new("User").size(SMALL_SIZE).color(tc.text_secondary),
+        RichText::new("User")
+            .size(SMALL_SIZE)
+            .color(tc.text_secondary),
     )
     .id_salt("preset_user")
     .default_open(true)
     .show(ui, |ui| {
         if user.is_empty() {
-            ui.label(RichText::new("(none)").size(SMALL_SIZE).color(tc.text_secondary));
+            ui.label(
+                RichText::new("(none)")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
         } else {
             draw_preset_grid(
                 ui,
@@ -205,9 +211,7 @@ pub fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = gap;
 
-        let current_is_builtin = store
-            .current_preset
-            .map_or(false, |i| store.is_builtin(i));
+        let current_is_builtin = store.current_preset.map_or(false, |i| store.is_builtin(i));
 
         if current_is_builtin {
             if ui
@@ -282,8 +286,8 @@ fn draw_preset_grid(
             for &(i, (pname, _)) in row {
                 let is_current = store.current_preset == Some(i);
                 let is_loading = loading_index == Some(i);
-                let is_armed = !is_builtin_section
-                    && pending_delete.map_or(false, |(idx, _)| idx == i);
+                let is_armed =
+                    !is_builtin_section && pending_delete.map_or(false, |(idx, _)| idx == i);
 
                 let (fill, text_color, stroke) = if is_armed {
                     (warning_color, Color32::WHITE, Stroke::NONE)
@@ -291,13 +295,27 @@ fn draw_preset_grid(
                     // Pulsing border for loading preset
                     let pulse = ((now * 3.0).sin() * 0.5 + 0.5) as f32;
                     let border_alpha = (pulse * 200.0 + 55.0) as u8;
-                    (tc.card_bg, tc.accent, Stroke::new(2.0, Color32::from_rgba_unmultiplied(
-                        tc.accent.r(), tc.accent.g(), tc.accent.b(), border_alpha,
-                    )))
+                    (
+                        tc.card_bg,
+                        tc.accent,
+                        Stroke::new(
+                            2.0,
+                            Color32::from_rgba_unmultiplied(
+                                tc.accent.r(),
+                                tc.accent.g(),
+                                tc.accent.b(),
+                                border_alpha,
+                            ),
+                        ),
+                    )
                 } else if is_current {
                     (tc.accent, Color32::WHITE, Stroke::NONE)
                 } else {
-                    (tc.card_bg, tc.text_primary, Stroke::new(1.0, tc.card_border))
+                    (
+                        tc.card_bg,
+                        tc.text_primary,
+                        Stroke::new(1.0, tc.card_border),
+                    )
                 };
 
                 let display_name = if is_current && store.dirty {
@@ -306,7 +324,9 @@ fn draw_preset_grid(
                     truncate_name(pname, 18)
                 };
                 let btn = egui::Button::new(
-                    RichText::new(&display_name).size(SMALL_SIZE).color(text_color),
+                    RichText::new(&display_name)
+                        .size(SMALL_SIZE)
+                        .color(text_color),
                 )
                 .fill(fill)
                 .stroke(stroke)
@@ -330,10 +350,9 @@ fn draw_preset_grid(
                         *new_pending = None;
                     } else if is_current && !store.dirty {
                         // Right-click current (clean) preset: deselect
-                        ui.ctx()
-                            .data_mut(|d| {
-                                d.insert_temp(egui::Id::new("deselect_preset"), true);
-                            });
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new("deselect_preset"), true);
+                        });
                         *new_pending = None;
                     } else {
                         // First right-click: arm for delete
@@ -344,10 +363,9 @@ fn draw_preset_grid(
                 // Right-click on built-in: deselect if current + clean
                 if is_builtin_section && response.secondary_clicked() {
                     if is_current && !store.dirty {
-                        ui.ctx()
-                            .data_mut(|d| {
-                                d.insert_temp(egui::Id::new("deselect_preset"), true);
-                            });
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new("deselect_preset"), true);
+                        });
                     }
                 }
 

@@ -300,7 +300,11 @@ impl ParticleImageSource {
             ..
         } = self
         {
-            let ms: f64 = delays_ms.iter().take(*current_frame).map(|d| *d as f64).sum();
+            let ms: f64 = delays_ms
+                .iter()
+                .take(*current_frame)
+                .map(|d| *d as f64)
+                .sum();
             return (ms + *frame_elapsed_ms) / 1000.0;
         }
         0.0
@@ -874,12 +878,16 @@ mod tests {
 
     #[test]
     fn source_transition_mismatched_lengths() {
-        let from = vec![
-            ParticleAux { home: [1.0, 2.0, 3.0, 0.0] },
-        ];
+        let from = vec![ParticleAux {
+            home: [1.0, 2.0, 3.0, 0.0],
+        }];
         let to = vec![
-            ParticleAux { home: [4.0, 5.0, 6.0, 0.0] },
-            ParticleAux { home: [7.0, 8.0, 9.0, 0.0] },
+            ParticleAux {
+                home: [4.0, 5.0, 6.0, 0.0],
+            },
+            ParticleAux {
+                home: [7.0, 8.0, 9.0, 0.0],
+            },
         ];
         let trans = SourceTransition {
             from_aux: from,

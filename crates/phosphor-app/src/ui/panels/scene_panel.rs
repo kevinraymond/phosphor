@@ -30,9 +30,10 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
     // ── Zone 1: Scene Management ──
 
     // Save row (matches preset panel pattern)
-    let mut scene_save_name: String = ui
-        .ctx()
-        .data_mut(|d| d.get_temp(egui::Id::new("scene_save_name")).unwrap_or_default());
+    let mut scene_save_name: String = ui.ctx().data_mut(|d| {
+        d.get_temp(egui::Id::new("scene_save_name"))
+            .unwrap_or_default()
+    });
 
     ui.horizontal(|ui| {
         let save_width = 44.0;
@@ -50,9 +51,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
             egui::Button::new(RichText::new("SAVE").size(SMALL_SIZE).strong()),
         );
         if save_btn.clicked()
-            || (can_save
-                && response.lost_focus()
-                && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+            || (can_save && response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
         {
             ui.ctx().data_mut(|d| {
                 d.insert_temp(
@@ -108,8 +107,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                 .outer_margin(egui::Margin::symmetric(0, 1))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        let is_armed =
-                            pending_delete.map_or(false, |(idx, _)| idx == i);
+                        let is_armed = pending_delete.map_or(false, |(idx, _)| idx == i);
 
                         // Name button
                         let display = truncate_scene_name(name, 22);
@@ -123,14 +121,14 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                                 .size(SMALL_SIZE)
                                 .color(tc.text_primary)
                         };
-                        let name_w = available_w - 20.0 - 6.0 * 2.0 - 2.0 * 2.0
+                        let name_w = available_w
+                            - 20.0
+                            - 6.0 * 2.0
+                            - 2.0 * 2.0
                             - ui.spacing().item_spacing.x;
                         let btn = egui::Button::new(label).frame(false);
                         if ui
-                            .add_sized(
-                                Vec2::new(name_w.max(40.0), MIN_INTERACT_HEIGHT),
-                                btn,
-                            )
+                            .add_sized(Vec2::new(name_w.max(40.0), MIN_INTERACT_HEIGHT), btn)
                             .on_hover_text(name)
                             .clicked()
                         {
@@ -141,35 +139,29 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
 
                         // Delete button
                         let del_text = if is_armed { "Sure?" } else { "×" };
-                        let del_color =
-                            if is_armed { tc.error } else { tc.text_secondary };
+                        let del_color = if is_armed {
+                            tc.error
+                        } else {
+                            tc.text_secondary
+                        };
                         let del_btn = egui::Button::new(
                             RichText::new(del_text).size(SMALL_SIZE).color(del_color),
                         )
                         .frame(false);
                         if ui
-                            .add_sized(
-                                Vec2::new(20.0, MIN_INTERACT_HEIGHT),
-                                del_btn,
-                            )
+                            .add_sized(Vec2::new(20.0, MIN_INTERACT_HEIGHT), del_btn)
                             .clicked()
                         {
                             if is_armed {
                                 ui.ctx().data_mut(|d| {
-                                    d.insert_temp(
-                                        egui::Id::new("delete_scene"),
-                                        i,
-                                    );
+                                    d.insert_temp(egui::Id::new("delete_scene"), i);
                                     d.remove_temp::<(usize, f64)>(egui::Id::new(
                                         "pending_delete_scene",
                                     ));
                                 });
                             } else {
                                 ui.ctx().data_mut(|d| {
-                                    d.insert_temp(
-                                        egui::Id::new("pending_delete_scene"),
-                                        (i, now),
-                                    );
+                                    d.insert_temp(egui::Id::new("pending_delete_scene"), (i, now));
                                 });
                             }
                         }
@@ -181,9 +173,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
         if let Some((_, t)) = pending_delete {
             if now - t >= 3.0 {
                 ui.ctx().data_mut(|d| {
-                    d.remove_temp::<(usize, f64)>(egui::Id::new(
-                        "pending_delete_scene",
-                    ));
+                    d.remove_temp::<(usize, f64)>(egui::Id::new("pending_delete_scene"));
                 });
             }
         }
@@ -224,37 +214,30 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                     .clicked()
                 {
                     ui.ctx().data_mut(|d| {
-                        d.insert_temp(
-                            egui::Id::new("scene_toggle_play"),
-                            true,
-                        );
+                        d.insert_temp(egui::Id::new("scene_toggle_play"), true);
                     });
                 }
             } else {
                 // Active: STOP | PREV | GO
                 ui.horizontal(|ui| {
-                    let stop_btn = egui::Button::new(
-                        RichText::new("STOP")
-                            .size(SMALL_SIZE)
-                            .color(tc.error),
-                    )
-                    .fill(Color32::TRANSPARENT)
-                    .stroke(Stroke::new(1.0, tc.error))
-                    .corner_radius(CornerRadius::same(WIDGET_ROUNDING));
+                    let stop_btn =
+                        egui::Button::new(RichText::new("STOP").size(SMALL_SIZE).color(tc.error))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(1.0, tc.error))
+                            .corner_radius(CornerRadius::same(WIDGET_ROUNDING));
                     if ui
                         .add_sized(Vec2::new(60.0, MIN_INTERACT_HEIGHT), stop_btn)
                         .clicked()
                     {
                         ui.ctx().data_mut(|d| {
-                            d.insert_temp(
-                                egui::Id::new("scene_toggle_play"),
-                                true,
-                            );
+                            d.insert_temp(egui::Id::new("scene_toggle_play"), true);
                         });
                     }
 
                     let prev_btn = egui::Button::new(
-                        RichText::new("PREV").size(SMALL_SIZE).color(tc.text_primary),
+                        RichText::new("PREV")
+                            .size(SMALL_SIZE)
+                            .color(tc.text_primary),
                     )
                     .fill(Color32::TRANSPARENT)
                     .stroke(Stroke::new(1.0, tc.card_border))
@@ -264,10 +247,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                         .clicked()
                     {
                         ui.ctx().data_mut(|d| {
-                            d.insert_temp(
-                                egui::Id::new("scene_go_prev"),
-                                true,
-                            );
+                            d.insert_temp(egui::Id::new("scene_go_prev"), true);
                         });
                     }
 
@@ -285,10 +265,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                         .clicked()
                     {
                         ui.ctx().data_mut(|d| {
-                            d.insert_temp(
-                                egui::Id::new("scene_go_next"),
-                                true,
-                            );
+                            d.insert_temp(egui::Id::new("scene_go_next"), true);
                         });
                     }
                 });
@@ -304,53 +281,40 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                     .changed()
                 {
                     ui.ctx().data_mut(|d| {
-                        d.insert_temp(
-                            egui::Id::new("scene_set_loop"),
-                            loop_mode,
-                        );
+                        d.insert_temp(egui::Id::new("scene_set_loop"), loop_mode);
                     });
                 }
 
-                ui.with_layout(
-                    egui::Layout::right_to_left(egui::Align::Center),
-                    |ui| {
-                        let advance_mode = &tl.advance_mode;
-                        let mode_id: u32 = match advance_mode {
-                            AdvanceMode::Manual => 0,
-                            AdvanceMode::Timer => 1,
-                            AdvanceMode::BeatSync { .. } => 2,
-                        };
-                        let mode_names = ["Manual", "Timer", "Beat Sync"];
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let advance_mode = &tl.advance_mode;
+                    let mode_id: u32 = match advance_mode {
+                        AdvanceMode::Manual => 0,
+                        AdvanceMode::Timer => 1,
+                        AdvanceMode::BeatSync { .. } => 2,
+                    };
+                    let mode_names = ["Manual", "Timer", "Beat Sync"];
 
-                        let mut selected = mode_id;
-                        egui::ComboBox::from_id_salt("advance_mode_combo")
-                            .width(80.0)
-                            .selected_text(mode_names[selected as usize])
-                            .show_ui(ui, |ui| {
-                                for (i, name) in mode_names.iter().enumerate() {
-                                    ui.selectable_value(
-                                        &mut selected,
-                                        i as u32,
-                                        *name,
-                                    );
-                                }
-                            });
-                        if selected != mode_id {
-                            ui.ctx().data_mut(|d| {
-                                d.insert_temp(
-                                    egui::Id::new("scene_set_advance_mode"),
-                                    selected,
-                                );
-                            });
-                        }
+                    let mut selected = mode_id;
+                    egui::ComboBox::from_id_salt("advance_mode_combo")
+                        .width(80.0)
+                        .selected_text(mode_names[selected as usize])
+                        .show_ui(ui, |ui| {
+                            for (i, name) in mode_names.iter().enumerate() {
+                                ui.selectable_value(&mut selected, i as u32, *name);
+                            }
+                        });
+                    if selected != mode_id {
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new("scene_set_advance_mode"), selected);
+                        });
+                    }
 
-                        ui.label(
-                            RichText::new("Advance:")
-                                .size(SMALL_SIZE)
-                                .color(tc.text_secondary),
-                        );
-                    },
-                );
+                    ui.label(
+                        RichText::new("Advance:")
+                            .size(SMALL_SIZE)
+                            .color(tc.text_secondary),
+                    );
+                });
             });
 
             // BeatSync: beats_per_cue control
@@ -365,16 +329,11 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                     let mut bpc: u32 = ui
                         .ctx()
                         .data_mut(|d| d.get_temp(bpc_id).unwrap_or(*beats_per_cue));
-                    let drag = ui.add(
-                        egui::DragValue::new(&mut bpc).range(1..=64).speed(0.1),
-                    );
+                    let drag = ui.add(egui::DragValue::new(&mut bpc).range(1..=64).speed(0.1));
                     if drag.changed() {
                         ui.ctx().data_mut(|d| {
                             d.insert_temp(bpc_id, bpc);
-                            d.insert_temp(
-                                egui::Id::new("scene_set_beats_per_cue"),
-                                bpc,
-                            );
+                            d.insert_temp(egui::Id::new("scene_set_beats_per_cue"), bpc);
                         });
                     }
                 });
@@ -409,21 +368,15 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                     );
                 });
         } else {
-            let current_cue =
-                info.timeline.as_ref().map(|t| t.current_cue).unwrap_or(0);
-            let active = info
-                .timeline
-                .as_ref()
-                .map(|t| t.active)
-                .unwrap_or(false);
-            let transitioning_to =
-                info.timeline.as_ref().and_then(|t| {
-                    if let TimelineInfoState::Transitioning { to, .. } = &t.state {
-                        Some(*to)
-                    } else {
-                        None
-                    }
-                });
+            let current_cue = info.timeline.as_ref().map(|t| t.current_cue).unwrap_or(0);
+            let active = info.timeline.as_ref().map(|t| t.active).unwrap_or(false);
+            let transitioning_to = info.timeline.as_ref().and_then(|t| {
+                if let TimelineInfoState::Transitioning { to, .. } = &t.state {
+                    Some(*to)
+                } else {
+                    None
+                }
+            });
 
             for (idx, cue) in info.cue_list.iter().enumerate() {
                 let is_current = active && idx == current_cue;
@@ -471,40 +424,33 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                             );
 
                             // Click preset name to jump
-                            let name_color =
-                                if is_current { tc.accent } else { tc.text_primary };
-                            let display =
-                                truncate_scene_name(&cue.preset_name, 22);
+                            let name_color = if is_current {
+                                tc.accent
+                            } else {
+                                tc.text_primary
+                            };
+                            let display = truncate_scene_name(&cue.preset_name, 22);
                             let name_btn = egui::Button::new(
-                                RichText::new(&display)
-                                    .size(SMALL_SIZE)
-                                    .color(name_color),
+                                RichText::new(&display).size(SMALL_SIZE).color(name_color),
                             )
                             .frame(false);
                             // Calculate remaining width for name
                             // right side: transition(48) + duration(38 if non-Cut) + delete(16) + spacing
-                            let right_w = 48.0
-                                + if cue.transition != TransitionType::Cut {
+                            let right_w =
+                                48.0 + if cue.transition != TransitionType::Cut {
                                     38.0
                                 } else {
                                     0.0
-                                }
-                                + 16.0
-                                + ui.spacing().item_spacing.x * 3.0;
+                                } + 16.0
+                                    + ui.spacing().item_spacing.x * 3.0;
                             let name_w = (ui.available_width() - right_w).max(30.0);
                             if ui
-                                .add_sized(
-                                    Vec2::new(name_w, MIN_INTERACT_HEIGHT),
-                                    name_btn,
-                                )
+                                .add_sized(Vec2::new(name_w, MIN_INTERACT_HEIGHT), name_btn)
                                 .on_hover_text(&cue.preset_name)
                                 .clicked()
                             {
                                 ui.ctx().data_mut(|d| {
-                                    d.insert_temp(
-                                        egui::Id::new("scene_jump_to_cue"),
-                                        idx,
-                                    );
+                                    d.insert_temp(egui::Id::new("scene_jump_to_cue"), idx);
                                 });
                             }
 
@@ -521,35 +467,20 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                             )
                             .fill(Color32::TRANSPARENT)
                             .stroke(Stroke::new(1.0, trans_color))
-                            .corner_radius(CornerRadius::same(
-                                WIDGET_ROUNDING,
-                            ));
+                            .corner_radius(CornerRadius::same(WIDGET_ROUNDING));
                             if ui
-                                .add_sized(
-                                    Vec2::new(48.0, MIN_INTERACT_HEIGHT),
-                                    trans_btn,
-                                )
-                                .on_hover_text(
-                                    "Transition IN to this cue (click to cycle)",
-                                )
+                                .add_sized(Vec2::new(48.0, MIN_INTERACT_HEIGHT), trans_btn)
+                                .on_hover_text("Transition IN to this cue (click to cycle)")
                                 .clicked()
                             {
                                 let next = match cue.transition {
-                                    TransitionType::Cut => {
-                                        TransitionType::Dissolve
-                                    }
-                                    TransitionType::Dissolve => {
-                                        TransitionType::ParamMorph
-                                    }
-                                    TransitionType::ParamMorph => {
-                                        TransitionType::Cut
-                                    }
+                                    TransitionType::Cut => TransitionType::Dissolve,
+                                    TransitionType::Dissolve => TransitionType::ParamMorph,
+                                    TransitionType::ParamMorph => TransitionType::Cut,
                                 };
                                 ui.ctx().data_mut(|d| {
                                     d.insert_temp(
-                                        egui::Id::new(
-                                            "scene_set_cue_transition",
-                                        ),
+                                        egui::Id::new("scene_set_cue_transition"),
                                         (idx, next),
                                     );
                                 });
@@ -557,11 +488,9 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
 
                             // Editable transition duration (only for non-Cut)
                             if cue.transition != TransitionType::Cut {
-                                let dur_id =
-                                    egui::Id::new("cue_dur").with(idx);
+                                let dur_id = egui::Id::new("cue_dur").with(idx);
                                 let mut dur: f32 = ui.ctx().data_mut(|d| {
-                                    d.get_temp(dur_id)
-                                        .unwrap_or(cue.transition_secs)
+                                    d.get_temp(dur_id).unwrap_or(cue.transition_secs)
                                 });
                                 let drag = ui.add_sized(
                                     Vec2::new(38.0, MIN_INTERACT_HEIGHT),
@@ -575,9 +504,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                                     ui.ctx().data_mut(|d| {
                                         d.insert_temp(dur_id, dur);
                                         d.insert_temp(
-                                            egui::Id::new(
-                                                "scene_set_cue_transition_secs",
-                                            ),
+                                            egui::Id::new("scene_set_cue_transition_secs"),
                                             (idx, dur),
                                         );
                                     });
@@ -586,32 +513,24 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
 
                             // Remove cue button
                             let del_btn = egui::Button::new(
-                                RichText::new("×")
-                                    .size(SMALL_SIZE)
-                                    .color(tc.text_secondary),
+                                RichText::new("×").size(SMALL_SIZE).color(tc.text_secondary),
                             )
                             .frame(false);
                             if ui
-                                .add_sized(
-                                    Vec2::new(16.0, MIN_INTERACT_HEIGHT),
-                                    del_btn,
-                                )
+                                .add_sized(Vec2::new(16.0, MIN_INTERACT_HEIGHT), del_btn)
                                 .clicked()
                             {
                                 ui.ctx().data_mut(|d| {
-                                    d.insert_temp(
-                                        egui::Id::new("scene_remove_cue"),
-                                        idx,
-                                    );
+                                    d.insert_temp(egui::Id::new("scene_remove_cue"), idx);
                                 });
                             }
                         });
 
                         // Row 2: Per-cue hold time (shown in Timer mode)
-                        let is_timer =
-                            info.timeline.as_ref().map_or(false, |t| {
-                                matches!(t.advance_mode, AdvanceMode::Timer)
-                            });
+                        let is_timer = info
+                            .timeline
+                            .as_ref()
+                            .map_or(false, |t| matches!(t.advance_mode, AdvanceMode::Timer));
                         if is_timer {
                             ui.horizontal(|ui| {
                                 ui.add_space(18.0);
@@ -620,11 +539,9 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                                         .size(SMALL_SIZE)
                                         .color(tc.text_secondary),
                                 );
-                                let hold_id =
-                                    egui::Id::new("cue_hold").with(idx);
+                                let hold_id = egui::Id::new("cue_hold").with(idx);
                                 let mut hold: f32 = ui.ctx().data_mut(|d| {
-                                    d.get_temp(hold_id)
-                                        .unwrap_or(cue.hold_secs.unwrap_or(4.0))
+                                    d.get_temp(hold_id).unwrap_or(cue.hold_secs.unwrap_or(4.0))
                                 });
                                 let drag = ui.add(
                                     egui::DragValue::new(&mut hold)
@@ -637,9 +554,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                                     ui.ctx().data_mut(|d| {
                                         d.insert_temp(hold_id, hold);
                                         d.insert_temp(
-                                            egui::Id::new(
-                                                "scene_set_cue_hold_secs",
-                                            ),
+                                            egui::Id::new("scene_set_cue_hold_secs"),
                                             (idx, hold),
                                         );
                                     });
@@ -655,16 +570,12 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
         if !info.preset_names.is_empty() {
             let mut add_cue_preset: usize = ui
                 .ctx()
-                .data_mut(|d| {
-                    d.get_temp(egui::Id::new("add_cue_preset_idx"))
-                        .unwrap_or(0)
-                });
+                .data_mut(|d| d.get_temp(egui::Id::new("add_cue_preset_idx")).unwrap_or(0));
 
             ui.horizontal(|ui| {
                 let btn_width = 52.0;
                 let spacing = ui.spacing().item_spacing.x;
-                let combo_w =
-                    (ui.available_width() - btn_width - spacing).max(60.0);
+                let combo_w = (ui.available_width() - btn_width - spacing).max(60.0);
 
                 egui::ComboBox::from_id_salt("add_cue_combo")
                     .width(combo_w)
@@ -680,32 +591,23 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                         }
                     });
 
-                let add_btn = egui::Button::new(
-                    RichText::new("+ Cue")
-                        .size(SMALL_SIZE)
-                        .color(tc.accent),
-                )
-                .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(1.0, tc.card_border))
-                .corner_radius(CornerRadius::same(WIDGET_ROUNDING))
-                .min_size(Vec2::new(btn_width, MIN_INTERACT_HEIGHT));
+                let add_btn =
+                    egui::Button::new(RichText::new("+ Cue").size(SMALL_SIZE).color(tc.accent))
+                        .fill(Color32::TRANSPARENT)
+                        .stroke(Stroke::new(1.0, tc.card_border))
+                        .corner_radius(CornerRadius::same(WIDGET_ROUNDING))
+                        .min_size(Vec2::new(btn_width, MIN_INTERACT_HEIGHT));
                 if ui.add(add_btn).clicked() {
                     if let Some(name) = info.preset_names.get(add_cue_preset) {
                         ui.ctx().data_mut(|d| {
-                            d.insert_temp(
-                                egui::Id::new("scene_add_cue"),
-                                name.clone(),
-                            );
+                            d.insert_temp(egui::Id::new("scene_add_cue"), name.clone());
                         });
                     }
                 }
             });
 
             ui.ctx().data_mut(|d| {
-                d.insert_temp(
-                    egui::Id::new("add_cue_preset_idx"),
-                    add_cue_preset,
-                );
+                d.insert_temp(egui::Id::new("add_cue_preset_idx"), add_cue_preset);
             });
         } else {
             ui.label(

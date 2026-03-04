@@ -11,8 +11,8 @@ use super::obstacle::ObstacleTexture;
 use super::spatial_hash::SpatialHashGrid;
 use super::sprite::SpriteAtlas;
 use super::types::{
-    ImageSampleDef, ParticleAux, ParticleDef, ParticleImageSource,
-    ParticleRenderUniforms, ParticleUniforms, RDUniforms, SourceTransition,
+    ImageSampleDef, ParticleAux, ParticleDef, ParticleImageSource, ParticleRenderUniforms,
+    ParticleUniforms, RDUniforms, SourceTransition,
 };
 
 const WORKGROUP_SIZE: u32 = 256;
@@ -139,7 +139,7 @@ pub struct ParticleSystem {
     sort_pipeline: Option<ComputePipeline>,
     sort_bind_groups: Option<[BindGroup; 2]>,
     sort_passes: Vec<(u32, u32)>, // (block_size, sub_block_size) per pass
-    sort_n: u32,                   // next power of 2 >= max_particles
+    sort_n: u32,                  // next power of 2 >= max_particles
 
     // Placeholder empty BGL + bind group for padding contiguous bind group indices
     empty_bgl: BindGroupLayout,
@@ -225,7 +225,12 @@ impl ParticleSystem {
         let mut init_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("particle-init-clear"),
         });
-        for buf in [&pos_life_buffers, &vel_size_buffers, &color_buffers, &flags_buffers] {
+        for buf in [
+            &pos_life_buffers,
+            &vel_size_buffers,
+            &color_buffers,
+            &flags_buffers,
+        ] {
             init_encoder.clear_buffer(&buf[0], 0, None);
             init_encoder.clear_buffer(&buf[1], 0, None);
         }
@@ -279,7 +284,11 @@ impl ParticleSystem {
             mapped_at_creation: false,
         });
         // Initialize with zero instances
-        queue.write_buffer(&indirect_args_buffer, 0, bytemuck::cast_slice(&[6u32, 0, 0, 0]));
+        queue.write_buffer(
+            &indirect_args_buffer,
+            0,
+            bytemuck::cast_slice(&[6u32, 0, 0, 0]),
+        );
 
         // Auxiliary buffer (home positions for image decomposition)
         // Pre-allocate at max_particles size so updates can use write_buffer without
@@ -411,7 +420,8 @@ impl ParticleSystem {
         });
 
         let obstacle = ObstacleTexture::placeholder(device, queue);
-        let flow_field_bind_group = create_flow_field_bind_group(device, &flow_field_bgl, &flow_field, &obstacle);
+        let flow_field_bind_group =
+            create_flow_field_bind_group(device, &flow_field_bgl, &flow_field, &obstacle);
 
         // Empty BGL + bind group for padding contiguous bind group indices
         let empty_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -429,18 +439,16 @@ impl ParticleSystem {
         let trail_compute_bgl = if def.trail_length >= 2 {
             Some(device.create_bind_group_layout(&BindGroupLayoutDescriptor {
                 label: Some("particle-trail-compute-bgl"),
-                entries: &[
-                    BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                ],
+                    count: None,
+                }],
             }))
         } else {
             None
@@ -536,11 +544,7 @@ impl ParticleSystem {
 
         // --- Prepare indirect pipeline ---
         let (prepare_indirect_pipeline, prepare_indirect_bind_groups) =
-            create_prepare_indirect_pipeline(
-                device,
-                &counter_buffer,
-                &indirect_args_buffer,
-            );
+            create_prepare_indirect_pipeline(device, &counter_buffer, &indirect_args_buffer);
 
         // --- Render pipeline ---
         let render_storage_ro = |binding: u32| -> BindGroupLayoutEntry {
@@ -905,22 +909,14 @@ impl ParticleSystem {
     /// Replace the compute shader and rebuild the pipeline (for switching shader at runtime).
     /// Unlike recompile_compute, this also updates current_compute_source.
     #[allow(dead_code)]
-    pub fn set_compute_shader(
-        &mut self,
-        device: &Device,
-        source: &str,
-    ) -> Result<(), String> {
+    pub fn set_compute_shader(&mut self, device: &Device, source: &str) -> Result<(), String> {
         self.recompile_compute(device, source)?;
         self.current_compute_source = source.to_string();
         Ok(())
     }
 
     /// Recompile the compute pipeline (for hot-reload).
-    pub fn recompile_compute(
-        &mut self,
-        device: &Device,
-        source: &str,
-    ) -> Result<(), String> {
+    pub fn recompile_compute(&mut self, device: &Device, source: &str) -> Result<(), String> {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("particle-compute-hotreload"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -948,13 +944,7 @@ impl ParticleSystem {
     }
 
     /// Update uniforms from app state. Call before dispatch().
-    pub fn update_uniforms(
-        &mut self,
-        dt: f32,
-        time: f32,
-        resolution: [f32; 2],
-        beat: f32,
-    ) {
+    pub fn update_uniforms(&mut self, dt: f32, time: f32, resolution: [f32; 2], beat: f32) {
         // Accumulate emissions
         self.emit_accumulator += self.emit_rate * dt;
 
@@ -1049,7 +1039,7 @@ impl ParticleSystem {
         self.uniforms.spin_speed = self.def.spin_speed;
 
         // Depth sort
-        self.uniforms.depth_sort = if self.def.depth_sort { 1 } else { 0 };
+        self.uniforms.depth_sort = u32::from(self.def.depth_sort);
 
         self.render_uniforms.resolution = resolution;
         self.render_uniforms.time = time;
@@ -1087,7 +1077,7 @@ impl ParticleSystem {
         // Upload uniforms
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&self.uniforms));
 
-        let workgroups = (self.max_particles + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+        let workgroups = self.max_particles.div_ceil(WORKGROUP_SIZE);
 
         // 0a. Reaction-diffusion compute (if present) — step R-D before particles
         if let (Some(rd_pipeline), Some(rd_bgs), Some(rd_ubuf)) = (
@@ -1114,7 +1104,8 @@ impl ParticleSystem {
             // We subtract 0.003 margin to stay in the robust pattern zone.
             let f = (0.02 + p2 * 0.06 + self.uniforms.bass * 0.02).clamp(0.02, 0.07);
             let k_sn = f.sqrt() * 0.5 - f;
-            let k = (0.05 + p3 * 0.02 + self.uniforms.mid * 0.01).clamp(0.05, (k_sn - 0.003).max(0.05));
+            let k =
+                (0.05 + p3 * 0.02 + self.uniforms.mid * 0.01).clamp(0.05, (k_sn - 0.003).max(0.05));
             // Diffusion: Da/Db = 2:1 standard. CFL stability limit: D < 0.25
             let da = 0.2097;
             let db = (0.05 + p4 * 0.08 + self.uniforms.brilliance * 0.02).clamp(0.05, 0.15);
@@ -1131,8 +1122,8 @@ impl ParticleSystem {
             };
             queue.write_buffer(rd_ubuf, 0, bytemuck::bytes_of(&rd_uniforms));
 
-            let wg_x = (self.rd_grid_size + 7) / 8;
-            let wg_y = (self.rd_grid_size + 7) / 8;
+            let wg_x = self.rd_grid_size.div_ceil(8);
+            let wg_y = self.rd_grid_size.div_ceil(8);
 
             // Steps per frame, modulated by sim_speed param and beat
             let steps = ((self.rd_steps_per_frame as f32
@@ -1159,7 +1150,7 @@ impl ParticleSystem {
         // 0b. Spatial hash (if interaction enabled) — build before sim
         if let Some(hash) = &self.spatial_hash {
             // Read from the input buffer (current side of ping-pong)
-            hash.dispatch(encoder, queue, self.current);
+            hash.dispatch(encoder, self.current);
         }
 
         // 1. Particle simulation
@@ -1196,7 +1187,7 @@ impl ParticleSystem {
             Some(keygen_bgs),
             Some(sort_pl),
             Some(sort_bgs),
-            Some(params_buf),
+            Some(_params_buf),
         ) = (
             &self.sort_keygen_pipeline,
             &self.sort_keygen_bind_groups,
@@ -1204,15 +1195,10 @@ impl ParticleSystem {
             &self.sort_bind_groups,
             &self.sort_params_buffer,
         ) {
-            let sort_workgroups = (self.sort_n + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            let sort_workgroups = self.sort_n.div_ceil(WORKGROUP_SIZE);
             let min_align = 256u64;
 
-            // Write all sort pass parameters (static data, could cache but tiny)
-            for (i, &(block_size, sub_block_size)) in self.sort_passes.iter().enumerate() {
-                let offset = i as u64 * min_align;
-                let params: [u32; 4] = [block_size, sub_block_size, self.sort_n, 0];
-                queue.write_buffer(params_buf, offset, bytemuck::cast_slice(&params));
-            }
+            // Sort params are static — written once at buffer creation via mapped_at_creation.
 
             // Key generation pass
             {
@@ -1267,7 +1253,10 @@ impl ParticleSystem {
 
         // 4. Copy counter buffer to staging for CPU readback (1-frame latency)
         // Skip if previous map is still pending (buffer would be mapped → submit error)
-        if !self.counter_map_pending.load(std::sync::atomic::Ordering::Relaxed) {
+        if !self
+            .counter_map_pending
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             encoder.copy_buffer_to_buffer(&self.counter_buffer, 0, &self.counter_readback, 0, 16);
         }
     }
@@ -1376,7 +1365,8 @@ impl ParticleSystem {
     /// Upload auxiliary data (home positions, packed colors) for image decomposition.
     /// Recreates aux buffer and compute bind groups.
     pub fn upload_aux_data(&mut self, device: &Device, queue: &Queue, data: &[ParticleAux]) {
-        let aux_size = (std::mem::size_of::<ParticleAux>() * (data.len().max(self.max_particles as usize)).max(1)) as u64;
+        let aux_size = (std::mem::size_of::<ParticleAux>()
+            * (data.len().max(self.max_particles as usize)).max(1)) as u64;
         self.aux_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("particle-aux"),
             size: aux_size,
@@ -1411,14 +1401,16 @@ impl ParticleSystem {
         if data.is_empty() {
             return;
         }
-        let byte_len = (std::mem::size_of::<ParticleAux>() * data.len()) as u64;
+        let byte_len = std::mem::size_of_val(data) as u64;
         if byte_len <= self.aux_buffer.size() {
             queue.write_buffer(&self.aux_buffer, 0, bytemuck::cast_slice(data));
         } else {
             log::warn!(
                 "Aux buffer too small: need {} bytes, have {} bytes ({} vs {} particles)",
-                byte_len, self.aux_buffer.size(),
-                data.len(), self.aux_buffer.size() as usize / std::mem::size_of::<ParticleAux>()
+                byte_len,
+                self.aux_buffer.size(),
+                data.len(),
+                self.aux_buffer.size() as usize / std::mem::size_of::<ParticleAux>()
             );
         }
     }
@@ -1636,7 +1628,14 @@ impl ParticleSystem {
     }
 
     /// Update obstacle texture from webcam frame data (per-frame).
-    pub fn update_obstacle_webcam(&mut self, device: &Device, queue: &Queue, data: &[u8], w: u32, h: u32) {
+    pub fn update_obstacle_webcam(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        data: &[u8],
+        w: u32,
+        h: u32,
+    ) {
         let dims_changed = w != self.obstacle.width || h != self.obstacle.height;
         self.obstacle.update(device, queue, data, w, h);
         if dims_changed {
@@ -1657,7 +1656,8 @@ impl ParticleSystem {
     ) {
         if let Some(frame) = frames.first() {
             let converted = Self::luminance_to_alpha(&frame.data);
-            self.obstacle = ObstacleTexture::from_rgba(device, queue, &converted, frame.width, frame.height);
+            self.obstacle =
+                ObstacleTexture::from_rgba(device, queue, &converted, frame.width, frame.height);
             self.rebuild_flow_field_bind_group(device);
         }
         self.obstacle_video_frames = frames;
@@ -1692,7 +1692,8 @@ impl ParticleSystem {
             return false;
         }
         self.obstacle_video_elapsed_ms += dt_secs * 1000.0 * self.obstacle_video_speed as f64;
-        let delay = self.obstacle_video_delays_ms
+        let delay = self
+            .obstacle_video_delays_ms
             .get(self.obstacle_video_frame)
             .copied()
             .unwrap_or(33) as f64;
@@ -1713,9 +1714,11 @@ impl ParticleSystem {
         }
         // Upload new frame (with luminance-to-alpha conversion)
         if let Some(frame) = self.obstacle_video_frames.get(self.obstacle_video_frame) {
-            let dims_changed = frame.width != self.obstacle.width || frame.height != self.obstacle.height;
+            let dims_changed =
+                frame.width != self.obstacle.width || frame.height != self.obstacle.height;
             let converted = Self::luminance_to_alpha(&frame.data);
-            self.obstacle.update(device, queue, &converted, frame.width, frame.height);
+            self.obstacle
+                .update(device, queue, &converted, frame.width, frame.height);
             if dims_changed {
                 self.rebuild_flow_field_bind_group(device);
             }
@@ -1737,8 +1740,12 @@ impl ParticleSystem {
 
     /// Rebuild group 1 bind group (flow field + obstacle).
     fn rebuild_flow_field_bind_group(&mut self, device: &Device) {
-        self.flow_field_bind_group =
-            create_flow_field_bind_group(device, &self.flow_field_bgl, &self.flow_field, &self.obstacle);
+        self.flow_field_bind_group = create_flow_field_bind_group(
+            device,
+            &self.flow_field_bgl,
+            &self.flow_field,
+            &self.obstacle,
+        );
     }
 
     /// Set up spatial hash grid for particle-particle interaction.
@@ -2023,7 +2030,9 @@ impl ParticleSystem {
 
     /// Initialize R-D textures: A=1.0, B=0.0 everywhere + seed drops.
     fn init_rd_textures(&self, queue: &Queue) {
-        let Some(ref textures) = self.rd_textures else { return };
+        let Some(ref textures) = self.rd_textures else {
+            return;
+        };
         let size = self.rd_grid_size;
         let pixel_count = (size * size) as usize;
 
@@ -2037,10 +2046,10 @@ impl ParticleSystem {
         // Fill with substrate: A=1.0, B=0.0
         for i in 0..pixel_count {
             let offset = i * 8;
-            data[offset..offset + 2].copy_from_slice(&f16_one.to_le_bytes());     // A
+            data[offset..offset + 2].copy_from_slice(&f16_one.to_le_bytes()); // A
             data[offset + 2..offset + 4].copy_from_slice(&f16_zero.to_le_bytes()); // B
             data[offset + 4..offset + 6].copy_from_slice(&f16_zero.to_le_bytes());
-            data[offset + 6..offset + 8].copy_from_slice(&f16_one.to_le_bytes());  // alpha
+            data[offset + 6..offset + 8].copy_from_slice(&f16_one.to_le_bytes()); // alpha
         }
 
         // Seed with a dense grid of circular B patches.
@@ -2057,7 +2066,9 @@ impl ParticleSystem {
             while cx < s {
                 for dy in -seed_radius..=seed_radius {
                     for dx in -seed_radius..=seed_radius {
-                        if dx * dx + dy * dy > seed_r2 { continue; }
+                        if dx * dx + dy * dy > seed_r2 {
+                            continue;
+                        }
                         let px = (cx + dx).rem_euclid(s) as usize;
                         let py = (cy + dy).rem_euclid(s) as usize;
                         let idx = py * size as usize + px;
@@ -2130,7 +2141,8 @@ fn create_prepare_indirect_pipeline(
         ],
     });
 
-    let source = include_str!("../../../../../assets/shaders/builtin/particle_prepare_indirect.wgsl");
+    let source =
+        include_str!("../../../../../assets/shaders/builtin/particle_prepare_indirect.wgsl");
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("prepare-indirect"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -2204,19 +2216,58 @@ fn create_compute_bind_groups(
         label: Some("particle-compute-bg-0"),
         layout,
         entries: &[
-            BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-            BindGroupEntry { binding: 1, resource: pos_life_buffers[0].as_entire_binding() },
-            BindGroupEntry { binding: 2, resource: vel_size_buffers[0].as_entire_binding() },
-            BindGroupEntry { binding: 3, resource: color_buffers[0].as_entire_binding() },
-            BindGroupEntry { binding: 4, resource: flags_buffers[0].as_entire_binding() },
-            BindGroupEntry { binding: 5, resource: pos_life_buffers[1].as_entire_binding() },
-            BindGroupEntry { binding: 6, resource: vel_size_buffers[1].as_entire_binding() },
-            BindGroupEntry { binding: 7, resource: color_buffers[1].as_entire_binding() },
-            BindGroupEntry { binding: 8, resource: flags_buffers[1].as_entire_binding() },
-            BindGroupEntry { binding: 9, resource: counter_buffer.as_entire_binding() },
-            BindGroupEntry { binding: 10, resource: aux_buffer.as_entire_binding() },
-            BindGroupEntry { binding: 11, resource: dead_index_buffer.as_entire_binding() },
-            BindGroupEntry { binding: 12, resource: alive_index_buffers[1].as_entire_binding() },
+            BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: pos_life_buffers[0].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: vel_size_buffers[0].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 3,
+                resource: color_buffers[0].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 4,
+                resource: flags_buffers[0].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 5,
+                resource: pos_life_buffers[1].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 6,
+                resource: vel_size_buffers[1].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 7,
+                resource: color_buffers[1].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 8,
+                resource: flags_buffers[1].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 9,
+                resource: counter_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 10,
+                resource: aux_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 11,
+                resource: dead_index_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 12,
+                resource: alive_index_buffers[1].as_entire_binding(),
+            },
         ],
     });
     // bind_group[1]: read from [1], write to [0]
@@ -2224,19 +2275,58 @@ fn create_compute_bind_groups(
         label: Some("particle-compute-bg-1"),
         layout,
         entries: &[
-            BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-            BindGroupEntry { binding: 1, resource: pos_life_buffers[1].as_entire_binding() },
-            BindGroupEntry { binding: 2, resource: vel_size_buffers[1].as_entire_binding() },
-            BindGroupEntry { binding: 3, resource: color_buffers[1].as_entire_binding() },
-            BindGroupEntry { binding: 4, resource: flags_buffers[1].as_entire_binding() },
-            BindGroupEntry { binding: 5, resource: pos_life_buffers[0].as_entire_binding() },
-            BindGroupEntry { binding: 6, resource: vel_size_buffers[0].as_entire_binding() },
-            BindGroupEntry { binding: 7, resource: color_buffers[0].as_entire_binding() },
-            BindGroupEntry { binding: 8, resource: flags_buffers[0].as_entire_binding() },
-            BindGroupEntry { binding: 9, resource: counter_buffer.as_entire_binding() },
-            BindGroupEntry { binding: 10, resource: aux_buffer.as_entire_binding() },
-            BindGroupEntry { binding: 11, resource: dead_index_buffer.as_entire_binding() },
-            BindGroupEntry { binding: 12, resource: alive_index_buffers[0].as_entire_binding() },
+            BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: pos_life_buffers[1].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: vel_size_buffers[1].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 3,
+                resource: color_buffers[1].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 4,
+                resource: flags_buffers[1].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 5,
+                resource: pos_life_buffers[0].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 6,
+                resource: vel_size_buffers[0].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 7,
+                resource: color_buffers[0].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 8,
+                resource: flags_buffers[0].as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 9,
+                resource: counter_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 10,
+                resource: aux_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 11,
+                resource: dead_index_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 12,
+                resource: alive_index_buffers[0].as_entire_binding(),
+            },
         ],
     });
     [bg0, bg1]
@@ -2331,10 +2421,22 @@ fn create_render_bind_groups(
             label: Some(label),
             layout,
             entries: &[
-                BindGroupEntry { binding: 0, resource: pos_life_buffers[i].as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: vel_size_buffers[i].as_entire_binding() },
-                BindGroupEntry { binding: 2, resource: color_buffers[i].as_entire_binding() },
-                BindGroupEntry { binding: 3, resource: flags_buffers[i].as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: pos_life_buffers[i].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: vel_size_buffers[i].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: color_buffers[i].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: flags_buffers[i].as_entire_binding(),
+                },
                 BindGroupEntry {
                     binding: 4,
                     resource: BindingResource::Buffer(wgpu::BufferBinding {
@@ -2343,11 +2445,17 @@ fn create_render_bind_groups(
                         size: None,
                     }),
                 },
-                BindGroupEntry { binding: 5, resource: alive_index_buffers[i].as_entire_binding() },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: alive_index_buffers[i].as_entire_binding(),
+                },
             ],
         })
     };
-    [make_bg(0, "particle-render-bg-0"), make_bg(1, "particle-render-bg-1")]
+    [
+        make_bg(0, "particle-render-bg-0"),
+        make_bg(1, "particle-render-bg-1"),
+    ]
 }
 
 fn create_trail_render_bind_groups(
@@ -2366,10 +2474,22 @@ fn create_trail_render_bind_groups(
             label: Some(label),
             layout,
             entries: &[
-                BindGroupEntry { binding: 0, resource: pos_life_buffers[i].as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: vel_size_buffers[i].as_entire_binding() },
-                BindGroupEntry { binding: 2, resource: color_buffers[i].as_entire_binding() },
-                BindGroupEntry { binding: 3, resource: flags_buffers[i].as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: pos_life_buffers[i].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: vel_size_buffers[i].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: color_buffers[i].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: flags_buffers[i].as_entire_binding(),
+                },
                 BindGroupEntry {
                     binding: 4,
                     resource: BindingResource::Buffer(wgpu::BufferBinding {
@@ -2378,12 +2498,21 @@ fn create_trail_render_bind_groups(
                         size: None,
                     }),
                 },
-                BindGroupEntry { binding: 5, resource: alive_index_buffers[i].as_entire_binding() },
-                BindGroupEntry { binding: 6, resource: trail_buffer.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: alive_index_buffers[i].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: trail_buffer.as_entire_binding(),
+                },
             ],
         })
     };
-    [make_bg(0, "particle-trail-render-bg-0"), make_bg(1, "particle-trail-render-bg-1")]
+    [
+        make_bg(0, "particle-trail-render-bg-0"),
+        make_bg(1, "particle-trail-render-bg-1"),
+    ]
 }
 
 fn create_trail_prepare_indirect_pipeline(
@@ -2506,14 +2635,14 @@ fn create_sort_resources(
     vel_size_buffers: &[wgpu::Buffer; 2],
     alive_index_buffers: &[wgpu::Buffer; 2],
 ) -> (
-    Option<wgpu::Buffer>,          // sort_key_buffer
-    Option<wgpu::Buffer>,          // sort_params_buffer
-    Option<ComputePipeline>,       // sort_keygen_pipeline
-    Option<[BindGroup; 2]>,        // sort_keygen_bind_groups
-    Option<ComputePipeline>,       // sort_pipeline
-    Option<[BindGroup; 2]>,        // sort_bind_groups
-    Vec<(u32, u32)>,               // sort_passes
-    u32,                           // sort_n
+    Option<wgpu::Buffer>,    // sort_key_buffer
+    Option<wgpu::Buffer>,    // sort_params_buffer
+    Option<ComputePipeline>, // sort_keygen_pipeline
+    Option<[BindGroup; 2]>,  // sort_keygen_bind_groups
+    Option<ComputePipeline>, // sort_pipeline
+    Option<[BindGroup; 2]>,  // sort_bind_groups
+    Vec<(u32, u32)>,         // sort_passes
+    u32,                     // sort_n
 ) {
     let sort_n = next_power_of_2(max_particles);
     let passes = bitonic_sort_passes(sort_n);
@@ -2526,37 +2655,29 @@ fn create_sort_resources(
         mapped_at_creation: false,
     });
 
-    // Sort params buffer: one 16-byte entry per pass, 256-byte aligned for dynamic offsets
+    // Sort params buffer: one 16-byte entry per pass, 256-byte aligned for dynamic offsets.
+    // Params are static (block_size, sub_block_size, sort_n) — write once at creation via mapped_at_creation.
     let min_align = 256u64;
     let params_buffer_size = passes.len() as u64 * min_align;
     let sort_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("particle-sort-params"),
         size: params_buffer_size.max(min_align), // at least one entry
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
+        mapped_at_creation: true,
     });
-
-    // Write all pass parameters at creation time
     {
-        let mut data = vec![0u8; params_buffer_size as usize];
+        let mut mapped = sort_params_buffer.slice(..).get_mapped_range_mut();
         for (i, &(block_size, sub_block_size)) in passes.iter().enumerate() {
             let offset = i * min_align as usize;
             let params: [u32; 4] = [block_size, sub_block_size, sort_n, 0];
-            data[offset..offset + 16].copy_from_slice(bytemuck::cast_slice(&params));
+            mapped[offset..offset + 16].copy_from_slice(bytemuck::cast_slice(&params));
         }
-        // Note: buffer write happens via queue in dispatch, but we can init here via mapped_at_creation
-        // Actually, we'll write in the dispatch path. Skip for now — the buffer is zero-initialized.
-        // We write all params once in the calling code after creation.
-        // For simplicity, store the data and write it later.
-        // Actually, we need queue here. Let's defer writing to the first dispatch.
-        // Instead, store passes for CPU-side reference and write per-frame.
-        // UPDATE: Actually, the params are static — we can write them at creation if we have the queue.
-        // Since we don't have queue in this function, we'll handle it differently.
-        let _ = data; // Params written at first dispatch
     }
+    sort_params_buffer.unmap();
 
     // --- Keygen pipeline ---
-    let keygen_source = include_str!("../../../../../assets/shaders/builtin/particle_sort_keygen.wgsl");
+    let keygen_source =
+        include_str!("../../../../../assets/shaders/builtin/particle_sort_keygen.wgsl");
     let keygen_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("particle-sort-keygen-shader"),
         source: wgpu::ShaderSource::Wgsl(keygen_source.into()),
@@ -2631,20 +2752,44 @@ fn create_sort_resources(
             label: Some("sort-keygen-bg-0"),
             layout: &keygen_bgl,
             entries: &[
-                BindGroupEntry { binding: 0, resource: counter_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: vel_size_buffers[1].as_entire_binding() },
-                BindGroupEntry { binding: 2, resource: alive_index_buffers[1].as_entire_binding() },
-                BindGroupEntry { binding: 3, resource: sort_key_buffer.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: counter_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: vel_size_buffers[1].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: alive_index_buffers[1].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: sort_key_buffer.as_entire_binding(),
+                },
             ],
         }),
         device.create_bind_group(&BindGroupDescriptor {
             label: Some("sort-keygen-bg-1"),
             layout: &keygen_bgl,
             entries: &[
-                BindGroupEntry { binding: 0, resource: counter_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: vel_size_buffers[0].as_entire_binding() },
-                BindGroupEntry { binding: 2, resource: alive_index_buffers[0].as_entire_binding() },
-                BindGroupEntry { binding: 3, resource: sort_key_buffer.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: counter_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: vel_size_buffers[0].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: alive_index_buffers[0].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: sort_key_buffer.as_entire_binding(),
+                },
             ],
         }),
     ];
@@ -2721,8 +2866,14 @@ fn create_sort_resources(
                         size: wgpu::BufferSize::new(16),
                     }),
                 },
-                BindGroupEntry { binding: 1, resource: sort_key_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 2, resource: alive_index_buffers[1].as_entire_binding() },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: sort_key_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: alive_index_buffers[1].as_entire_binding(),
+                },
             ],
         }),
         device.create_bind_group(&BindGroupDescriptor {
@@ -2737,8 +2888,14 @@ fn create_sort_resources(
                         size: wgpu::BufferSize::new(16),
                     }),
                 },
-                BindGroupEntry { binding: 1, resource: sort_key_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 2, resource: alive_index_buffers[0].as_entire_binding() },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: sort_key_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: alive_index_buffers[0].as_entire_binding(),
+                },
             ],
         }),
     ];
@@ -2763,17 +2920,17 @@ fn create_rd_resources(
     _queue: &Queue,
     rd_def: &super::types::ReactionDiffusionDef,
 ) -> (
-    Option<[wgpu::Texture; 2]>,          // rd_textures
-    Option<[wgpu::TextureView; 2]>,      // rd_views
-    Option<wgpu::Sampler>,               // rd_sampler
-    Option<wgpu::Buffer>,                // rd_uniform_buffer
-    Option<ComputePipeline>,             // rd_compute_pipeline
-    Option<BindGroupLayout>,             // rd_compute_bgl
-    Option<[BindGroup; 2]>,              // rd_compute_bgs
-    Option<BindGroupLayout>,             // rd_particle_bgl
-    Option<[BindGroup; 2]>,              // rd_particle_bgs
-    u32,                                  // rd_steps_per_frame
-    u32,                                  // rd_grid_size
+    Option<[wgpu::Texture; 2]>,     // rd_textures
+    Option<[wgpu::TextureView; 2]>, // rd_views
+    Option<wgpu::Sampler>,          // rd_sampler
+    Option<wgpu::Buffer>,           // rd_uniform_buffer
+    Option<ComputePipeline>,        // rd_compute_pipeline
+    Option<BindGroupLayout>,        // rd_compute_bgl
+    Option<[BindGroup; 2]>,         // rd_compute_bgs
+    Option<BindGroupLayout>,        // rd_particle_bgl
+    Option<[BindGroup; 2]>,         // rd_particle_bgs
+    u32,                            // rd_steps_per_frame
+    u32,                            // rd_grid_size
 ) {
     let grid_size = rd_def.grid_size.max(64).min(2048);
     let steps = rd_def.steps_per_frame.max(1).min(32);
@@ -2910,7 +3067,10 @@ fn create_rd_resources(
         let base = std::path::Path::new("assets/shaders");
         let path = base.join(&rd_def.compute_shader);
         std::fs::read_to_string(&path).unwrap_or_else(|e| {
-            log::warn!("Failed to load R-D shader {}: {e}, using built-in", path.display());
+            log::warn!(
+                "Failed to load R-D shader {}: {e}, using built-in",
+                path.display()
+            );
             include_str!("../../../../../assets/shaders/turing_rd.wgsl").to_string()
         })
     };

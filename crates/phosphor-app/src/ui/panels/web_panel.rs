@@ -22,9 +22,13 @@ pub fn draw_web_panel(ui: &mut Ui, web: &mut WebSystem) {
             // Client count
             if web.client_count > 0 {
                 ui.label(
-                    RichText::new(format!("{} client{}", web.client_count, if web.client_count == 1 { "" } else { "s" }))
-                        .size(SMALL_SIZE)
-                        .color(tc.text_secondary),
+                    RichText::new(format!(
+                        "{} client{}",
+                        web.client_count,
+                        if web.client_count == 1 { "" } else { "s" }
+                    ))
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
                 );
             }
             // Activity dot
@@ -66,8 +70,15 @@ pub fn draw_web_panel(ui: &mut Ui, web: &mut WebSystem) {
         // Show localhost
         let url = format!("http://localhost:{port}");
         ui.horizontal(|ui| {
-            ui.label(RichText::new("URL").size(SMALL_SIZE).color(tc.text_secondary));
-            if ui.link(RichText::new(&url).size(SMALL_SIZE).color(WEB_BLUE)).clicked() {
+            ui.label(
+                RichText::new("URL")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
+            if ui
+                .link(RichText::new(&url).size(SMALL_SIZE).color(WEB_BLUE))
+                .clicked()
+            {
                 ui.ctx().copy_text(url.clone());
             }
         });
@@ -76,8 +87,15 @@ pub fn draw_web_panel(ui: &mut Ui, web: &mut WebSystem) {
         if let Some(ip) = get_lan_ip() {
             let lan_url = format!("http://{ip}:{port}");
             ui.horizontal(|ui| {
-                ui.label(RichText::new("LAN").size(SMALL_SIZE).color(tc.text_secondary));
-                if ui.link(RichText::new(&lan_url).size(SMALL_SIZE).color(WEB_BLUE)).clicked() {
+                ui.label(
+                    RichText::new("LAN")
+                        .size(SMALL_SIZE)
+                        .color(tc.text_secondary),
+                );
+                if ui
+                    .link(RichText::new(&lan_url).size(SMALL_SIZE).color(WEB_BLUE))
+                    .clicked()
+                {
                     ui.ctx().copy_text(lan_url.clone());
                 }
             });

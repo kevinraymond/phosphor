@@ -27,8 +27,12 @@ struct SamplePoint {
 /// Deterministic per-index jitter in [-1, 1] using LCG hash.
 fn grid_jitter(index: u32) -> (f32, f32) {
     // Two independent LCG steps seeded from index
-    let s0 = (index as u64).wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-    let s1 = s0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    let s0 = (index as u64)
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    let s1 = s0
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     // Map upper bits to [-1, 1]
     let jx = ((s0 >> 33) as f32 / (u32::MAX >> 1) as f32) * 2.0 - 1.0;
     let jy = ((s1 >> 33) as f32 / (u32::MAX >> 1) as f32) * 2.0 - 1.0;
@@ -84,8 +88,7 @@ pub fn sample_image(
     sample_def: &ImageSampleDef,
     max_particles: u32,
 ) -> Result<Vec<ParticleAux>, String> {
-    let img = image::open(path)
-        .map_err(|e| format!("Failed to load image: {e}"))?;
+    let img = image::open(path).map_err(|e| format!("Failed to load image: {e}"))?;
 
     // Resize to cap dimensions while preserving aspect ratio
     let img = if img.width() > MAX_DIM || img.height() > MAX_DIM {
@@ -135,12 +138,7 @@ pub fn sample_image(
 
 /// Grid sampling with jittered positions, bilinear color, and gradient.
 /// Every Nth pixel to fit within max_particles, with ±GRID_JITTER×step random offset.
-fn sample_grid(
-    img: &image::RgbaImage,
-    w: u32,
-    h: u32,
-    max_particles: u32,
-) -> Vec<SamplePoint> {
+fn sample_grid(img: &image::RgbaImage, w: u32, h: u32, max_particles: u32) -> Vec<SamplePoint> {
     let total_pixels = w * h;
     let step = ((total_pixels as f32 / max_particles as f32).sqrt().ceil() as u32).max(1);
     let step_f = step as f32;
@@ -176,7 +174,15 @@ fn sample_grid(
                 continue;
             }
 
-            samples.push(SamplePoint { px: fx, py: fy, r, g, b, a, gradient: grad });
+            samples.push(SamplePoint {
+                px: fx,
+                py: fy,
+                r,
+                g,
+                b,
+                a,
+                gradient: grad,
+            });
             index += 1;
         }
     }
@@ -205,8 +211,12 @@ fn sample_threshold(
             if brightness > threshold {
                 let grad = gradient_at(img, x, y, w, h);
                 candidates.push(SamplePoint {
-                    px: x as f32, py: y as f32,
-                    r: pixel[0], g: pixel[1], b: pixel[2], a: pixel[3],
+                    px: x as f32,
+                    py: y as f32,
+                    r: pixel[0],
+                    g: pixel[1],
+                    b: pixel[2],
+                    a: pixel[3],
                     gradient: grad,
                 });
             }
@@ -227,12 +237,7 @@ fn sample_threshold(
 }
 
 /// Random sampling: uniform random subset.
-fn sample_random(
-    img: &image::RgbaImage,
-    w: u32,
-    h: u32,
-    max_particles: u32,
-) -> Vec<SamplePoint> {
+fn sample_random(img: &image::RgbaImage, w: u32, h: u32, max_particles: u32) -> Vec<SamplePoint> {
     // Simple deterministic pseudo-random using hash
     let total = w * h;
     let count = max_particles.min(total);
@@ -260,8 +265,12 @@ fn sample_random(
         }
         let grad = gradient_at(img, x, y, w, h);
         samples.push(SamplePoint {
-            px: x as f32, py: y as f32,
-            r: pixel[0], g: pixel[1], b: pixel[2], a: pixel[3],
+            px: x as f32,
+            py: y as f32,
+            r: pixel[0],
+            g: pixel[1],
+            b: pixel[2],
+            a: pixel[3],
             gradient: grad,
         });
     }
@@ -444,8 +453,7 @@ mod tests {
     fn bilinear_sample_at_pixel_center() {
         // 2x2 image: top-left red, top-right green, bottom-left blue, bottom-right white
         let data = vec![
-            255, 0, 0, 255,    0, 255, 0, 255,
-            0, 0, 255, 255,    255, 255, 255, 255,
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
         ];
         let img = image::RgbaImage::from_raw(2, 2, data).unwrap();
         // Sample at (0.0, 0.0) — top-left pixel
@@ -474,14 +482,17 @@ mod tests {
         }
         let img = image::RgbaImage::from_raw(4, 4, data).unwrap();
         let grad = gradient_at(&img, 2, 2, 4, 4);
-        assert!(grad.abs() < 0.01, "uniform image gradient should be ~0, got {grad}");
+        assert!(
+            grad.abs() < 0.01,
+            "uniform image gradient should be ~0, got {grad}"
+        );
     }
 
     #[test]
     fn gradient_at_horizontal_edge() {
         // 4x1 image: black, black, white, white — gradient at x=1 should be nonzero
         let data = vec![
-            0, 0, 0, 255,   0, 0, 0, 255,   255, 255, 255, 255,   255, 255, 255, 255,
+            0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255,
         ];
         let img = image::RgbaImage::from_raw(4, 1, data).unwrap();
         let grad = gradient_at(&img, 1, 0, 4, 1);
@@ -508,6 +519,9 @@ mod tests {
         assert!(!result.is_empty());
         // At least some particles should have nonzero gradient
         let has_gradient = result.iter().any(|p| p.home[3] > 0.0);
-        assert!(has_gradient, "gradient image should produce nonzero home[3]");
+        assert!(
+            has_gradient,
+            "gradient image should produce nonzero home[3]"
+        );
     }
 }

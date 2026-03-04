@@ -24,16 +24,16 @@ use egui::{Context, Frame, Margin, ScrollArea};
 use crate::audio::AudioSystem;
 use crate::effect::EffectLoader;
 use crate::effect::format::PostProcessDef;
-use crate::gpu::layer::LayerInfo;
 use crate::gpu::ShaderUniforms;
+use crate::gpu::layer::LayerInfo;
 use crate::midi::MidiSystem;
 use crate::osc::OscSystem;
 use crate::params::ParamStore;
 use crate::preset::PresetStore;
 use crate::ui::theme::ThemeMode;
 use crate::ui::theme::colors::theme_colors;
-use crate::web::WebSystem;
 use crate::ui::widgets;
+use crate::web::WebSystem;
 
 /// Draw all UI panels when overlay is visible.
 pub fn draw_panels(
@@ -74,14 +74,15 @@ pub fn draw_panels(
         let midi_recently_active = midi.is_recently_active();
         #[cfg(feature = "ndi")]
         let ndi_running = ctx.data_mut(|d| {
-            d.get_temp::<bool>(egui::Id::new("ndi_running")).unwrap_or(false)
+            d.get_temp::<bool>(egui::Id::new("ndi_running"))
+                .unwrap_or(false)
         });
         #[cfg(not(feature = "ndi"))]
         let ndi_running = false;
         let preset_loading: Option<String> = ctx.data_mut(|d| {
-            d.get_temp::<crate::preset::loader::PresetLoadingState>(
-                egui::Id::new("preset_loading_state"),
-            )
+            d.get_temp::<crate::preset::loader::PresetLoadingState>(egui::Id::new(
+                "preset_loading_state",
+            ))
             .and_then(|s| match s {
                 crate::preset::loader::PresetLoadingState::Loading { preset_name, .. } => {
                     Some(preset_name)
@@ -89,8 +90,15 @@ pub fn draw_panels(
                 _ => None,
             })
         });
-        let scene_active = scene_info.as_ref().and_then(|s| s.timeline.as_ref()).map_or(false, |t| t.active);
-        let scene_cue = scene_info.as_ref().and_then(|s| s.timeline.as_ref()).filter(|t| t.active).map(|t| (t.current_cue, t.cue_count));
+        let scene_active = scene_info
+            .as_ref()
+            .and_then(|s| s.timeline.as_ref())
+            .map_or(false, |t| t.active);
+        let scene_cue = scene_info
+            .as_ref()
+            .and_then(|s| s.timeline.as_ref())
+            .filter(|t| t.active)
+            .map(|t| (t.current_cue, t.cue_count));
         status_bar::draw_status_bar(
             ui,
             shader_error,
@@ -123,7 +131,8 @@ pub fn draw_panels(
                         ..Default::default()
                     })
                     .show(ctx, |ui| {
-                        let cue_names: Vec<String> = scene.cue_list
+                        let cue_names: Vec<String> = scene
+                            .cue_list
                             .iter()
                             .map(|c| c.preset_name.clone())
                             .collect();
@@ -152,29 +161,15 @@ pub fn draw_panels(
                 } else {
                     None
                 };
-                widgets::section(
-                    ui,
-                    "sec_audio",
-                    "Audio",
-                    bpm_badge.as_deref(),
-                    true,
-                    |ui| {
-                        audio_panel::draw_audio_panel(ui, audio, uniforms);
-                    },
-                );
+                widgets::section(ui, "sec_audio", "Audio", bpm_badge.as_deref(), true, |ui| {
+                    audio_panel::draw_audio_panel(ui, audio, uniforms);
+                });
 
                 // Effects section
                 let fx_badge = format!("{}", effect_loader.effects.len());
-                widgets::section(
-                    ui,
-                    "sec_effects",
-                    "Effects",
-                    Some(&fx_badge),
-                    true,
-                    |ui| {
-                        effect_panel::draw_effect_panel(ui, effect_loader);
-                    },
-                );
+                widgets::section(ui, "sec_effects", "Effects", Some(&fx_badge), true, |ui| {
+                    effect_panel::draw_effect_panel(ui, effect_loader);
+                });
 
                 // Presets section
                 let preset_badge = if preset_store.presets.is_empty() {
@@ -197,37 +192,24 @@ pub fn draw_panels(
                 if let Some(ref scene) = scene_info {
                     let scene_count = scene.scene_store_names.len();
                     let scene_badge_owned = format!("{}", scene_count);
-                    let scene_badge: Option<&str> = if scene.timeline.as_ref().map_or(false, |t| t.active) {
-                        Some("LIVE")
-                    } else if scene_count > 0 {
-                        Some(&scene_badge_owned)
-                    } else {
-                        None
-                    };
-                    widgets::section(
-                        ui,
-                        "sec_scenes",
-                        "Scenes",
-                        scene_badge,
-                        false,
-                        |ui| {
-                            scene_panel::draw_scene_panel(ui, scene);
-                        },
-                    );
+                    let scene_badge: Option<&str> =
+                        if scene.timeline.as_ref().map_or(false, |t| t.active) {
+                            Some("LIVE")
+                        } else if scene_count > 0 {
+                            Some(&scene_badge_owned)
+                        } else {
+                            None
+                        };
+                    widgets::section(ui, "sec_scenes", "Scenes", scene_badge, false, |ui| {
+                        scene_panel::draw_scene_panel(ui, scene);
+                    });
                 }
 
                 // Layers section
                 let layer_badge = format!("{}", layers.len());
-                widgets::section(
-                    ui,
-                    "sec_layers",
-                    "Layers",
-                    Some(&layer_badge),
-                    true,
-                    |ui| {
-                        layer_panel::draw_layer_panel(ui, layers, active_layer);
-                    },
-                );
+                widgets::section(ui, "sec_layers", "Layers", Some(&layer_badge), true, |ui| {
+                    layer_panel::draw_layer_panel(ui, layers, active_layer);
+                });
 
                 // MIDI section (default collapsed)
                 let midi_badge = if !midi.config.enabled {
@@ -237,16 +219,9 @@ pub fn draw_panels(
                 } else {
                     None
                 };
-                widgets::section(
-                    ui,
-                    "sec_midi",
-                    "MIDI",
-                    midi_badge,
-                    false,
-                    |ui| {
-                        midi_panel::draw_midi_panel(ui, midi);
-                    },
-                );
+                widgets::section(ui, "sec_midi", "MIDI", midi_badge, false, |ui| {
+                    midi_panel::draw_midi_panel(ui, midi);
+                });
 
                 // OSC section (default collapsed)
                 let osc_badge = if !osc.config.enabled {
@@ -254,70 +229,46 @@ pub fn draw_panels(
                 } else {
                     Some("ON")
                 };
-                widgets::section(
-                    ui,
-                    "sec_osc",
-                    "OSC",
-                    osc_badge,
-                    false,
-                    |ui| {
-                        osc_panel::draw_osc_panel(ui, osc);
-                    },
-                );
+                widgets::section(ui, "sec_osc", "OSC", osc_badge, false, |ui| {
+                    osc_panel::draw_osc_panel(ui, osc);
+                });
 
                 // Web section (default collapsed)
                 let web_badge_text;
                 let web_badge = if !web.config.enabled {
                     "OFF"
                 } else if web.client_count > 0 {
-                    web_badge_text = format!("{} client{}", web.client_count, if web.client_count == 1 { "" } else { "s" });
+                    web_badge_text = format!(
+                        "{} client{}",
+                        web.client_count,
+                        if web.client_count == 1 { "" } else { "s" }
+                    );
                     &web_badge_text
                 } else {
                     "ON"
                 };
-                widgets::section(
-                    ui,
-                    "sec_web",
-                    "Web",
-                    Some(web_badge),
-                    false,
-                    |ui| {
-                        web_panel::draw_web_panel(ui, web);
-                    },
-                );
+                widgets::section(ui, "sec_web", "Web", Some(web_badge), false, |ui| {
+                    web_panel::draw_web_panel(ui, web);
+                });
 
                 // NDI Outputs section (feature-gated, default collapsed)
                 #[cfg(feature = "ndi")]
                 {
-                    let ndi_info: Option<ndi_panel::NdiInfo> = ui.ctx().data_mut(|d| {
-                        d.remove_temp(egui::Id::new("ndi_info"))
-                    });
+                    let ndi_info: Option<ndi_panel::NdiInfo> = ui
+                        .ctx()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("ndi_info")));
                     if let Some(info) = ndi_info {
                         let ndi_badge = if info.running { "ON" } else { "OFF" };
-                        widgets::section(
-                            ui,
-                            "sec_ndi",
-                            "Outputs",
-                            Some(ndi_badge),
-                            false,
-                            |ui| {
-                                ndi_panel::draw_ndi_panel(ui, &info);
-                            },
-                        );
+                        widgets::section(ui, "sec_ndi", "Outputs", Some(ndi_badge), false, |ui| {
+                            ndi_panel::draw_ndi_panel(ui, &info);
+                        });
                     }
                 }
 
                 // Settings section (default collapsed)
-                widgets::section(
-                    ui,
-                    "sec_settings",
-                    "Global",
-                    None,
-                    false,
-                    |ui| {
-                        settings_panel::draw_settings_panel(ui, current_theme);
-                    },
-                );
+                widgets::section(ui, "sec_settings", "Global", None, false, |ui| {
+                    settings_panel::draw_settings_panel(ui, current_theme);
+                });
             });
         });
 
@@ -329,51 +280,28 @@ pub fn draw_panels(
             ScrollArea::vertical().show(ui, |ui| {
                 if let Some(ref info) = webcam_info {
                     // Webcam layer: show webcam controls
-                    widgets::section(
-                        ui,
-                        "sec_webcam",
-                        "Webcam",
-                        None,
-                        true,
-                        |ui| {
-                            webcam_panel::draw_webcam_panel(ui, info);
-                        },
-                    );
+                    widgets::section(ui, "sec_webcam", "Webcam", None, true, |ui| {
+                        webcam_panel::draw_webcam_panel(ui, info);
+                    });
                 } else if let Some(ref info) = media_info {
                     // Media layer: show media controls instead of params
-                    widgets::section(
-                        ui,
-                        "sec_media",
-                        "Media",
-                        None,
-                        true,
-                        |ui| {
-                            media_panel::draw_media_panel(ui, info);
-                        },
-                    );
+                    widgets::section(ui, "sec_media", "Media", None, true, |ui| {
+                        media_panel::draw_media_panel(ui, info);
+                    });
                 } else {
                     // Effect layer: show parameters
-                    widgets::section(
-                        ui,
-                        "sec_params",
-                        "Parameters",
-                        None,
-                        true,
-                        |ui| {
-                            param_panel::draw_param_panel(ui, params, midi, osc);
-                        },
-                    );
+                    widgets::section(ui, "sec_params", "Parameters", None, true, |ui| {
+                        param_panel::draw_param_panel(ui, params, midi, osc);
+                    });
 
                     // Particle section (shows when active layer has particles)
                     if let Some(ref pinfo) = particle_info {
-                        let particle_badge = format!(
-                            "{}",
-                            if pinfo.alive_count >= 1000 {
-                                format!("{:.1}K", pinfo.alive_count as f32 / 1000.0)
-                            } else {
-                                format!("{}", pinfo.alive_count)
-                            }
-                        );
+                        let particle_badge = (if pinfo.alive_count >= 1000 {
+                            format!("{:.1}K", pinfo.alive_count as f32 / 1000.0)
+                        } else {
+                            format!("{}", pinfo.alive_count)
+                        })
+                        .to_string();
                         widgets::section(
                             ui,
                             "sec_particles",
@@ -425,81 +353,89 @@ pub fn draw_panels(
                 }
 
                 // Post-Processing section
-                widgets::section(
-                    ui,
-                    "sec_postprocess",
-                    "Post-Processing",
-                    None,
-                    true,
-                    |ui| {
-                        ui.checkbox(&mut postprocess.enabled, "Enable");
-                        let global_on = postprocess.enabled;
+                widgets::section(ui, "sec_postprocess", "Post-Processing", None, true, |ui| {
+                    ui.checkbox(&mut postprocess.enabled, "Enable");
+                    let global_on = postprocess.enabled;
 
-                        ui.add_space(4.0);
+                    ui.add_space(4.0);
 
-                        // Bloom
-                        ui.add_enabled_ui(global_on, |ui| {
-                            ui.checkbox(&mut postprocess.bloom_enabled, "Bloom");
-                        });
-                        ui.add_enabled_ui(global_on && postprocess.bloom_enabled, |ui| {
-                            ui.indent("bloom_params", |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label("Threshold");
-                                    ui.add(egui::Slider::new(&mut postprocess.bloom_threshold, 0.0..=1.5).show_value(true));
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Intensity");
-                                    ui.add(egui::Slider::new(&mut postprocess.bloom_intensity, 0.0..=1.0).show_value(true));
-                                });
+                    // Bloom
+                    ui.add_enabled_ui(global_on, |ui| {
+                        ui.checkbox(&mut postprocess.bloom_enabled, "Bloom");
+                    });
+                    ui.add_enabled_ui(global_on && postprocess.bloom_enabled, |ui| {
+                        ui.indent("bloom_params", |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Threshold");
+                                ui.add(
+                                    egui::Slider::new(&mut postprocess.bloom_threshold, 0.0..=1.5)
+                                        .show_value(true),
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Intensity");
+                                ui.add(
+                                    egui::Slider::new(&mut postprocess.bloom_intensity, 0.0..=1.0)
+                                        .show_value(true),
+                                );
                             });
                         });
+                    });
 
-                        ui.add_space(2.0);
+                    ui.add_space(2.0);
 
-                        // Chromatic Aberration
-                        ui.add_enabled_ui(global_on, |ui| {
-                            ui.checkbox(&mut postprocess.ca_enabled, "Chromatic Aberration");
-                        });
-                        ui.add_enabled_ui(global_on && postprocess.ca_enabled, |ui| {
-                            ui.indent("ca_params", |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label("Intensity");
-                                    ui.add(egui::Slider::new(&mut postprocess.ca_intensity, 0.0..=1.0).show_value(true));
-                                });
+                    // Chromatic Aberration
+                    ui.add_enabled_ui(global_on, |ui| {
+                        ui.checkbox(&mut postprocess.ca_enabled, "Chromatic Aberration");
+                    });
+                    ui.add_enabled_ui(global_on && postprocess.ca_enabled, |ui| {
+                        ui.indent("ca_params", |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Intensity");
+                                ui.add(
+                                    egui::Slider::new(&mut postprocess.ca_intensity, 0.0..=1.0)
+                                        .show_value(true),
+                                );
                             });
                         });
+                    });
 
-                        ui.add_space(2.0);
+                    ui.add_space(2.0);
 
-                        // Vignette
-                        ui.add_enabled_ui(global_on, |ui| {
-                            ui.checkbox(&mut postprocess.vignette_enabled, "Vignette");
-                        });
-                        ui.add_enabled_ui(global_on && postprocess.vignette_enabled, |ui| {
-                            ui.indent("vignette_params", |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label("Strength");
-                                    ui.add(egui::Slider::new(&mut postprocess.vignette, 0.0..=1.0).show_value(true));
-                                });
+                    // Vignette
+                    ui.add_enabled_ui(global_on, |ui| {
+                        ui.checkbox(&mut postprocess.vignette_enabled, "Vignette");
+                    });
+                    ui.add_enabled_ui(global_on && postprocess.vignette_enabled, |ui| {
+                        ui.indent("vignette_params", |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Strength");
+                                ui.add(
+                                    egui::Slider::new(&mut postprocess.vignette, 0.0..=1.0)
+                                        .show_value(true),
+                                );
                             });
                         });
+                    });
 
-                        ui.add_space(2.0);
+                    ui.add_space(2.0);
 
-                        // Film Grain
-                        ui.add_enabled_ui(global_on, |ui| {
-                            ui.checkbox(&mut postprocess.grain_enabled, "Film Grain");
-                        });
-                        ui.add_enabled_ui(global_on && postprocess.grain_enabled, |ui| {
-                            ui.indent("grain_params", |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label("Intensity");
-                                    ui.add(egui::Slider::new(&mut postprocess.grain_intensity, 0.0..=1.0).show_value(true));
-                                });
+                    // Film Grain
+                    ui.add_enabled_ui(global_on, |ui| {
+                        ui.checkbox(&mut postprocess.grain_enabled, "Film Grain");
+                    });
+                    ui.add_enabled_ui(global_on && postprocess.grain_enabled, |ui| {
+                        ui.indent("grain_params", |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Intensity");
+                                ui.add(
+                                    egui::Slider::new(&mut postprocess.grain_intensity, 0.0..=1.0)
+                                        .show_value(true),
+                                );
                             });
                         });
-                    },
-                );
+                    });
+                });
             });
         });
 }

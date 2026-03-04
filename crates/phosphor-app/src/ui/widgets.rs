@@ -1,4 +1,7 @@
-use egui::{collapsing_header::CollapsingState, pos2, Color32, CornerRadius, Frame, Margin, RichText, Shape, Stroke, Ui};
+use egui::{
+    Color32, CornerRadius, Frame, Margin, RichText, Shape, Stroke, Ui,
+    collapsing_header::CollapsingState, pos2,
+};
 
 use super::theme::colors::theme_colors;
 use super::theme::tokens::*;
@@ -45,17 +48,17 @@ pub fn section(
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(badge_text) = badge {
-                    ui.label(
-                        RichText::new(badge_text)
-                            .size(SMALL_SIZE)
-                            .color(tc.accent),
-                    );
+                    ui.label(RichText::new(badge_text).size(SMALL_SIZE).color(tc.accent));
                 }
             });
         });
 
         // Toggle on header click
-        if header_response.response.interact(egui::Sense::click()).clicked() {
+        if header_response
+            .response
+            .interact(egui::Sense::click())
+            .clicked()
+        {
             let mut state = CollapsingState::load_with_default_open(ui.ctx(), id, default_open);
             state.toggle(ui);
             state.store(ui.ctx());

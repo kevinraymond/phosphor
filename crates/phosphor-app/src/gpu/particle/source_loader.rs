@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::thread;
 
-use crossbeam_channel::{bounded, Receiver, TryRecvError};
+use crossbeam_channel::{Receiver, TryRecvError, bounded};
 
 use crate::media::types::DecodedFrame;
 
@@ -176,13 +176,10 @@ impl ParticleSourceLoader {
         thread::Builder::new()
             .name("particle-source-dialog".into())
             .spawn(move || {
-                let mut dialog = rfd::FileDialog::new()
-                    .set_title("Load Video for Particle Source");
+                let mut dialog = rfd::FileDialog::new().set_title("Load Video for Particle Source");
                 if crate::media::video::ffmpeg_available() {
-                    dialog = dialog.add_filter(
-                        "Video",
-                        &["mp4", "mov", "avi", "mkv", "webm", "m4v"],
-                    );
+                    dialog =
+                        dialog.add_filter("Video", &["mp4", "mov", "avi", "mkv", "webm", "m4v"]);
                 }
                 if let Some(path) = dialog.pick_file() {
                     let result = load_video_sync(&path);
@@ -366,7 +363,11 @@ fn load_animated_webp_sync(path: &std::path::Path) -> Option<ParticleSourceResul
                     }
                     rgba
                 };
-                frames.push(DecodedFrame { data, width, height });
+                frames.push(DecodedFrame {
+                    data,
+                    width,
+                    height,
+                });
             }
             Err(_) => break,
         }
@@ -388,7 +389,9 @@ fn load_animated_webp_sync(path: &std::path::Path) -> Option<ParticleSourceResul
 /// Synchronous video loading (runs on background thread).
 #[cfg(feature = "video")]
 fn load_video_sync(path: &std::path::Path) -> ParticleSourceResult {
-    use crate::media::video::{decode_all_frames, ffmpeg_available, probe_video, MAX_PREDECODE_SECS};
+    use crate::media::video::{
+        MAX_PREDECODE_SECS, decode_all_frames, ffmpeg_available, probe_video,
+    };
 
     if !ffmpeg_available() {
         return ParticleSourceResult::Error("ffmpeg/ffprobe not found on PATH".to_string());

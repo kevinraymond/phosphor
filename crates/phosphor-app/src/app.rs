@@ -5,35 +5,35 @@ use anyhow::Result;
 use winit::window::Window;
 
 use crate::audio::AudioSystem;
+use crate::effect::EffectLoader;
 use crate::effect::format::PostProcessDef;
 use crate::effect::loader::assets_dir;
-use crate::effect::EffectLoader;
 use crate::gpu::compositor::Compositor;
 use crate::gpu::layer::{BlendMode, EffectLayer, Layer, LayerContent, LayerInfo, LayerStack};
-use crate::media::MediaLayer;
 use crate::gpu::particle::ParticleSystem;
 use crate::gpu::pass_executor::PassExecutor;
 use crate::gpu::placeholder::PlaceholderTexture;
 use crate::gpu::postprocess::PostProcessChain;
 use crate::gpu::render_target::PingPongTarget;
 use crate::gpu::{GpuContext, ShaderPipeline, ShaderUniforms, UniformBuffer};
+use crate::media::MediaLayer;
+use crate::midi::MidiSystem;
 use crate::midi::clock::MidiClock;
 use crate::midi::types::TriggerAction;
-use crate::midi::MidiSystem;
 use crate::osc::OscSystem;
 use crate::params::{ParamStore, ParamValue};
-use crate::web::WebSystem;
-use crate::preset::loader::{PresetLoader, MediaDecodeResult};
-use crate::preset::store::LayerPreset;
 use crate::preset::PresetStore;
+use crate::preset::loader::{MediaDecodeResult, PresetLoader};
+use crate::preset::store::LayerPreset;
 use crate::scene::SceneStore;
 use crate::scene::timeline::{Timeline, TimelineEvent};
 use crate::scene::transition::TransitionRenderer;
 use crate::scene::types::AdvanceMode;
-use crate::shader::ShaderWatcher;
 use crate::settings::SettingsConfig;
+use crate::shader::ShaderWatcher;
 use crate::ui::EguiOverlay;
 use crate::ui::panels::shader_editor::ShaderEditorState;
+use crate::web::WebSystem;
 
 pub struct App {
     pub gpu: GpuContext,
@@ -103,6 +103,9 @@ pub struct App {
     pub depth_thread: Option<crate::depth::thread::DepthThread>,
     #[cfg(feature = "depth")]
     pub depth_download: Option<std::sync::Arc<crate::depth::model::DownloadProgress>>,
+    // GPU profiler (feature-gated)
+    #[cfg(feature = "profiling")]
+    pub gpu_profiler: crate::gpu::profiler::Profiler,
 }
 
 impl App {
@@ -131,70 +134,99 @@ impl App {
 
         // Build initial layer with default effect (use normalized_passes for multi-pass effects)
         let uniform_buffer = UniformBuffer::new(&gpu.device);
-        let (pass_executor, shader_sources, param_store, effect_index) = if let Some(idx) = default_idx {
-            let effect = &effect_loader.effects[idx];
-            let passes = effect.normalized_passes();
-            if !passes.is_empty() {
-                match PassExecutor::new(
-                    &gpu.device,
-                    hdr_format,
-                    gpu.surface_config.width,
-                    gpu.surface_config.height,
-                    &passes,
-                    &effect_loader,
-                    &uniform_buffer,
-                    &placeholder,
-                    &gpu.queue,
-                ) {
-                    Ok(executor) => {
-                        let sources: Vec<String> = passes
-                            .iter()
-                            .filter_map(|p| effect_loader.load_effect_source(&p.shader).ok())
-                            .collect();
-                        let mut store = ParamStore::new();
-                        store.load_from_defs(&effect.inputs);
-                        effect_loader.current_effect = Some(idx);
-                        (executor, sources, store, Some(idx))
+        let (pass_executor, shader_sources, param_store, effect_index) =
+            if let Some(idx) = default_idx {
+                let effect = &effect_loader.effects[idx];
+                let passes = effect.normalized_passes();
+                if !passes.is_empty() {
+                    match PassExecutor::new(
+                        &gpu.device,
+                        hdr_format,
+                        gpu.surface_config.width,
+                        gpu.surface_config.height,
+                        &passes,
+                        &effect_loader,
+                        &uniform_buffer,
+                        &placeholder,
+                        &gpu.queue,
+                        gpu.pipeline_cache.as_ref(),
+                    ) {
+                        Ok(executor) => {
+                            let sources: Vec<String> = passes
+                                .iter()
+                                .filter_map(|p| effect_loader.load_effect_source(&p.shader).ok())
+                                .collect();
+                            let mut store = ParamStore::new();
+                            store.load_from_defs(&effect.inputs);
+                            effect_loader.current_effect = Some(idx);
+                            (executor, sources, store, Some(idx))
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to load effect: {e}, using default shader");
+                            let source = read_default_shader();
+                            let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &source, gpu.pipeline_cache.as_ref())?;
+                            let feedback = PingPongTarget::new_cleared(
+                                &gpu.device,
+                                &gpu.queue,
+                                gpu.surface_config.width,
+                                gpu.surface_config.height,
+                                hdr_format,
+                                1.0,
+                            );
+                            let executor = PassExecutor::single_pass(
+                                pipeline,
+                                feedback,
+                                &uniform_buffer,
+                                &gpu.device,
+                                &placeholder,
+                            );
+                            (executor, vec![source], ParamStore::new(), None)
+                        }
                     }
-                    Err(e) => {
-                        log::warn!("Failed to load effect: {e}, using default shader");
-                        let source = read_default_shader();
-                        let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &source)?;
-                        let feedback = PingPongTarget::new_cleared(
-                            &gpu.device, &gpu.queue, gpu.surface_config.width, gpu.surface_config.height,
-                            hdr_format, 1.0,
-                        );
-                        let executor = PassExecutor::single_pass(
-                            pipeline, feedback, &uniform_buffer, &gpu.device, &placeholder,
-                        );
-                        (executor, vec![source], ParamStore::new(), None)
-                    }
+                } else {
+                    log::warn!(
+                        "Effect '{}' has no passes, using default shader",
+                        effect.name
+                    );
+                    let source = read_default_shader();
+                    let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &source, gpu.pipeline_cache.as_ref())?;
+                    let feedback = PingPongTarget::new_cleared(
+                        &gpu.device,
+                        &gpu.queue,
+                        gpu.surface_config.width,
+                        gpu.surface_config.height,
+                        hdr_format,
+                        1.0,
+                    );
+                    let executor = PassExecutor::single_pass(
+                        pipeline,
+                        feedback,
+                        &uniform_buffer,
+                        &gpu.device,
+                        &placeholder,
+                    );
+                    (executor, vec![source], ParamStore::new(), None)
                 }
             } else {
-                log::warn!("Effect '{}' has no passes, using default shader", effect.name);
                 let source = read_default_shader();
-                let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &source)?;
+                let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &source, gpu.pipeline_cache.as_ref())?;
                 let feedback = PingPongTarget::new_cleared(
-                    &gpu.device, &gpu.queue, gpu.surface_config.width, gpu.surface_config.height,
-                    hdr_format, 1.0,
+                    &gpu.device,
+                    &gpu.queue,
+                    gpu.surface_config.width,
+                    gpu.surface_config.height,
+                    hdr_format,
+                    1.0,
                 );
                 let executor = PassExecutor::single_pass(
-                    pipeline, feedback, &uniform_buffer, &gpu.device, &placeholder,
+                    pipeline,
+                    feedback,
+                    &uniform_buffer,
+                    &gpu.device,
+                    &placeholder,
                 );
                 (executor, vec![source], ParamStore::new(), None)
-            }
-        } else {
-            let source = read_default_shader();
-            let pipeline = ShaderPipeline::new(&gpu.device, hdr_format, &source)?;
-            let feedback = PingPongTarget::new_cleared(
-                &gpu.device, &gpu.queue, gpu.surface_config.width, gpu.surface_config.height,
-                hdr_format, 1.0,
-            );
-            let executor = PassExecutor::single_pass(
-                pipeline, feedback, &uniform_buffer, &gpu.device, &placeholder,
-            );
-            (executor, vec![source], ParamStore::new(), None)
-        };
+            };
 
         // Build particle system for initial effect (if it has one)
         let mut pass_executor = pass_executor;
@@ -205,17 +237,17 @@ impl App {
                     effect_loader.grid_dims = grid_dims(pd.max_count);
                 }
                 let compute_source = if pd.compute_shader.is_empty() {
-                    effect_loader.prepend_compute_libraries(
-                        include_str!("../../../assets/shaders/builtin/particle_sim.wgsl"),
-                    )
+                    effect_loader.prepend_compute_libraries(include_str!(
+                        "../../../assets/shaders/builtin/particle_sim.wgsl"
+                    ))
                 } else {
                     effect_loader
                         .load_compute_source(&pd.compute_shader)
                         .unwrap_or_else(|e| {
                             log::warn!("Failed to load compute shader: {e}");
-                            effect_loader.prepend_compute_libraries(
-                                include_str!("../../../assets/shaders/builtin/particle_sim.wgsl"),
-                            )
+                            effect_loader.prepend_compute_libraries(include_str!(
+                                "../../../assets/shaders/builtin/particle_sim.wgsl"
+                            ))
                         })
                 };
                 match ParticleSystem::new(
@@ -235,10 +267,7 @@ impl App {
                                 pd.trail_length,
                                 pd.trail_width,
                             );
-                            log::info!(
-                                "Trail rendering enabled: {} points",
-                                pd.trail_length
-                            );
+                            log::info!("Trail rendering enabled: {} points", pd.trail_length);
                         }
                         if pd.interaction {
                             log::info!("Spatial hash enabled for particle interaction");
@@ -302,6 +331,9 @@ impl App {
             gpu.surface_config.height,
         );
 
+        #[cfg(feature = "profiling")]
+        let gpu_profiler = crate::gpu::profiler::Profiler::new(&gpu.device);
+
         let now = Instant::now();
         Ok(Self {
             gpu,
@@ -351,13 +383,21 @@ impl App {
             depth_thread: None,
             #[cfg(feature = "depth")]
             depth_download: None,
+            #[cfg(feature = "profiling")]
+            gpu_profiler,
         })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         self.gpu.resize(width, height);
         for layer in &mut self.layer_stack.layers {
-            layer.resize(&self.gpu.device, &self.gpu.queue, width, height, &self.placeholder);
+            layer.resize(
+                &self.gpu.device,
+                &self.gpu.queue,
+                width,
+                height,
+                &self.placeholder,
+            );
             layer.resize_media(&self.gpu.device, &self.gpu.queue, width, height);
         }
         self.compositor.resize(&self.gpu.device, width, height);
@@ -459,14 +499,21 @@ impl App {
             for (layer_idx, name, value) in osc_result.layer_params {
                 if let Some(target_layer) = self.layer_stack.layers.get_mut(layer_idx) {
                     if !target_layer.locked {
-                        if let Some(def) = target_layer.param_store.defs.iter().find(|d| d.name() == name) {
+                        if let Some(def) = target_layer
+                            .param_store
+                            .defs
+                            .iter()
+                            .find(|d| d.name() == name)
+                        {
                             match def.clone() {
                                 crate::params::ParamDef::Float { min, max, .. } => {
                                     let val = min + (max - min) * value.clamp(0.0, 1.0);
                                     target_layer.param_store.set(&name, ParamValue::Float(val));
                                 }
                                 crate::params::ParamDef::Bool { .. } => {
-                                    target_layer.param_store.set(&name, ParamValue::Bool(value > 0.5));
+                                    target_layer
+                                        .param_store
+                                        .set(&name, ParamValue::Bool(value > 0.5));
                                 }
                                 _ => {}
                             }
@@ -546,14 +593,21 @@ impl App {
             for (layer_idx, name, value) in web_result.layer_params {
                 if let Some(target_layer) = self.layer_stack.layers.get_mut(layer_idx) {
                     if !target_layer.locked {
-                        if let Some(def) = target_layer.param_store.defs.iter().find(|d| d.name() == name) {
+                        if let Some(def) = target_layer
+                            .param_store
+                            .defs
+                            .iter()
+                            .find(|d| d.name() == name)
+                        {
                             match def.clone() {
                                 crate::params::ParamDef::Float { min, max, .. } => {
                                     let val = min + (max - min) * value.clamp(0.0, 1.0);
                                     target_layer.param_store.set(&name, ParamValue::Float(val));
                                 }
                                 crate::params::ParamDef::Bool { .. } => {
-                                    target_layer.param_store.set(&name, ParamValue::Bool(value > 0.5));
+                                    target_layer
+                                        .param_store
+                                        .set(&name, ParamValue::Bool(value > 0.5));
                                 }
                                 _ => {}
                             }
@@ -617,9 +671,21 @@ impl App {
             // After preset load, broadcast full state so all clients update
             if had_preset_loads && self.web.client_count > 0 {
                 let layer_infos = self.layer_stack.layer_infos(&self.effect_loader.effects);
-                let layer_data: Vec<_> = self.layer_stack.layers.iter().map(|l| {
-                    (&l.param_store, l.effect_index(), l.blend_mode, l.opacity, l.enabled, l.locked)
-                }).collect();
+                let layer_data: Vec<_> = self
+                    .layer_stack
+                    .layers
+                    .iter()
+                    .map(|l| {
+                        (
+                            &l.param_store,
+                            l.effect_index(),
+                            l.blend_mode,
+                            l.opacity,
+                            l.enabled,
+                            l.locked,
+                        )
+                    })
+                    .collect();
                 let state_json = crate::web::state::build_full_state(
                     &self.effect_loader.effects,
                     &layer_infos,
@@ -634,7 +700,10 @@ impl App {
 
         // Drain async preset decode results
         if let Some(result) = self.preset_loader.try_recv() {
-            log::info!("Async preset decode complete, applying preset index {}", result.preset_index);
+            log::info!(
+                "Async preset decode complete, applying preset index {}",
+                result.preset_index
+            );
             let index = result.preset_index;
             let preset = result.preset;
             self.apply_preset_immediately(index, &preset, result.decoded_media);
@@ -642,9 +711,21 @@ impl App {
             // Broadcast full state to web clients after async preset load
             if self.web.client_count > 0 {
                 let layer_infos = self.layer_stack.layer_infos(&self.effect_loader.effects);
-                let layer_data: Vec<_> = self.layer_stack.layers.iter().map(|l| {
-                    (&l.param_store, l.effect_index(), l.blend_mode, l.opacity, l.enabled, l.locked)
-                }).collect();
+                let layer_data: Vec<_> = self
+                    .layer_stack
+                    .layers
+                    .iter()
+                    .map(|l| {
+                        (
+                            &l.param_store,
+                            l.effect_index(),
+                            l.blend_mode,
+                            l.opacity,
+                            l.enabled,
+                            l.locked,
+                        )
+                    })
+                    .collect();
                 let state_json = crate::web::state::build_full_state(
                     &self.effect_loader.effects,
                     &layer_infos,
@@ -661,8 +742,10 @@ impl App {
         self.midi_clock_beat_crossed = self.midi.drain_clock(&mut self.midi_clock);
 
         // Auto-follow MIDI transport → timeline
-        if self.midi_clock.playing() && !self.midi_clock_was_playing
-            && !self.timeline.active && !self.timeline.cues.is_empty()
+        if self.midi_clock.playing()
+            && !self.midi_clock_was_playing
+            && !self.timeline.active
+            && !self.timeline.cues.is_empty()
         {
             let event = self.timeline.start(0);
             self.process_timeline_event(event);
@@ -702,18 +785,25 @@ impl App {
         // OSC TX: send audio features + state + timeline (throttled internally)
         if let Some(features) = self.latest_audio {
             let active = self.layer_stack.active_layer;
-            let effect_name = self.layer_stack.active()
+            let effect_name = self
+                .layer_stack
+                .active()
                 .and_then(|l| l.effect_index())
                 .and_then(|i| self.effect_loader.effects.get(i))
                 .map(|e| e.name.as_str())
                 .unwrap_or("");
-            let tl_progress = if let crate::scene::timeline::PlaybackState::Transitioning { progress, .. } = &self.timeline.state {
-                *progress
-            } else {
-                0.0
-            };
+            let tl_progress =
+                if let crate::scene::timeline::PlaybackState::Transitioning { progress, .. } =
+                    &self.timeline.state
+                {
+                    *progress
+                } else {
+                    0.0
+                };
             self.osc.send_state(
-                &features, active, effect_name,
+                &features,
+                active,
+                effect_name,
                 self.timeline.active,
                 self.timeline.current_cue_index(),
                 self.timeline.cues.len(),
@@ -727,9 +817,21 @@ impl App {
         // Web: update latest state for new client initial sync
         if self.web.client_count > 0 || self.web.is_running() {
             let layer_infos = self.layer_stack.layer_infos(&self.effect_loader.effects);
-            let layer_data: Vec<_> = self.layer_stack.layers.iter().map(|l| {
-                (&l.param_store, l.effect_index(), l.blend_mode, l.opacity, l.enabled, l.locked)
-            }).collect();
+            let layer_data: Vec<_> = self
+                .layer_stack
+                .layers
+                .iter()
+                .map(|l| {
+                    (
+                        &l.param_store,
+                        l.effect_index(),
+                        l.blend_mode,
+                        l.opacity,
+                        l.enabled,
+                        l.locked,
+                    )
+                })
+                .collect();
             let state_json = crate::web::state::build_full_state(
                 &self.effect_loader.effects,
                 &layer_infos,
@@ -874,16 +976,10 @@ impl App {
                     );
                     // Forward first 8 effect params to compute shader
                     let p = e.uniforms.params;
-                    ps.uniforms.effect_params = [
-                        p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7],
-                    ];
+                    ps.uniforms.effect_params = [p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]];
                     // Advance obstacle video playback
                     if ps.obstacle_source == "video" {
-                        ps.advance_obstacle_video(
-                            &self.gpu.device,
-                            &self.gpu.queue,
-                            dt as f64,
-                        );
+                        ps.advance_obstacle_video(&self.gpu.device, &self.gpu.queue, dt as f64);
                     }
                     // Pack obstacle collision uniforms
                     ps.uniforms.obstacle_enabled = if ps.obstacle_enabled { 1.0 } else { 0.0 };
@@ -899,14 +995,18 @@ impl App {
         // Shader hot-reload — iterate all layers
         let changes = self.shader_watcher.drain_changes();
         if !changes.is_empty() {
-            let lib_changed = changes.iter().any(|p| p.to_string_lossy().contains("/lib/"));
+            let lib_changed = changes
+                .iter()
+                .any(|p| p.to_string_lossy().contains("/lib/"));
             if lib_changed {
                 self.effect_loader.reload_library();
             }
             let hdr_format = GpuContext::hdr_format();
 
             for layer in &mut self.layer_stack.layers {
-                let LayerContent::Effect(ref mut e) = layer.content else { continue };
+                let LayerContent::Effect(ref mut e) = layer.content else {
+                    continue;
+                };
                 let effect_idx = match e.effect_index {
                     Some(idx) => idx,
                     None => continue,
@@ -926,10 +1026,8 @@ impl App {
                     }
                     match self.effect_loader.load_effect_source(&pass_def.shader) {
                         Ok(source) => {
-                            let changed = e
-                                .shader_sources
-                                .get(i)
-                                .map_or(true, |prev| *prev != source);
+                            let changed =
+                                e.shader_sources.get(i).map_or(true, |prev| *prev != source);
                             if changed {
                                 log::info!("Shader changed: pass {} ({})", i, pass_def.shader);
                                 match e.pass_executor.recompile_pass(
@@ -939,6 +1037,7 @@ impl App {
                                     &source,
                                     &e.uniform_buffer,
                                     &self.placeholder,
+                                    self.gpu.pipeline_cache.as_ref(),
                                 ) {
                                     Ok(()) => {
                                         if i < e.shader_sources.len() {
@@ -984,7 +1083,7 @@ impl App {
                                     }
                                     Ok(_) => {}
                                     Err(e) => {
-                                        log::error!("Failed to reload compute shader: {e}")
+                                        log::error!("Failed to reload compute shader: {e}");
                                     }
                                 }
                             }
@@ -1068,7 +1167,9 @@ impl App {
             // Update layers using this effect
             for layer_idx in 0..self.layer_stack.layers.len() {
                 let layer = &self.layer_stack.layers[layer_idx];
-                let LayerContent::Effect(ref eff) = layer.content else { continue };
+                let LayerContent::Effect(ref eff) = layer.content else {
+                    continue;
+                };
                 if eff.effect_index != Some(effect_idx) {
                     continue;
                 }
@@ -1083,7 +1184,8 @@ impl App {
                     // Restore params that still exist with matching types
                     let layer = &mut self.layer_stack.layers[layer_idx];
                     for (name, value) in &saved_values {
-                        if let Some(def) = layer.param_store.defs.iter().find(|d| d.name() == name) {
+                        if let Some(def) = layer.param_store.defs.iter().find(|d| d.name() == name)
+                        {
                             if def.default_value().float_count() == value.float_count() {
                                 layer.param_store.values.insert(name.clone(), value.clone());
                             }
@@ -1110,7 +1212,9 @@ impl App {
             // Update editor paired content if open on this effect
             if self.shader_editor.open {
                 if let Some(ref paired_path) = self.shader_editor.paired_path {
-                    let paired_canonical = paired_path.canonicalize().unwrap_or_else(|_| paired_path.clone());
+                    let paired_canonical = paired_path
+                        .canonicalize()
+                        .unwrap_or_else(|_| paired_path.clone());
                     if paired_canonical == pfx_canonical {
                         self.shader_editor.paired_content = json.clone();
                         self.shader_editor.paired_disk_content = json;
@@ -1130,15 +1234,18 @@ impl App {
 
         // For image emitters, use the builtin image_scatter compute shader
         let compute_source = if is_image_emitter && particles.compute_shader.is_empty() {
-            self.effect_loader.prepend_compute_libraries(
-                include_str!("../../../assets/shaders/builtin/image_scatter.wgsl"),
-            )
+            self.effect_loader.prepend_compute_libraries(include_str!(
+                "../../../assets/shaders/builtin/image_scatter.wgsl"
+            ))
         } else if particles.compute_shader.is_empty() {
-            self.effect_loader.prepend_compute_libraries(
-                include_str!("../../../assets/shaders/builtin/particle_sim.wgsl"),
-            )
+            self.effect_loader.prepend_compute_libraries(include_str!(
+                "../../../assets/shaders/builtin/particle_sim.wgsl"
+            ))
         } else {
-            match self.effect_loader.load_compute_source(&particles.compute_shader) {
+            match self
+                .effect_loader
+                .load_compute_source(&particles.compute_shader)
+            {
                 Ok(src) => src,
                 Err(e) => {
                     log::error!(
@@ -1150,7 +1257,14 @@ impl App {
             }
         };
 
-        match ParticleSystem::new(&self.gpu.device, &self.gpu.queue, hdr_format, particles, &compute_source, particles.interaction) {
+        match ParticleSystem::new(
+            &self.gpu.device,
+            &self.gpu.queue,
+            hdr_format,
+            particles,
+            &compute_source,
+            particles.interaction,
+        ) {
             Ok(mut ps) => {
                 log::info!("Particle system created: {} particles", particles.max_count);
 
@@ -1180,10 +1294,7 @@ impl App {
                             );
                         }
                         Err(e) => {
-                            log::warn!(
-                                "Failed to load image '{}': {e}",
-                                particles.emitter.image
-                            );
+                            log::warn!("Failed to load image '{}': {e}", particles.emitter.image);
                         }
                     }
 
@@ -1195,9 +1306,13 @@ impl App {
                             if crate::media::video::ffmpeg_available() {
                                 match crate::media::video::probe_video(&video_path) {
                                     Ok(meta) => {
-                                        match crate::media::video::decode_all_frames(&video_path, &meta) {
+                                        match crate::media::video::decode_all_frames(
+                                            &video_path,
+                                            &meta,
+                                        ) {
                                             Ok((frames, delays_ms)) => {
-                                                let path_str = video_path.to_string_lossy().to_string();
+                                                let path_str =
+                                                    video_path.to_string_lossy().to_string();
                                                 ps.set_video_source(
                                                     &self.gpu.queue,
                                                     frames,
@@ -1325,7 +1440,8 @@ impl App {
             );
             // Temporary pipeline — will be replaced by executor_result below
             let default_source = read_default_shader();
-            if let Ok(pipeline) = ShaderPipeline::new(&self.gpu.device, hdr_format, &default_source) {
+            if let Ok(pipeline) = ShaderPipeline::new(&self.gpu.device, hdr_format, &default_source, self.gpu.pipeline_cache.as_ref())
+            {
                 let pass_executor = PassExecutor::single_pass(
                     pipeline,
                     feedback,
@@ -1359,6 +1475,7 @@ impl App {
             uniform_buffer_ref,
             &self.placeholder,
             &self.gpu.queue,
+            self.gpu.pipeline_cache.as_ref(),
         );
 
         match executor_result {
@@ -1397,7 +1514,9 @@ impl App {
             }
             Err(e) => {
                 log::error!("Failed to load effect '{}': {e}", effect.name);
-                if let LayerContent::Effect(ref mut eff) = self.layer_stack.layers[layer_idx].content {
+                if let LayerContent::Effect(ref mut eff) =
+                    self.layer_stack.layers[layer_idx].content
+                {
                     eff.shader_error = Some(format!("Load error: {e}"));
                     // Still track the effect index so "Edit Shader" can find the source file
                     eff.effect_index = Some(effect_index);
@@ -1411,7 +1530,7 @@ impl App {
                     let path = self.effect_loader.resolve_shader_path(&pass.shader);
                     if let Ok(content) = std::fs::read_to_string(&path) {
                         self.shader_editor.open_file(&effect.name, path, content);
-                        self.shader_editor.compile_error = Some(format!("{e}"));
+                        self.shader_editor.compile_error = Some(e.to_string());
                         // Load paired .pfx for tab switching
                         if let Some(ref pfx_path) = effect.source_path {
                             if let Ok(pfx_content) = std::fs::read_to_string(pfx_path) {
@@ -1452,7 +1571,7 @@ impl App {
             1.0,
         );
 
-        match ShaderPipeline::new(&self.gpu.device, hdr_format, &source) {
+        match ShaderPipeline::new(&self.gpu.device, hdr_format, &source, self.gpu.pipeline_cache.as_ref()) {
             Ok(pipeline) => {
                 let executor = PassExecutor::single_pass(
                     pipeline,
@@ -1490,7 +1609,12 @@ impl App {
         self.layer_stack.active_layer = 0;
         self.add_layer();
         // Load Phosphor as default on the fresh layer
-        if let Some(idx) = self.effect_loader.effects.iter().position(|e| e.name == "Phosphor") {
+        if let Some(idx) = self
+            .effect_loader
+            .effects
+            .iter()
+            .position(|e| e.name == "Phosphor")
+        {
             self.load_effect(idx);
         }
     }
@@ -1652,22 +1776,26 @@ impl App {
                     .and_then(|i| self.effect_loader.effects.get(i))
                     .map(|e| e.name.clone())
                     .unwrap_or_default();
-                let media_path = l.as_media().map(|m| m.file_path.to_string_lossy().to_string());
+                let media_path = l
+                    .as_media()
+                    .map(|m| m.file_path.to_string_lossy().to_string());
                 let media_speed = l.as_media().map(|m| m.transport.speed);
                 let media_looping = l.as_media().map(|m| m.transport.looping);
-                let webcam_device = l.as_media()
+                let webcam_device = l
+                    .as_media()
                     .filter(|m| m.is_live())
                     .map(|m| m.file_name.clone());
                 // Capture particle source info
-                let ps_ref = l.as_effect()
+                let ps_ref = l
+                    .as_effect()
                     .and_then(|e| e.pass_executor.particle_system.as_ref());
-                let particle_video_path = ps_ref
-                    .and_then(|ps| ps.video_path.clone());
-                let particle_video_speed = ps_ref
-                    .and_then(|ps| ps.image_source.video_speed());
+                let particle_video_path = ps_ref.and_then(|ps| ps.video_path.clone());
+                let particle_video_speed = ps_ref.and_then(|ps| ps.image_source.video_speed());
                 let particle_video_looping = ps_ref.and_then(|ps| {
                     #[cfg(feature = "video")]
-                    if let crate::gpu::particle::ParticleImageSource::Video { looping, .. } = &ps.image_source {
+                    if let crate::gpu::particle::ParticleImageSource::Video { looping, .. } =
+                        &ps.image_source
+                    {
                         return Some(*looping);
                     }
                     let _ = ps;
@@ -1720,7 +1848,9 @@ impl App {
             })
             .collect();
 
-        if layer_presets.iter().all(|l| l.effect_name.is_empty() && l.media_path.is_none() && l.webcam_device.is_none()) {
+        if layer_presets.iter().all(|l| {
+            l.effect_name.is_empty() && l.media_path.is_none() && l.webcam_device.is_none()
+        }) {
             log::warn!("No effects or media loaded, cannot save preset");
             return;
         }
@@ -1868,10 +1998,7 @@ impl App {
                                 true
                             }
                             MediaDecodeResult::Err(e) => {
-                                log::warn!(
-                                    "Pre-decoded media failed for layer {}: {}",
-                                    i, e
-                                );
+                                log::warn!("Pre-decoded media failed for layer {}: {}", i, e);
                                 false
                             }
                         }
@@ -1979,14 +2106,12 @@ impl App {
                                         }
                                     }
                                 }
-                                Err(e) => log::warn!(
-                                    "Failed to decode particle video for layer {i}: {e}"
-                                ),
+                                Err(e) => {
+                                    log::warn!("Failed to decode particle video for layer {i}: {e}")
+                                }
                             }
                         }
-                        Err(e) => log::warn!(
-                            "Failed to probe particle video for layer {i}: {e}"
-                        ),
+                        Err(e) => log::warn!("Failed to probe particle video for layer {i}: {e}"),
                     }
                 }
             }
@@ -2010,9 +2135,7 @@ impl App {
                         if let Some(effect) = layer.as_effect_mut() {
                             if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
                                 ps.set_webcam_source(&self.gpu.queue, w, h);
-                                log::info!(
-                                    "Restored particle webcam source for layer {i}"
-                                );
+                                log::info!("Restored particle webcam source for layer {i}");
                             }
                         }
                     }
@@ -2029,7 +2152,8 @@ impl App {
                             let (w, h) = rgba.dimensions();
                             if let Some(layer) = self.layer_stack.layers.get_mut(i) {
                                 if let Some(effect) = layer.as_effect_mut() {
-                                    if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
+                                    if let Some(ps) = effect.pass_executor.particle_system.as_mut()
+                                    {
                                         ps.set_obstacle_image(
                                             &self.gpu.device,
                                             &self.gpu.queue,
@@ -2039,7 +2163,8 @@ impl App {
                                             Some(obstacle_path.clone()),
                                         );
                                         if let Some(mode) = lp.obstacle_mode {
-                                            ps.obstacle_mode = crate::gpu::particle::ObstacleMode::from_u32(mode);
+                                            ps.obstacle_mode =
+                                                crate::gpu::particle::ObstacleMode::from_u32(mode);
                                         }
                                         if let Some(threshold) = lp.obstacle_threshold {
                                             ps.obstacle_threshold = threshold;
@@ -2069,7 +2194,9 @@ impl App {
                                 self.webcam_capture = Some(capture);
                             }
                             Err(e) => {
-                                log::error!("Failed to start webcam for depth obstacle restore: {e}");
+                                log::error!(
+                                    "Failed to start webcam for depth obstacle restore: {e}"
+                                );
                             }
                         }
                     }
@@ -2091,7 +2218,8 @@ impl App {
                                 ps.obstacle_enabled = true;
                                 ps.obstacle_source = "depth".to_string();
                                 if let Some(mode) = lp.obstacle_mode {
-                                    ps.obstacle_mode = crate::gpu::particle::ObstacleMode::from_u32(mode);
+                                    ps.obstacle_mode =
+                                        crate::gpu::particle::ObstacleMode::from_u32(mode);
                                 }
                                 if let Some(threshold) = lp.obstacle_threshold {
                                     ps.obstacle_threshold = threshold;
@@ -2104,7 +2232,9 @@ impl App {
                         }
                     }
                 } else {
-                    log::warn!("Preset requires depth model but it's not downloaded, skipping depth obstacle for layer {i}");
+                    log::warn!(
+                        "Preset requires depth model but it's not downloaded, skipping depth obstacle for layer {i}"
+                    );
                 }
             }
 
@@ -2169,7 +2299,11 @@ impl App {
         let layer = &mut self.layer_stack.layers[layer_idx];
         layer.content = LayerContent::Media(media_layer);
         layer.param_store = ParamStore::new();
-        log::info!("Layer {}: loaded media '{}' (pre-decoded)", layer_idx, file_name);
+        log::info!(
+            "Layer {}: loaded media '{}' (pre-decoded)",
+            layer_idx,
+            file_name
+        );
     }
 
     /// Collect LayerInfo snapshots for UI (avoids borrow conflicts).
@@ -2194,17 +2328,17 @@ impl App {
 
         self.scene_store.current_scene = Some(index);
 
-        self.timeline = Timeline::new(
-            scene.cues.clone(),
-            scene.loop_mode,
-            scene.advance_mode,
-        );
+        self.timeline = Timeline::new(scene.cues.clone(), scene.loop_mode, scene.advance_mode);
 
         // Start at cue 0
         let event = self.timeline.start(0);
         self.process_timeline_event(event);
 
-        log::info!("Loaded scene '{}' with {} cues", scene.name, scene.cues.len());
+        log::info!(
+            "Loaded scene '{}' with {} cues",
+            scene.name,
+            scene.cues.len()
+        );
     }
 
     /// Auto-save current timeline state back to the active scene on disk.
@@ -2279,12 +2413,8 @@ impl App {
                             .iter()
                             .map(|l| l.param_store.values.clone())
                             .collect();
-                        let from_opacities: Vec<f32> = self
-                            .layer_stack
-                            .layers
-                            .iter()
-                            .map(|l| l.opacity)
-                            .collect();
+                        let from_opacities: Vec<f32> =
+                            self.layer_stack.layers.iter().map(|l| l.opacity).collect();
                         self.morph_from_params = Some(from_params);
                         self.morph_from_opacities = Some(from_opacities);
 
@@ -2308,12 +2438,8 @@ impl App {
                             .iter()
                             .map(|l| l.param_store.values.clone())
                             .collect();
-                        let to_opacities: Vec<f32> = self
-                            .layer_stack
-                            .layers
-                            .iter()
-                            .map(|l| l.opacity)
-                            .collect();
+                        let to_opacities: Vec<f32> =
+                            self.layer_stack.layers.iter().map(|l| l.opacity).collect();
                         self.morph_to_params = Some(to_params);
                         self.morph_to_opacities = Some(to_opacities);
                     }
@@ -2359,9 +2485,10 @@ impl App {
             }
 
             // Interpolate opacity using saved from/to snapshots
-            if let (Some(from_op), Some(to_op)) =
-                (self.morph_from_opacities.as_ref(), self.morph_to_opacities.as_ref())
-            {
+            if let (Some(from_op), Some(to_op)) = (
+                self.morph_from_opacities.as_ref(),
+                self.morph_to_opacities.as_ref(),
+            ) {
                 if let (Some(&from_o), Some(&to_o)) = (from_op.get(i), to_op.get(i)) {
                     layer.opacity = from_o + (to_o - from_o) * progress;
                 }
@@ -2409,17 +2536,27 @@ impl App {
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        // Check for GPU device loss
+        if self
+            .gpu
+            .device_lost
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            log::error!("GPU device lost — cannot render");
+            return Err(wgpu::SurfaceError::Lost);
+        }
+
         let output = self.gpu.surface.get_current_texture()?;
         let surface_view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder =
-            self.gpu
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("phosphor-encoder"),
-                });
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("phosphor-encoder"),
+            });
 
         // Execute all enabled layers
         let enabled_layers: Vec<usize> = self
@@ -2443,10 +2580,13 @@ impl App {
         // Compute the HDR source from layer execution + compositing.
         let (source, postprocess) = if enabled_layers.is_empty() {
             (
-                self.compositor.accumulator.write_target() as &crate::gpu::render_target::RenderTarget,
+                self.compositor.accumulator.write_target()
+                    as &crate::gpu::render_target::RenderTarget,
                 PostProcessDef::default(),
             )
-        } else if enabled_layers.len() == 1 && self.layer_stack.layers[enabled_layers[0]].opacity >= 1.0 {
+        } else if enabled_layers.len() == 1
+            && self.layer_stack.layers[enabled_layers[0]].opacity >= 1.0
+        {
             // Single-layer fast path: skip compositing entirely (only when fully opaque)
             let idx = enabled_layers[0];
             let target = self.layer_stack.layers[idx].execute(&mut encoder, &self.gpu.queue);
@@ -2487,9 +2627,12 @@ impl App {
             self.load_preset(preset_idx);
 
             // Create fresh encoder and re-render layers for crossfade
-            encoder = self.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("phosphor-encoder-dissolve"),
-            });
+            encoder = self
+                .gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("phosphor-encoder-dissolve"),
+                });
             let enabled_layers2: Vec<usize> = self
                 .layer_stack
                 .layers
@@ -2517,7 +2660,8 @@ impl App {
                     f32,
                 )> = Vec::new();
                 for &idx in &enabled_layers2 {
-                    let target = self.layer_stack.layers[idx].execute(&mut encoder, &self.gpu.queue);
+                    let target =
+                        self.layer_stack.layers[idx].execute(&mut encoder, &self.gpu.queue);
                     let blend = self.layer_stack.layers[idx].blend_mode;
                     let opacity = self.layer_stack.layers[idx].opacity;
                     layer_outputs2.push((target, blend, opacity));
@@ -2569,21 +2713,21 @@ impl App {
                 &new_pp,
                 {
                     #[cfg(feature = "ndi")]
-                    { self.ndi.config.alpha_from_luma }
+                    {
+                        self.ndi.config.alpha_from_luma
+                    }
                     #[cfg(not(feature = "ndi"))]
-                    { false }
+                    {
+                        false
+                    }
                 },
             );
 
             // NDI capture
             #[cfg(feature = "ndi")]
             if self.ndi.is_running() {
-                self.ndi.capture_frame(
-                    &self.gpu.device,
-                    &mut encoder,
-                    &self.post_process,
-                    source,
-                );
+                self.ndi
+                    .capture_frame(&self.gpu.device, &mut encoder, &self.post_process, source);
             }
 
             // Flip ping-pong for all layers
@@ -2593,10 +2737,20 @@ impl App {
             self.frame_count = self.frame_count.wrapping_add(1);
 
             // egui overlay
-            self.egui_overlay
-                .render(&self.gpu.device, &self.gpu.queue, &mut encoder, &surface_view);
+            self.egui_overlay.render(
+                &self.gpu.device,
+                &self.gpu.queue,
+                &mut encoder,
+                &surface_view,
+            );
+
+            #[cfg(feature = "profiling")]
+            self.gpu_profiler.inner.resolve_queries(&mut encoder);
 
             self.gpu.queue.submit(std::iter::once(encoder.finish()));
+
+            #[cfg(feature = "profiling")]
+            self.gpu_profiler.end_frame(&self.gpu.queue);
 
             // Request particle counter readback (async, read next frame)
             for layer in &self.layer_stack.layers {
@@ -2657,21 +2811,21 @@ impl App {
             &postprocess,
             {
                 #[cfg(feature = "ndi")]
-                { self.ndi.config.alpha_from_luma }
+                {
+                    self.ndi.config.alpha_from_luma
+                }
                 #[cfg(not(feature = "ndi"))]
-                { false }
+                {
+                    false
+                }
             },
         );
 
         // NDI capture: render composite to capture texture + copy to staging
         #[cfg(feature = "ndi")]
         if self.ndi.is_running() {
-            self.ndi.capture_frame(
-                &self.gpu.device,
-                &mut encoder,
-                &self.post_process,
-                source,
-            );
+            self.ndi
+                .capture_frame(&self.gpu.device, &mut encoder, &self.post_process, source);
         }
 
         // Flip ping-pong for all layers
@@ -2681,10 +2835,22 @@ impl App {
         self.frame_count = self.frame_count.wrapping_add(1);
 
         // egui overlay → surface
-        self.egui_overlay
-            .render(&self.gpu.device, &self.gpu.queue, &mut encoder, &surface_view);
+        self.egui_overlay.render(
+            &self.gpu.device,
+            &self.gpu.queue,
+            &mut encoder,
+            &surface_view,
+        );
+
+        // GPU profiler: resolve timestamp queries before submitting
+        #[cfg(feature = "profiling")]
+        self.gpu_profiler.inner.resolve_queries(&mut encoder);
 
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
+
+        // GPU profiler: finalize frame and poll results
+        #[cfg(feature = "profiling")]
+        self.gpu_profiler.end_frame(&self.gpu.queue);
 
         // Request particle counter readback (async, read next frame)
         for layer in &self.layer_stack.layers {
@@ -2846,7 +3012,12 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {{
         );
         std::fs::write(&wgsl_path, &wgsl_template)?;
 
-        log::info!("Created new effect '{}': {} + {}", name, pfx_path.display(), wgsl_path.display());
+        log::info!(
+            "Created new effect '{}': {} + {}",
+            name,
+            pfx_path.display(),
+            wgsl_path.display()
+        );
 
         // Rescan effects directory
         self.effect_loader.scan_effects_directory();
@@ -2867,8 +3038,7 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {{
             self.shader_editor.open_file(name, wgsl_path, content);
             // Load paired .pfx for tab switching
             if let Ok(pfx_content) = std::fs::read_to_string(&pfx_path) {
-                self.shader_editor
-                    .load_paired_pfx(pfx_path, pfx_content);
+                self.shader_editor.load_paired_pfx(pfx_path, pfx_content);
             }
         }
 

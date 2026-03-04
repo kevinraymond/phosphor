@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
-use notify_debouncer_mini::{new_debouncer, DebouncedEventKind, Debouncer};
+use notify_debouncer_mini::{DebouncedEventKind, Debouncer, new_debouncer};
 
 use crate::effect::loader::assets_dir;
 

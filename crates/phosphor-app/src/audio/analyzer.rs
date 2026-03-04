@@ -1,12 +1,12 @@
-use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
+use rustfft::num_complex::Complex;
 
 use super::features::AudioFeatures;
 
 /// FFT sizes for multi-resolution analysis.
-const FFT_LARGE: usize = 4096;  // 10.8 Hz/bin — sub_bass, bass, kick
-const FFT_MED: usize = 1024;    // 43 Hz/bin — low_mid, mid, upper_mid
-const FFT_SMALL: usize = 512;   // 86 Hz/bin — presence, brilliance
+const FFT_LARGE: usize = 4096; // 10.8 Hz/bin — sub_bass, bass, kick
+const FFT_MED: usize = 1024; // 43 Hz/bin — low_mid, mid, upper_mid
+const FFT_SMALL: usize = 512; // 86 Hz/bin — presence, brilliance
 
 /// MFCC / chroma constants
 const N_MELS: usize = 26;
@@ -143,8 +143,8 @@ pub struct FftAnalyzer {
     kick_max: f32,
 
     // MFCC precomputed data
-    mel_filters: MelFilter,                    // N_MELS sparse triangular filters
-    dct_matrix: [[f32; N_MELS]; N_MFCC],      // DCT-II coefficients
+    mel_filters: MelFilter,              // N_MELS sparse triangular filters
+    dct_matrix: [[f32; N_MELS]; N_MFCC], // DCT-II coefficients
 
     // Chroma precomputed data: (fft_bin_index, chroma_class 0-11)
     chroma_bins: Vec<(usize, usize)>,
@@ -160,23 +160,23 @@ impl FftAnalyzer {
 
         log::info!(
             "Multi-resolution FFT: {FFT_LARGE}/{FFT_MED}/{FFT_SMALL}-pt, {:.1}/{:.1}/{:.1} Hz/bin",
-            large.bin_hz, medium.bin_hz, small.bin_hz
+            large.bin_hz,
+            medium.bin_hz,
+            small.bin_hz
         );
 
         // Precompute mel filterbank (26 triangular filters, 20 Hz – Nyquist)
-        let mel_filters = Self::build_mel_filterbank(
-            large.num_bins, large.bin_hz, 20.0, sample_rate * 0.5,
-        );
+        let mel_filters =
+            Self::build_mel_filterbank(large.num_bins, large.bin_hz, 20.0, sample_rate * 0.5);
 
         // Precompute DCT-II matrix: dct[i][j] = cos(PI * i * (j + 0.5) / N_MELS) * sqrt(2/N_MELS)
         let scale = (2.0 / N_MELS as f32).sqrt();
         let mut dct_matrix = [[0.0f32; N_MELS]; N_MFCC];
         for i in 0..N_MFCC {
             for j in 0..N_MELS {
-                dct_matrix[i][j] = (std::f32::consts::PI * i as f32 * (j as f32 + 0.5)
-                    / N_MELS as f32)
-                    .cos()
-                    * scale;
+                dct_matrix[i][j] =
+                    (std::f32::consts::PI * i as f32 * (j as f32 + 0.5) / N_MELS as f32).cos()
+                        * scale;
             }
         }
 
@@ -252,7 +252,7 @@ impl FftAnalyzer {
         let mut map = Vec::new();
         for k in 1..num_bins {
             let hz = k as f32 * bin_hz;
-            if hz < 20.0 || hz > 5000.0 {
+            if !(20.0..=5000.0).contains(&hz) {
                 continue;
             }
             // Pitch class: 12 * log2(f / C0), mod 12, where C0 ~= 16.35 Hz

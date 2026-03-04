@@ -9,10 +9,8 @@ use crate::gpu::layer::BlendMode;
 use crate::params::ParamValue;
 
 // Embedded built-in presets
-const BUILTIN_CRUCIBLE: &str =
-    include_str!("../../../../assets/presets/Crucible.json");
-const BUILTIN_SPECTRAL_EYE: &str =
-    include_str!("../../../../assets/presets/Spectral Eye.json");
+const BUILTIN_CRUCIBLE: &str = include_str!("../../../../assets/presets/Crucible.json");
+const BUILTIN_SPECTRAL_EYE: &str = include_str!("../../../../assets/presets/Spectral Eye.json");
 
 /// Built-in preset names in display order.
 const BUILTIN_PRESETS: &[(&str, &str)] = &[
@@ -236,7 +234,13 @@ impl PresetStore {
     fn sanitize_name(name: &str) -> String {
         let sanitized: String = name
             .chars()
-            .map(|c| if c == '/' || c == '\\' || c == '.' { '_' } else { c })
+            .map(|c| {
+                if c == '/' || c == '\\' || c == '.' {
+                    '_'
+                } else {
+                    c
+                }
+            })
             .collect();
         let trimmed = sanitized.trim();
         if trimmed.len() > 64 {
@@ -598,7 +602,11 @@ mod tests {
         for &(name, json) in BUILTIN_PRESETS {
             let preset: Preset = serde_json::from_str(json)
                 .unwrap_or_else(|e| panic!("Built-in preset '{}' failed to parse: {}", name, e));
-            assert!(!preset.layers.is_empty(), "Built-in preset '{}' has no layers", name);
+            assert!(
+                !preset.layers.is_empty(),
+                "Built-in preset '{}' has no layers",
+                name
+            );
         }
     }
 
@@ -612,7 +620,8 @@ mod tests {
             postprocess: PostProcessDef::default(),
         };
         s.presets.push(("Crucible".into(), empty_preset.clone()));
-        s.presets.push(("Spectral Eye".into(), empty_preset.clone()));
+        s.presets
+            .push(("Spectral Eye".into(), empty_preset.clone()));
         s.presets.push(("User Preset".into(), empty_preset));
 
         assert!(s.is_builtin(0));
@@ -648,22 +657,12 @@ mod tests {
         };
         s.presets.push(("Crucible".into(), empty_preset));
 
-        let result = s.save(
-            "Crucible",
-            vec![],
-            0,
-            &PostProcessDef::default(),
-        );
+        let result = s.save("Crucible", vec![], 0, &PostProcessDef::default());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("built-in"));
 
         // Case-insensitive check
-        let result2 = s.save(
-            "crucible",
-            vec![],
-            0,
-            &PostProcessDef::default(),
-        );
+        let result2 = s.save("crucible", vec![], 0, &PostProcessDef::default());
         assert!(result2.is_err());
     }
 }

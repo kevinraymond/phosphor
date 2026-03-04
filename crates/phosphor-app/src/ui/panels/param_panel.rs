@@ -1,7 +1,7 @@
 use egui::{Color32, RichText, Ui};
 
-use crate::midi::types::{LearnTarget, MidiMsgType};
 use crate::midi::MidiSystem;
+use crate::midi::types::{LearnTarget, MidiMsgType};
 use crate::osc::OscSystem;
 use crate::params::{ParamDef, ParamStore, ParamValue};
 use crate::ui::panels::osc_panel;
@@ -68,11 +68,20 @@ fn fmt_val(v: f32) -> String {
     }
 }
 
-pub fn draw_param_panel(ui: &mut Ui, store: &mut ParamStore, midi: &mut MidiSystem, osc: &mut OscSystem) {
+pub fn draw_param_panel(
+    ui: &mut Ui,
+    store: &mut ParamStore,
+    midi: &mut MidiSystem,
+    osc: &mut OscSystem,
+) {
     let tc = theme_colors(ui.ctx());
 
     if store.defs.is_empty() {
-        ui.label(RichText::new("No parameters").size(SMALL_SIZE).color(tc.text_secondary));
+        ui.label(
+            RichText::new("No parameters")
+                .size(SMALL_SIZE)
+                .color(tc.text_secondary),
+        );
         return;
     }
 
@@ -80,12 +89,7 @@ pub fn draw_param_panel(ui: &mut Ui, store: &mut ParamStore, midi: &mut MidiSyst
 
     for def in &defs {
         match def {
-            ParamDef::Float {
-                name,
-                min,
-                max,
-                ..
-            } => {
+            ParamDef::Float { name, min, max, .. } => {
                 let current = match store.get(name) {
                     Some(ParamValue::Float(v)) => *v,
                     _ => *min,
@@ -141,7 +145,6 @@ pub fn draw_param_panel(ui: &mut Ui, store: &mut ParamStore, midi: &mut MidiSyst
                     ui.color_edit_button_rgba_unmultiplied(&mut color);
                     if ui.small_button("R").on_hover_text("Reset").clicked() {
                         store.reset(name);
-                        return;
                     }
                 });
 
@@ -168,9 +171,7 @@ pub fn draw_param_panel(ui: &mut Ui, store: &mut ParamStore, midi: &mut MidiSyst
                     store.set(name, ParamValue::Bool(val));
                 }
             }
-            ParamDef::Point2D {
-                name, min, max, ..
-            } => {
+            ParamDef::Point2D { name, min, max, .. } => {
                 let current = match store.get(name) {
                     Some(ParamValue::Point2D(p)) => *p,
                     _ => *min,

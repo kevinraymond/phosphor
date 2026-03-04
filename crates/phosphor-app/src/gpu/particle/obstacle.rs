@@ -192,7 +192,7 @@ mod tests {
         // Image with transparent pixels — alpha should be preserved
         let data = vec![
             255, 0, 0, 128, // semi-transparent red
-            0, 255, 0, 0,   // fully transparent green
+            0, 255, 0, 0, // fully transparent green
         ];
         let result = preprocess_alpha(&data);
         assert_eq!(result[3], 128);
@@ -204,7 +204,7 @@ mod tests {
         // All alpha=255 — should replace with luminance
         let data = vec![
             255, 255, 255, 255, // white → lum ≈ 255
-            0, 0, 0, 255,       // black → lum = 0
+            0, 0, 0, 255, // black → lum = 0
         ];
         let result = preprocess_alpha(&data);
         // White pixel should have high alpha

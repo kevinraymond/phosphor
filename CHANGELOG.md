@@ -5,6 +5,17 @@
 
 ## Unreleased
 
+### Performance & Build Optimization
+- **Build profiles**: dev builds use opt-level 1 (deps at 2 for faster shader compilation), release uses thin LTO + codegen-units=1
+- **GPU buffer clears**: spatial hash dispatch uses `encoder.clear_buffer()` instead of allocating a zeroed Vec per frame (up to 262KB saved per frame at max grid)
+- **Sort params cached**: bitonic sort parameters written once at buffer creation via `mapped_at_creation` instead of ~210 `write_buffer` calls per frame
+- **Parallel prefix sum**: spatial hash prefix sum upgraded from single-thread sequential to 256-thread Blelloch scan with shared memory (supports up to 65K cells)
+- **Pipeline cache**: compiled shader data persisted to `~/.config/phosphor/pipeline_cache.bin` for faster startup on subsequent launches
+- **Device loss handling**: GPU device lost callback + uncaptured error handler + graceful render-time detection (no more hard crash on driver reset)
+- **GPU profiler** (`--features profiling`): wgpu-profiler integration with egui overlay panel, timestamp query support
+- **Clippy pedantic**: workspace-level clippy lints enabled, auto-fixed 500+ warnings, rustfmt config added
+- **FxHashMap**: `rustc-hash` for runtime-only hash maps (MIDI trigger tracking)
+
 ### Audio Panel Redesign (Improved)
 - **BPM ring**: circular beat-phase arc with orbiting dot replaces static BPM number; flashes white on downbeat
 - **Chroma wheel**: radial 12-segment pie chart with energy-proportional radius replaces linear bars; dominant note displayed in center

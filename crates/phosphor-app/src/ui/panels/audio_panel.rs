@@ -1,6 +1,6 @@
 use std::f32::consts::{PI, TAU};
 
-use egui::{pos2, Color32, Mesh, Pos2, Rect, RichText, Shape, Stroke, Ui, Vec2};
+use egui::{Color32, Mesh, Pos2, Rect, RichText, Shape, Stroke, Ui, Vec2, pos2};
 
 use crate::audio::AudioSystem;
 use crate::gpu::ShaderUniforms;
@@ -47,7 +47,7 @@ const DYNAMICS_TOOLTIPS: [&str; 7] = [
 
 const DYNAMICS_COLORS: [Color32; 7] = [
     Color32::from_rgb(0x66, 0xBB, 0xFF), // RMS - light blue
-    Color32::WHITE,                       // Kick - white
+    Color32::WHITE,                      // Kick - white
     Color32::from_rgb(0xFF, 0xAA, 0x44), // Onset - orange
     Color32::from_rgb(0x44, 0x88, 0xFF), // Flux - blue
     Color32::from_rgb(0xBB, 0x66, 0xFF), // Centroid - purple
@@ -79,7 +79,9 @@ const MFCC_TOOLTIPS: [&str; 13] = [
 
 // ── Chroma ─────────────────────────────────────────────────────────────
 
-const CHROMA_LABELS: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const CHROMA_LABELS: [&str; 12] = [
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+];
 
 // ── Layout constants ───────────────────────────────────────────────────
 
@@ -114,11 +116,7 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
 fn chroma_color(pitch_class: usize, energy: f32) -> Color32 {
     let hue = pitch_class as f32 / 12.0;
     let (r, g, b) = hsv_to_rgb(hue, 0.8, 0.4 + 0.6 * energy.clamp(0.0, 1.0));
-    Color32::from_rgb(
-        (r * 255.0) as u8,
-        (g * 255.0) as u8,
-        (b * 255.0) as u8,
-    )
+    Color32::from_rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
 }
 
 fn truncate_device_name(name: &str, max: usize) -> String {
@@ -177,7 +175,11 @@ fn draw_device_selector(ui: &mut Ui, audio: &AudioSystem) {
     let selected_text = truncate_device_name(current, 24);
 
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Input").size(SMALL_SIZE).color(tc.text_secondary));
+        ui.label(
+            RichText::new("Input")
+                .size(SMALL_SIZE)
+                .color(tc.text_secondary),
+        );
 
         egui::ComboBox::from_id_salt("audio_device_combo")
             .selected_text(RichText::new(&selected_text).size(SMALL_SIZE))
@@ -204,10 +206,7 @@ fn draw_device_selector(ui: &mut Ui, audio: &AudioSystem) {
                         && !selected
                     {
                         ui.ctx().data_mut(|d| {
-                            d.insert_temp(
-                                egui::Id::new("switch_audio_device"),
-                                dev.clone(),
-                            );
+                            d.insert_temp(egui::Id::new("switch_audio_device"), dev.clone());
                         });
                     }
                 }
@@ -223,7 +222,12 @@ fn draw_section_header(ui: &mut Ui, label: &str, right: &str) {
     let tc = theme_colors(ui.ctx());
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(label).size(SMALL_SIZE).color(tc.text_secondary).strong());
+        ui.label(
+            RichText::new(label)
+                .size(SMALL_SIZE)
+                .color(tc.text_secondary)
+                .strong(),
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(RichText::new(right).size(8.0).color(tc.text_secondary));
         });
@@ -264,8 +268,15 @@ fn draw_bpm_ring(ui: &mut Ui, uniforms: &ShaderUniforms) -> egui::Response {
 
         // Orbiting dot at current phase
         let dot_angle = -PI / 2.0 + phase * TAU;
-        let dot_pos = pos2(center.x + r * dot_angle.cos(), center.y + r * dot_angle.sin());
-        let dot_color = if uniforms.beat > 0.5 { Color32::WHITE } else { tc.accent };
+        let dot_pos = pos2(
+            center.x + r * dot_angle.cos(),
+            center.y + r * dot_angle.sin(),
+        );
+        let dot_color = if uniforms.beat > 0.5 {
+            Color32::WHITE
+        } else {
+            tc.accent
+        };
         let dot_r = if uniforms.beat > 0.5 { 3.5 } else { 2.5 };
         painter.circle_filled(dot_pos, dot_r, dot_color);
     }
@@ -327,7 +338,8 @@ fn draw_spectrum_bars(ui: &mut Ui, bands: &[f32; 7]) {
     }
     ui.ctx().data_mut(|d| d.insert_temp(peak_id, peaks));
 
-    let (rect, bars_resp) = ui.allocate_exact_size(Vec2::new(available_width, height), egui::Sense::hover());
+    let (rect, bars_resp) =
+        ui.allocate_exact_size(Vec2::new(available_width, height), egui::Sense::hover());
     let (label_rect, _) =
         ui.allocate_exact_size(Vec2::new(available_width, 12.0), egui::Sense::hover());
 
@@ -358,7 +370,12 @@ fn draw_spectrum_bars(ui: &mut Ui, bands: &[f32; 7]) {
         let bottom = rect.bottom();
 
         let color = BAND_COLORS[i];
-        let faded = Color32::from_rgba_premultiplied(color.r() / 3, color.g() / 3, color.b() / 3, color.a());
+        let faded = Color32::from_rgba_premultiplied(
+            color.r() / 3,
+            color.g() / 3,
+            color.b() / 3,
+            color.a(),
+        );
 
         let mut mesh = Mesh::default();
         // top-left, top-right (full color), bottom-left, bottom-right (faded)
@@ -451,7 +468,11 @@ fn draw_dynamics_rows(ui: &mut Ui, uniforms: &ShaderUniforms) {
 
         if i == 1 {
             // Kick: boolean dot at start of track area
-            let dot_color = if v > 0.5 { Color32::WHITE } else { Color32::from_rgb(0x33, 0x33, 0x33) };
+            let dot_color = if v > 0.5 {
+                Color32::WHITE
+            } else {
+                Color32::from_rgb(0x33, 0x33, 0x33)
+            };
             painter.circle_filled(pos2(track_left + 4.0, cy), 3.5, dot_color);
         } else {
             // Track background
@@ -522,13 +543,19 @@ fn draw_chroma_wheel(ui: &mut Ui, chroma: &[f32; 12]) {
         for s in 0..arc_steps {
             let t = s as f32 / (arc_steps - 1) as f32;
             let a = start_angle + t * (end_angle - start_angle);
-            points.push(pos2(center.x + seg_outer * a.cos(), center.y + seg_outer * a.sin()));
+            points.push(pos2(
+                center.x + seg_outer * a.cos(),
+                center.y + seg_outer * a.sin(),
+            ));
         }
         // Inner arc (reversed)
         for s in (0..arc_steps).rev() {
             let t = s as f32 / (arc_steps - 1) as f32;
             let a = start_angle + t * (end_angle - start_angle);
-            points.push(pos2(center.x + inner_r * a.cos(), center.y + inner_r * a.sin()));
+            points.push(pos2(
+                center.x + inner_r * a.cos(),
+                center.y + inner_r * a.sin(),
+            ));
         }
 
         let color = chroma_color(i, e);
@@ -576,14 +603,16 @@ fn draw_mfcc_heatmap(ui: &mut Ui, mfcc: &[f32; 16]) {
     let cell_width = ((available_width - 12.0 * gap) / 13.0).max(6.0);
     let total_w = cell_width * 13.0 + gap * 12.0;
 
-    let (rect, heat_resp) = ui.allocate_exact_size(Vec2::new(total_w, MFCC_CELL_HEIGHT), egui::Sense::hover());
+    let (rect, heat_resp) =
+        ui.allocate_exact_size(Vec2::new(total_w, MFCC_CELL_HEIGHT), egui::Sense::hover());
     let (label_rect, _) = ui.allocate_exact_size(Vec2::new(total_w, 10.0), egui::Sense::hover());
     let painter = ui.painter();
 
     for i in 0..13 {
         let v = mfcc[i].clamp(0.0, 1.0);
         let x = rect.left() + i as f32 * (cell_width + gap);
-        let cell = Rect::from_min_size(pos2(x, rect.top()), Vec2::new(cell_width, MFCC_CELL_HEIGHT));
+        let cell =
+            Rect::from_min_size(pos2(x, rect.top()), Vec2::new(cell_width, MFCC_CELL_HEIGHT));
         painter.rect_filled(cell, 2.0, mfcc_heat_color(v));
     }
 
@@ -649,8 +678,13 @@ pub fn draw_audio_panel(ui: &mut Ui, audio: &AudioSystem, uniforms: &ShaderUnifo
 
     // Spectrum
     let bands: [f32; 7] = [
-        uniforms.sub_bass, uniforms.bass, uniforms.low_mid, uniforms.mid,
-        uniforms.upper_mid, uniforms.presence, uniforms.brilliance,
+        uniforms.sub_bass,
+        uniforms.bass,
+        uniforms.low_mid,
+        uniforms.mid,
+        uniforms.upper_mid,
+        uniforms.presence,
+        uniforms.brilliance,
     ];
     draw_section_header(ui, "SPECTRUM", "7 bands");
     draw_spectrum_bars(ui, &bands);

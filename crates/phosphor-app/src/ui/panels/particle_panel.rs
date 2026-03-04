@@ -92,11 +92,7 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             feature_badge(ui, "flow field", tc.accent);
         }
         if info.has_trails {
-            feature_badge(
-                ui,
-                &format!("trails ({}pt)", info.trail_length),
-                tc.accent,
-            );
+            feature_badge(ui, &format!("trails ({}pt)", info.trail_length), tc.accent);
         }
         if info.has_interaction {
             feature_badge(ui, "interaction", tc.accent);
@@ -156,7 +152,8 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                         .color(tc.text_secondary),
                 );
                 // Derive current selection label from source_name
-                let current_label = if info.source_type == "static" && !info.source_name.is_empty() {
+                let current_label = if info.source_type == "static" && !info.source_name.is_empty()
+                {
                     // Strip "raster_" prefix and ".png" suffix for display
                     let name = info.source_name.trim_end_matches(".png");
                     let name = name.strip_prefix("raster_").unwrap_or(name);
@@ -169,10 +166,7 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                     .width(ui.available_width() - 4.0)
                     .show_ui(ui, |ui| {
                         for name in &info.builtin_images {
-                            if ui
-                                .selectable_label(*name == current_label, name)
-                                .clicked()
-                            {
+                            if ui.selectable_label(*name == current_label, name).clicked() {
                                 ui.ctx().data_mut(|d| {
                                     d.insert_temp(
                                         egui::Id::new("particle_select_builtin"),
@@ -200,7 +194,10 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 if ui
-                    .add(egui::Button::new(RichText::new("Load Image").size(SMALL_SIZE)).min_size(egui::vec2(0.0, 24.0)))
+                    .add(
+                        egui::Button::new(RichText::new("Load Image").size(SMALL_SIZE))
+                            .min_size(egui::vec2(0.0, 24.0)),
+                    )
                     .clicked()
                 {
                     ui.ctx().data_mut(|d| {
@@ -209,7 +206,10 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                 }
                 #[cfg(feature = "video")]
                 if ui
-                    .add(egui::Button::new(RichText::new("Load Video").size(SMALL_SIZE)).min_size(egui::vec2(0.0, 24.0)))
+                    .add(
+                        egui::Button::new(RichText::new("Load Video").size(SMALL_SIZE))
+                            .min_size(egui::vec2(0.0, 24.0)),
+                    )
                     .clicked()
                 {
                     ui.ctx().data_mut(|d| {
@@ -218,7 +218,10 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                 }
                 #[cfg(feature = "webcam")]
                 if ui
-                    .add(egui::Button::new(RichText::new("Webcam").size(SMALL_SIZE)).min_size(egui::vec2(0.0, 24.0)))
+                    .add(
+                        egui::Button::new(RichText::new("Webcam").size(SMALL_SIZE))
+                            .min_size(egui::vec2(0.0, 24.0)),
+                    )
                     .clicked()
                 {
                     ui.ctx().data_mut(|d| {
@@ -235,26 +238,30 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let play_label = if info.video_playing { "Pause" } else { "Play" };
                 if ui
-                    .add(egui::Button::new(RichText::new(play_label).size(SMALL_SIZE)).min_size(egui::vec2(0.0, 24.0)))
+                    .add(
+                        egui::Button::new(RichText::new(play_label).size(SMALL_SIZE))
+                            .min_size(egui::vec2(0.0, 24.0)),
+                    )
                     .clicked()
                 {
                     ui.ctx().data_mut(|d| {
-                        d.insert_temp(
-                            egui::Id::new("particle_video_playing"),
-                            !info.video_playing,
-                        );
+                        d.insert_temp(egui::Id::new("particle_video_playing"), !info.video_playing);
                     });
                 }
-                let loop_label = if info.video_looping { "Loop: On" } else { "Loop: Off" };
+                let loop_label = if info.video_looping {
+                    "Loop: On"
+                } else {
+                    "Loop: Off"
+                };
                 if ui
-                    .add(egui::Button::new(RichText::new(loop_label).size(SMALL_SIZE)).min_size(egui::vec2(0.0, 24.0)))
+                    .add(
+                        egui::Button::new(RichText::new(loop_label).size(SMALL_SIZE))
+                            .min_size(egui::vec2(0.0, 24.0)),
+                    )
                     .clicked()
                 {
                     ui.ctx().data_mut(|d| {
-                        d.insert_temp(
-                            egui::Id::new("particle_video_looping"),
-                            !info.video_looping,
-                        );
+                        d.insert_temp(egui::Id::new("particle_video_looping"), !info.video_looping);
                     });
                 }
             });
@@ -262,7 +269,11 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             // Speed slider
             let mut speed = info.video_speed;
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Speed").size(SMALL_SIZE).color(tc.text_secondary));
+                ui.label(
+                    RichText::new("Speed")
+                        .size(SMALL_SIZE)
+                        .color(tc.text_secondary),
+                );
                 let r = ui.add(
                     egui::Slider::new(&mut speed, 0.1..=4.0)
                         .show_value(true)
@@ -337,7 +348,11 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
         .num_columns(2)
         .spacing([8.0, 3.0])
         .show(ui, |ui| {
-            ui.label(RichText::new("Emit rate").size(SMALL_SIZE).color(tc.text_secondary));
+            ui.label(
+                RichText::new("Emit rate")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
             let r = ui.add(
                 egui::Slider::new(&mut emit_rate, 10.0..=emit_max)
                     .logarithmic(true)
@@ -351,11 +366,12 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             }
             ui.end_row();
 
-            ui.label(RichText::new("Burst").size(SMALL_SIZE).color(tc.text_secondary));
-            let r = ui.add(
-                egui::Slider::new(&mut burst, 0..=burst_max)
-                    .show_value(true),
+            ui.label(
+                RichText::new("Burst")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
             );
+            let r = ui.add(egui::Slider::new(&mut burst, 0..=burst_max).show_value(true));
             if r.changed() {
                 ui.ctx().data_mut(|d| {
                     d.insert_temp(egui::Id::new("particle_burst"), burst);
@@ -363,7 +379,11 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             }
             ui.end_row();
 
-            ui.label(RichText::new("Lifetime").size(SMALL_SIZE).color(tc.text_secondary));
+            ui.label(
+                RichText::new("Lifetime")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
             let r = ui.add(
                 egui::Slider::new(&mut lifetime, 0.5..=life_max)
                     .show_value(true)
@@ -376,7 +396,11 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             }
             ui.end_row();
 
-            ui.label(RichText::new("Speed").size(SMALL_SIZE).color(tc.text_secondary));
+            ui.label(
+                RichText::new("Speed")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
             let r = ui.add(
                 egui::Slider::new(&mut speed, speed_min..=speed_max)
                     .logarithmic(speed_log)
@@ -390,7 +414,11 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             }
             ui.end_row();
 
-            ui.label(RichText::new("Size").size(SMALL_SIZE).color(tc.text_secondary));
+            ui.label(
+                RichText::new("Size")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
             let r = ui.add(
                 egui::Slider::new(&mut size, size_min..=size_max)
                     .logarithmic(true)
@@ -404,7 +432,11 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             }
             ui.end_row();
 
-            ui.label(RichText::new("Drag").size(SMALL_SIZE).color(tc.text_secondary));
+            ui.label(
+                RichText::new("Drag")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
             let r = ui.add(
                 egui::Slider::new(&mut drag, drag_min..=1.0)
                     .show_value(true)
@@ -421,7 +453,7 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
 
 fn feature_badge(ui: &mut Ui, text: &str, color: egui::Color32) {
     let tc = theme_colors(ui.ctx());
-    egui::Frame::none()
+    egui::Frame::NONE
         .fill(tc.widget_bg)
         .corner_radius(3.0)
         .inner_margin(egui::Margin::symmetric(4, 2))

@@ -35,17 +35,15 @@ impl DepthEstimator {
         for y in 0..size {
             for x in 0..size {
                 let src_idx = (y * size + x) * 3;
-                chw[0 * size * size + y * size + x] = rgb_f32[src_idx];     // R
+                chw[0 * size * size + y * size + x] = rgb_f32[src_idx]; // R
                 chw[1 * size * size + y * size + x] = rgb_f32[src_idx + 1]; // G
                 chw[2 * size * size + y * size + x] = rgb_f32[src_idx + 2]; // B
             }
         }
 
         // 3. Create input tensor (1×3×256×256) from (shape, data) tuple
-        let input = ort::value::Tensor::<f32>::from_array((
-            [1i64, 3, size as i64, size as i64],
-            chw,
-        ))?;
+        let input =
+            ort::value::Tensor::<f32>::from_array(([1i64, 3, size as i64, size as i64], chw))?;
 
         // 4. Run inference
         let outputs = self.session.run(ort::inputs![input])?;
@@ -57,8 +55,12 @@ impl DepthEstimator {
         let mut min_val = f32::MAX;
         let mut max_val = f32::MIN;
         for &v in depth_data {
-            if v < min_val { min_val = v; }
-            if v > max_val { max_val = v; }
+            if v < min_val {
+                min_val = v;
+            }
+            if v > max_val {
+                max_val = v;
+            }
         }
 
         let range = (max_val - min_val).max(1e-6);
@@ -125,9 +127,9 @@ mod tests {
     fn downscale_rgba_basic() {
         // 2×2 image → 1×1 target: should average all pixels
         let rgba = vec![
-            255, 0, 0, 255,   // red
-            0, 255, 0, 255,   // green
-            0, 0, 255, 255,   // blue
+            255, 0, 0, 255, // red
+            0, 255, 0, 255, // green
+            0, 0, 255, 255, // blue
             255, 255, 0, 255, // yellow
         ];
         let result = downscale_rgba_to_rgb_f32(&rgba, 2, 2, 1);

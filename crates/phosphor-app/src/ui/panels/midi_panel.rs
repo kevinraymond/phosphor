@@ -1,7 +1,7 @@
 use egui::{Color32, RichText, Ui};
 
-use crate::midi::types::{LearnTarget, MidiMsgType, TriggerAction};
 use crate::midi::MidiSystem;
+use crate::midi::types::{LearnTarget, MidiMsgType, TriggerAction};
 use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
@@ -12,7 +12,10 @@ const TRIGGER_PAIRS: &[(TriggerAction, TriggerAction)] = &[
     (TriggerAction::NextEffect, TriggerAction::PrevEffect),
     (TriggerAction::NextPreset, TriggerAction::PrevPreset),
     (TriggerAction::NextLayer, TriggerAction::PrevLayer),
-    (TriggerAction::TogglePostProcess, TriggerAction::ToggleOverlay),
+    (
+        TriggerAction::TogglePostProcess,
+        TriggerAction::ToggleOverlay,
+    ),
     (TriggerAction::SceneGoNext, TriggerAction::SceneGoPrev),
 ];
 
@@ -32,12 +35,9 @@ pub fn draw_midi_panel(ui: &mut Ui, midi: &mut MidiSystem) {
             // Last message summary (right-aligned)
             if let Some(msg) = midi.last_message {
                 ui.label(
-                    RichText::new(format!(
-                        "CC#{} v:{}",
-                        msg.number, msg.value
-                    ))
-                    .size(SMALL_SIZE)
-                    .color(tc.text_secondary),
+                    RichText::new(format!("CC#{} v:{}", msg.number, msg.value))
+                        .size(SMALL_SIZE)
+                        .color(tc.text_secondary),
                 );
             }
             // Activity dot
@@ -54,10 +54,7 @@ pub fn draw_midi_panel(ui: &mut Ui, midi: &mut MidiSystem) {
     });
 
     // Port selector
-    let current_label = midi
-        .connected_port()
-        .unwrap_or("Not connected")
-        .to_string();
+    let current_label = midi.connected_port().unwrap_or("Not connected").to_string();
 
     egui::ComboBox::from_id_salt("midi_port")
         .selected_text(RichText::new(&current_label).size(SMALL_SIZE))
@@ -76,7 +73,12 @@ pub fn draw_midi_panel(ui: &mut Ui, midi: &mut MidiSystem) {
                 }
             }
             if midi.available_ports.is_empty() {
-                ui.label(RichText::new("No MIDI ports").weak().italics().size(SMALL_SIZE));
+                ui.label(
+                    RichText::new("No MIDI ports")
+                        .weak()
+                        .italics()
+                        .size(SMALL_SIZE),
+                );
             }
         });
 

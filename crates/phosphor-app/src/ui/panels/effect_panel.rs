@@ -10,7 +10,11 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
     let tc = theme_colors(ui.ctx());
 
     if loader.effects.is_empty() {
-        ui.label(RichText::new("No effects found").size(SMALL_SIZE).color(tc.text_secondary));
+        ui.label(
+            RichText::new("No effects found")
+                .size(SMALL_SIZE)
+                .color(tc.text_secondary),
+        );
         return;
     }
 
@@ -43,7 +47,9 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
     // Built-in section
     if !builtin.is_empty() {
         egui::CollapsingHeader::new(
-            RichText::new("Built-in").size(SMALL_SIZE).color(tc.text_secondary),
+            RichText::new("Built-in")
+                .size(SMALL_SIZE)
+                .color(tc.text_secondary),
         )
         .default_open(true)
         .show(ui, |ui| {
@@ -64,12 +70,18 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
 
     // User section
     egui::CollapsingHeader::new(
-        RichText::new("User").size(SMALL_SIZE).color(tc.text_secondary),
+        RichText::new("User")
+            .size(SMALL_SIZE)
+            .color(tc.text_secondary),
     )
     .default_open(true)
     .show(ui, |ui| {
         if user.is_empty() {
-            ui.label(RichText::new("(none)").size(SMALL_SIZE).color(tc.text_secondary));
+            ui.label(
+                RichText::new("(none)")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
         } else {
             draw_effect_grid(
                 ui,
@@ -109,18 +121,20 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
         let current_is_builtin = loader
             .current_effect
             .and_then(|i| loader.effects.get(i))
-            .map_or(false, |e| EffectLoader::is_builtin(e));
+            .map_or(false, EffectLoader::is_builtin);
 
         if current_is_builtin {
             // "Copy Effect" for built-in effects
             if ui
                 .add_enabled(
                     has_effect,
-                    egui::Button::new(
-                        RichText::new("Copy Effect")
-                            .size(SMALL_SIZE)
-                            .color(if has_effect { tc.text_primary } else { tc.text_secondary }),
-                    )
+                    egui::Button::new(RichText::new("Copy Effect").size(SMALL_SIZE).color(
+                        if has_effect {
+                            tc.text_primary
+                        } else {
+                            tc.text_secondary
+                        },
+                    ))
                     .fill(tc.card_bg)
                     .stroke(Stroke::new(1.0, tc.card_border))
                     .corner_radius(CornerRadius::same(4)),
@@ -136,11 +150,13 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
             if ui
                 .add_enabled(
                     has_effect,
-                    egui::Button::new(
-                        RichText::new("Edit Effect")
-                            .size(SMALL_SIZE)
-                            .color(if has_effect { tc.text_primary } else { tc.text_secondary }),
-                    )
+                    egui::Button::new(RichText::new("Edit Effect").size(SMALL_SIZE).color(
+                        if has_effect {
+                            tc.text_primary
+                        } else {
+                            tc.text_secondary
+                        },
+                    ))
                     .fill(tc.card_bg)
                     .stroke(Stroke::new(1.0, tc.card_border))
                     .corner_radius(CornerRadius::same(4)),
@@ -197,15 +213,19 @@ fn draw_effect_grid(
             ui.spacing_mut().item_spacing.x = gap;
             for &(i, effect) in row {
                 let is_current = loader.current_effect == Some(i);
-                let is_armed = !is_builtin_section
-                    && pending_delete.map_or(false, |(idx, _)| idx == i);
+                let is_armed =
+                    !is_builtin_section && pending_delete.map_or(false, |(idx, _)| idx == i);
 
                 let (fill, text_color, stroke) = if is_armed {
                     (warning_color, Color32::WHITE, Stroke::NONE)
                 } else if is_current {
                     (tc.accent, Color32::WHITE, Stroke::NONE)
                 } else {
-                    (tc.card_bg, tc.text_primary, Stroke::new(1.0, tc.card_border))
+                    (
+                        tc.card_bg,
+                        tc.text_primary,
+                        Stroke::new(1.0, tc.card_border),
+                    )
                 };
 
                 let btn = egui::Button::new(
@@ -221,20 +241,43 @@ fn draw_effect_grid(
 
                 // Particle badge: scattered burst in top-right corner for effects with particles
                 if effect.particles.is_some() {
-                    let anchor = egui::pos2(
-                        response.rect.right() - 5.0,
-                        response.rect.top() + 5.0,
+                    let anchor = egui::pos2(response.rect.right() - 5.0, response.rect.top() + 5.0);
+                    let accent_50 = Color32::from_rgba_unmultiplied(
+                        tc.accent.r(),
+                        tc.accent.g(),
+                        tc.accent.b(),
+                        128,
                     );
-                    let accent_50 = Color32::from_rgba_unmultiplied(tc.accent.r(), tc.accent.g(), tc.accent.b(), 128);
-                    let accent_35 = Color32::from_rgba_unmultiplied(tc.accent.r(), tc.accent.g(), tc.accent.b(), 90);
+                    let accent_35 = Color32::from_rgba_unmultiplied(
+                        tc.accent.r(),
+                        tc.accent.g(),
+                        tc.accent.b(),
+                        90,
+                    );
                     let painter = ui.painter();
                     // Center dot
                     painter.circle_filled(anchor, 1.2, accent_50);
                     // Surrounding scattered dots (slightly irregular offsets)
-                    painter.circle_filled(egui::pos2(anchor.x - 2.8, anchor.y - 0.5), 0.9, accent_35);
-                    painter.circle_filled(egui::pos2(anchor.x + 2.5, anchor.y + 0.8), 1.0, accent_35);
-                    painter.circle_filled(egui::pos2(anchor.x + 0.3, anchor.y - 2.7), 0.8, accent_35);
-                    painter.circle_filled(egui::pos2(anchor.x - 0.6, anchor.y + 2.6), 0.9, accent_35);
+                    painter.circle_filled(
+                        egui::pos2(anchor.x - 2.8, anchor.y - 0.5),
+                        0.9,
+                        accent_35,
+                    );
+                    painter.circle_filled(
+                        egui::pos2(anchor.x + 2.5, anchor.y + 0.8),
+                        1.0,
+                        accent_35,
+                    );
+                    painter.circle_filled(
+                        egui::pos2(anchor.x + 0.3, anchor.y - 2.7),
+                        0.8,
+                        accent_35,
+                    );
+                    painter.circle_filled(
+                        egui::pos2(anchor.x - 0.6, anchor.y + 2.6),
+                        0.9,
+                        accent_35,
+                    );
                 }
 
                 // Left click: load effect (also clears pending delete)
@@ -258,9 +301,10 @@ fn draw_effect_grid(
                 }
 
                 // Hover text (includes particle count for particle effects)
-                let particle_suffix = effect.particles.as_ref().map(|p| {
-                    format!(" [{}]", format_count_short(p.max_count))
-                });
+                let particle_suffix = effect
+                    .particles
+                    .as_ref()
+                    .map(|p| format!(" [{}]", format_count_short(p.max_count)));
                 let hover_text = if is_armed {
                     "Right-click again to DELETE".to_string()
                 } else if is_builtin_section {

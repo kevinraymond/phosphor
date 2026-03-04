@@ -1,4 +1,4 @@
-use egui::{pos2, Color32, RichText, Shape, Stroke, Ui, Vec2};
+use egui::{Color32, RichText, Shape, Stroke, Ui, Vec2, pos2};
 
 use crate::effect::format::AudioMapping;
 use crate::ui::theme::colors::theme_colors;
@@ -53,14 +53,19 @@ fn draw_arrow_right(ui: &mut Ui, color: Color32) {
         pos2(c.x + half * 0.5, c.y),
         pos2(c.x - half * 0.5, c.y + half),
     ];
-    ui.painter().add(Shape::convex_polygon(points, color, Stroke::NONE));
+    ui.painter()
+        .add(Shape::convex_polygon(points, color, Stroke::NONE));
 }
 
 pub fn draw_audio_mappings(ui: &mut Ui, mappings: &[AudioMapping]) {
     let tc = theme_colors(ui.ctx());
 
     if mappings.is_empty() {
-        ui.label(RichText::new("No audio mappings").size(SMALL_SIZE).color(tc.text_secondary));
+        ui.label(
+            RichText::new("No audio mappings")
+                .size(SMALL_SIZE)
+                .color(tc.text_secondary),
+        );
         return;
     }
 

@@ -1,13 +1,13 @@
 use wgpu::{CommandEncoder, Device, Queue, TextureFormat};
 
-use crate::effect::format::PassDef;
 use crate::effect::EffectLoader;
+use crate::effect::format::PassDef;
 
+use super::ShaderPipeline;
 use super::particle::ParticleSystem;
 use super::placeholder::PlaceholderTexture;
 use super::render_target::{PingPongTarget, RenderTarget};
 use super::uniforms::UniformBuffer;
-use super::ShaderPipeline;
 
 /// A compiled pass: pipeline + render target + bind groups.
 struct CompiledPass {
@@ -38,6 +38,7 @@ impl PassExecutor {
         uniform_buffer: &UniformBuffer,
         placeholder: &PlaceholderTexture,
         queue: &Queue,
+        pipeline_cache: Option<&wgpu::PipelineCache>,
     ) -> Result<Self, String> {
         let mut passes = Vec::new();
 
@@ -46,7 +47,7 @@ impl PassExecutor {
                 .load_effect_source(&def.shader)
                 .map_err(|e| format!("Failed to load shader '{}': {e}", def.shader))?;
 
-            let pipeline = ShaderPipeline::new(device, hdr_format, &source)
+            let pipeline = ShaderPipeline::new(device, hdr_format, &source, pipeline_cache)
                 .map_err(|e| format!("Failed to compile shader '{}': {e}", def.shader))?;
 
             // Clear feedback targets to prevent NaN/garbage from uninitialized GPU memory
@@ -209,9 +210,11 @@ impl PassExecutor {
         source: &str,
         uniform_buffer: &UniformBuffer,
         placeholder: &PlaceholderTexture,
+        pipeline_cache: Option<&wgpu::PipelineCache>,
     ) -> Result<(), String> {
         if let Some(pass) = self.passes.get_mut(pass_index) {
-            pass.pipeline.recreate_pipeline(device, hdr_format, source)?;
+            pass.pipeline
+                .recreate_pipeline(device, hdr_format, source, pipeline_cache)?;
             pass.bind_groups = create_pass_bind_groups(
                 device,
                 uniform_buffer,

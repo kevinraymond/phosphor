@@ -1,8 +1,8 @@
 use egui::{Color32, RichText, Ui};
 
 use crate::midi::types::TriggerAction;
-use crate::osc::types::OscLearnTarget;
 use crate::osc::OscSystem;
+use crate::osc::types::OscLearnTarget;
 use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
@@ -13,7 +13,10 @@ const TRIGGER_PAIRS: &[(TriggerAction, TriggerAction)] = &[
     (TriggerAction::NextEffect, TriggerAction::PrevEffect),
     (TriggerAction::NextPreset, TriggerAction::PrevPreset),
     (TriggerAction::NextLayer, TriggerAction::PrevLayer),
-    (TriggerAction::TogglePostProcess, TriggerAction::ToggleOverlay),
+    (
+        TriggerAction::TogglePostProcess,
+        TriggerAction::ToggleOverlay,
+    ),
     (TriggerAction::SceneGoNext, TriggerAction::SceneGoPrev),
 ];
 

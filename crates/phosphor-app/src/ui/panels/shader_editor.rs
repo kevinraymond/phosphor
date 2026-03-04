@@ -139,7 +139,11 @@ fn icon_button(
 ) -> egui::Response {
     let size = Vec2::splat(16.0);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-    let c = if response.hovered() { Color32::WHITE } else { color };
+    let c = if response.hovered() {
+        Color32::WHITE
+    } else {
+        color
+    };
     paint(ui.painter(), rect, c);
     response
 }
@@ -201,9 +205,28 @@ fn wgsl_syntax() -> Syntax {
             "true", "false",
         ])
         .with_types([
-            "f32", "f16", "i32", "u32", "bool", "vec2f", "vec3f", "vec4f", "vec2i", "vec3i",
-            "vec4i", "vec2u", "vec3u", "vec4u", "mat2x2f", "mat3x3f", "mat4x4f", "array",
-            "texture_2d", "texture_storage_2d", "sampler", "ptr",
+            "f32",
+            "f16",
+            "i32",
+            "u32",
+            "bool",
+            "vec2f",
+            "vec3f",
+            "vec4f",
+            "vec2i",
+            "vec3i",
+            "vec4i",
+            "vec2u",
+            "vec3u",
+            "vec4u",
+            "mat2x2f",
+            "mat3x3f",
+            "mat4x4f",
+            "array",
+            "texture_2d",
+            "texture_storage_2d",
+            "sampler",
+            "ptr",
         ])
         .with_special([
             "@fragment",
@@ -238,7 +261,11 @@ fn editor_color_theme(theme: ThemeMode) -> ColorTheme {
 
 /// Draw the shader editor as an overlay with semi-transparent code area.
 /// Returns true if the editor is open.
-pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, theme: ThemeMode) -> bool {
+pub fn draw_shader_editor(
+    ctx: &egui::Context,
+    state: &mut ShaderEditorState,
+    theme: ThemeMode,
+) -> bool {
     use egui::TextBuffer;
 
     if !state.open {
@@ -246,13 +273,17 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
     }
 
     let tc = theme_colors(ctx);
-    let screen = ctx.input(|i| i.screen_rect());
+    let screen = ctx.input(|i| i.content_rect());
     let color_theme = editor_color_theme(theme);
     let fontsize = 13.0f32;
 
     // Header bar height + toolbar + separators
     let header_height = 60.0;
-    let error_height = if state.compile_error.is_some() { 28.0 } else { 0.0 };
+    let error_height = if state.compile_error.is_some() {
+        28.0
+    } else {
+        0.0
+    };
 
     // Minimized shows ~5 lines, normal uses 80% of screen height
     let code_height = if state.minimized {
@@ -262,7 +293,9 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
     };
 
     let panel_h = header_height + code_height + error_height;
-    let panel_w = (screen.width() * 0.85).max(500.0).min(screen.width() - 20.0);
+    let panel_w = (screen.width() * 0.85)
+        .max(500.0)
+        .min(screen.width() - 20.0);
 
     // Centered when normal, anchored to bottom when minimized
     let panel_pos = egui::pos2(
@@ -332,12 +365,18 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
                             "Shader"
                         };
                         let shader_btn = ui.add(
-                            egui::Button::new(
-                                RichText::new(shader_label)
-                                    .size(12.0)
-                                    .color(if shader_active { tc.text_primary } else { tc.text_secondary }),
-                            )
-                            .fill(if shader_active { tc.card_bg } else { Color32::TRANSPARENT })
+                            egui::Button::new(RichText::new(shader_label).size(12.0).color(
+                                if shader_active {
+                                    tc.text_primary
+                                } else {
+                                    tc.text_secondary
+                                },
+                            ))
+                            .fill(if shader_active {
+                                tc.card_bg
+                            } else {
+                                Color32::TRANSPARENT
+                            })
                             .stroke(if shader_active {
                                 Stroke::new(1.0, tc.accent)
                             } else {
@@ -363,12 +402,18 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
                             "Effect"
                         };
                         let pfx_btn = ui.add(
-                            egui::Button::new(
-                                RichText::new(pfx_label)
-                                    .size(12.0)
-                                    .color(if pfx_active { tc.text_primary } else { tc.text_secondary }),
-                            )
-                            .fill(if pfx_active { tc.card_bg } else { Color32::TRANSPARENT })
+                            egui::Button::new(RichText::new(pfx_label).size(12.0).color(
+                                if pfx_active {
+                                    tc.text_primary
+                                } else {
+                                    tc.text_secondary
+                                },
+                            ))
+                            .fill(if pfx_active {
+                                tc.card_bg
+                            } else {
+                                Color32::TRANSPARENT
+                            })
                             .stroke(if pfx_active {
                                 Stroke::new(1.0, tc.accent)
                             } else {
@@ -431,11 +476,13 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
                     let save_enabled = state.is_dirty() || state.paired_is_dirty();
                     let save_btn = ui.add_enabled(
                         save_enabled,
-                        egui::Button::new(
-                            RichText::new("Save")
-                                .size(12.0)
-                                .color(if save_enabled { tc.text_primary } else { tc.text_secondary }),
-                        )
+                        egui::Button::new(RichText::new("Save").size(12.0).color(
+                            if save_enabled {
+                                tc.text_primary
+                            } else {
+                                tc.text_secondary
+                            },
+                        ))
                         .fill(tc.card_bg)
                         .stroke(Stroke::new(1.0, tc.card_border))
                         .corner_radius(CornerRadius::same(3)),
@@ -469,8 +516,10 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
                         let slider = egui::Slider::new(&mut state.editor_opacity, 0.25..=1.0)
                             .show_value(false)
                             .text("BG");
-                        ui.add(slider)
-                            .on_hover_text(format!("Background opacity: {:.0}%", state.editor_opacity * 100.0));
+                        ui.add(slider).on_hover_text(format!(
+                            "Background opacity: {:.0}%",
+                            state.editor_opacity * 100.0
+                        ));
                     });
                 });
                 ui.add_space(2.0);
@@ -547,9 +596,7 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
                             let num_width = max_digits as f32 * fontsize * 0.5;
 
                             let mut num_layouter =
-                                |ui: &egui::Ui,
-                                 buf: &dyn TextBuffer,
-                                 _wrap: f32| {
+                                |ui: &egui::Ui, buf: &dyn TextBuffer, _wrap: f32| {
                                     let job = egui::text::LayoutJob::single_section(
                                         buf.as_str().to_string(),
                                         egui::text::TextFormat::simple(
@@ -575,9 +622,7 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
                                 .id_salt(format!("shader_hscroll_{mode_salt}"))
                                 .show(ui, |ui| {
                                     let mut code_layouter =
-                                        |ui: &egui::Ui,
-                                         buf: &dyn TextBuffer,
-                                         _wrap: f32| {
+                                        |ui: &egui::Ui, buf: &dyn TextBuffer, _wrap: f32| {
                                             let mut token = Token::default();
                                             let tokens = token.tokens(&syntax, buf.as_str());
                                             let mut job = egui::text::LayoutJob::default();
@@ -625,9 +670,8 @@ pub fn draw_shader_editor(ctx: &egui::Context, state: &mut ShaderEditorState, th
         });
 
     // Handle Ctrl+S
-    let ctrl_s = ctx.input(|i| {
-        i.key_pressed(Key::S) && i.modifiers.matches_exact(Modifiers::COMMAND)
-    });
+    let ctrl_s =
+        ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.matches_exact(Modifiers::COMMAND));
     if ctrl_s && (state.is_dirty() || state.paired_is_dirty()) {
         ctx.data_mut(|d| {
             d.insert_temp(Id::new("shader_editor_save"), true);
@@ -651,9 +695,21 @@ pub fn draw_new_effect_prompt(ctx: &egui::Context, state: &mut ShaderEditorState
 
     let tc = theme_colors(ctx);
 
-    let title = if state.copy_builtin_mode { "Copy Effect" } else { "New Effect" };
-    let label = if state.copy_builtin_mode { "New effect name:" } else { "Effect name:" };
-    let btn_label = if state.copy_builtin_mode { "Copy" } else { "Create" };
+    let title = if state.copy_builtin_mode {
+        "Copy Effect"
+    } else {
+        "New Effect"
+    };
+    let label = if state.copy_builtin_mode {
+        "New effect name:"
+    } else {
+        "Effect name:"
+    };
+    let btn_label = if state.copy_builtin_mode {
+        "Copy"
+    } else {
+        "Create"
+    };
 
     egui::Window::new(title)
         .collapsible(false)
@@ -661,11 +717,7 @@ pub fn draw_new_effect_prompt(ctx: &egui::Context, state: &mut ShaderEditorState
         .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
         .fixed_size(Vec2::new(300.0, 0.0))
         .show(ctx, |ui| {
-            ui.label(
-                RichText::new(label)
-                    .size(13.0)
-                    .color(tc.text_primary),
-            );
+            ui.label(RichText::new(label).size(13.0).color(tc.text_primary));
             ui.add_space(4.0);
             let response = ui.text_edit_singleline(&mut state.new_effect_name);
 
@@ -680,10 +732,7 @@ pub fn draw_new_effect_prompt(ctx: &egui::Context, state: &mut ShaderEditorState
                 let enter_pressed = ui.input(|i| i.key_pressed(Key::Enter));
 
                 if ui
-                    .add_enabled(
-                        name_valid,
-                        egui::Button::new(btn_label),
-                    )
+                    .add_enabled(name_valid, egui::Button::new(btn_label))
                     .clicked()
                     || (enter_pressed && name_valid)
                 {
@@ -701,9 +750,7 @@ pub fn draw_new_effect_prompt(ctx: &egui::Context, state: &mut ShaderEditorState
                     state.copy_builtin_mode = false;
                 }
 
-                if ui.button("Cancel").clicked()
-                    || ui.input(|i| i.key_pressed(Key::Escape))
-                {
+                if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(Key::Escape)) {
                     state.new_effect_prompt = false;
                     state.new_effect_name.clear();
                     state.copy_builtin_mode = false;

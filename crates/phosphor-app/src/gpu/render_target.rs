@@ -66,7 +66,14 @@ impl RenderTarget {
         if w == self.width && h == self.height {
             return;
         }
-        *self = Self::new(device, width, height, self.format, self.scale, "render-target");
+        *self = Self::new(
+            device,
+            width,
+            height,
+            self.format,
+            self.scale,
+            "render-target",
+        );
     }
 }
 

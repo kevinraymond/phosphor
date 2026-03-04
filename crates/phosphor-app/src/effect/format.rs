@@ -384,9 +384,7 @@ mod tests {
     fn diff_detects_particles_change() {
         let a = make_effect("test", "t.wgsl");
         let mut b = make_effect("test", "t.wgsl");
-        b.particles = Some(
-            serde_json::from_str(r#"{"max_count": 1000}"#).unwrap(),
-        );
+        b.particles = Some(serde_json::from_str(r#"{"max_count": 1000}"#).unwrap());
         let diff = a.diff(&b);
         assert!(diff.particles_changed);
         assert!(diff.needs_rebuild());
