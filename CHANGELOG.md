@@ -5,6 +5,17 @@
 
 ## Unreleased
 
+### Chaos Effect (New)
+- **Strange attractor dynamics**: 5 classic attractors (Lorenz, Rössler, Halvorsen, Thomas, Chen) with RK4 integration — particles trace chaotic trajectories that reveal butterfly, torus, and knot-like shapes through accumulated feedback trails
+- **Attractor morphing**: spectral centroid smoothly blends between adjacent attractor types; slider + audio drive crossfade the derivative functions (all attractors normalized to [-1,1] space)
+- **Audio-reactive bifurcation**: bass shifts the bifurcation parameter across chaos boundaries (e.g. Lorenz ρ through ~24.74), onset provides impulse push past critical points for dramatic order→chaos transitions
+- **RK4 integrator**: 4th-order Runge-Kutta for accurate trajectory integration; brilliance modulates time step for faster/more chaotic motion at high frequencies
+- **4 color modes**: velocity (blue→gold speed ramp), z-depth (cool→warm gradient), wing (cyan vs magenta by sign of attractor x), age (bright warm→dim cool fade)
+- **Feedback trail rendering**: background shader with centripetal UV warp, differential RGB decay (red fades fastest → cool aging trails), HDR clamp
+- **3D projection**: slow constant-speed Y-axis rotation, perspective depth scaling via projection param, depth-based size and brightness modulation
+- **Divergence guard**: NaN/out-of-bounds particles reset to random position near origin; soft clamp to normalized space prevents runaway
+- 50K particles, 8 params, additive blending, bloom postprocess, obstacle collision
+
 ### Turing Effect (New)
 - **Gray-Scott reaction-diffusion**: full 2D R-D simulation on ping-pong compute textures, running N steps/frame (default 8, audio-modulated up to 32)
 - **Hybrid R-D + particles**: 200K particles sample the R-D field for gradient-based chemotactic forces, flowing toward high-concentration pattern regions
