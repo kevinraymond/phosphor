@@ -5,6 +5,24 @@
 
 ## Unreleased
 
+### Audio Panel Redesign (Improved)
+- **BPM ring**: circular beat-phase arc with orbiting dot replaces static BPM number; flashes white on downbeat
+- **Chroma wheel**: radial 12-segment pie chart with energy-proportional radius replaces linear bars; dominant note displayed in center
+- **MFCC heatmap**: single-row dark blue→cyan→white timbral fingerprint replaces bar graph; selective labels (DC, Slope, Shape, Formant, Det6)
+- **Spectrum bars**: vertical gradient mesh bars (bright top→faded bottom) with peak-hold markers (0.95 decay)
+- **Dynamics section**: 7 labeled rows with thin track bars + percentage values; kick uses boolean dot indicator
+- **Section headers**: self-documenting sections (SPECTRUM 7 bands, DYNAMICS 7 features, CHROMA 12 pitch classes, TIMBRE·MFCC 13 coefficients)
+- **Tooltips**: per-bar spectrum tooltips (name, Hz range, character), per-row dynamics tooltips (feature description), per-cell MFCC tooltips (coefficient meaning), chroma wheel and BPM ring tooltips
+- **Footer**: feature count summary (7 bands · 7 dynamics · 12 chroma · 13 mfcc · 512 fft)
+
+### MFCC + Chroma Audio Feature Extraction (New)
+- **13 Mel-Frequency Cepstral Coefficients**: captures timbral content — different instruments/voices produce distinct MFCC patterns. Computed from 26-band mel filterbank + DCT-II on the existing 4096-pt FFT
+- **12 Chroma pitch-class energies**: maps spectral energy to musical pitch classes (C through B). Individual notes/chords light up specific bars. Frequency range 20–5000 Hz
+- **GPU-accessible**: new `mfcc(i)` and `chroma_val(i)` WGSL helper functions in both fragment and compute shaders. ShaderUniforms 256→288 bytes, ParticleUniforms 416→528 bytes
+- **Audio panel visualization**: chromatic-colored chroma bars (12 pitch classes) and MFCC bar graph in the audio panel overlay
+- **Smoothed + normalized**: 25 new features go through the existing adaptive normalizer and asymmetric EMA smoother (attack 0.03s, release 0.15s)
+- **Non-breaking**: existing effects unchanged — they simply don't read the new fields. NUM_FEATURES 20→45
+
 ### Spatial Hash Grid (Improved)
 - **Dynamic grid sizing**: `grid_dims(N)` computes `clamp(sqrt(N/16), 40, 256)` — grid scales automatically with particle count instead of fixed 40×40
 - **Shader constant patching**: SH_GRID_W/H constants in particle_lib, count, prefix_sum, and scatter shaders patched at pipeline creation time
