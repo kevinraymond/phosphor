@@ -1122,13 +1122,15 @@ impl ParticleSystem {
             let p6 = self.uniforms.effect_params[6]; // drop_size param
 
             // Gray-Scott parameter mapping: narrow ranges centered on known-good regimes
-            // f ∈ [0.02, 0.08]: spots(0.03) → worms(0.042) → coral(0.055) → chaos(0.07)
-            // k ∈ [0.05, 0.07]: the interesting pattern zone is very narrow (~0.060-0.065)
-            let f = 0.02 + p2 * 0.06 + self.uniforms.bass * 0.02;
-            let k = 0.05 + p3 * 0.02 + self.uniforms.mid * 0.01;
+            // f ∈ [0.02, 0.07]: spots(0.03) → worms(0.042) → coral(0.055) → chaos(0.07)
+            // Saddle-node boundary: k_SN = sqrt(f)/2 - f. Beyond this, B collapses to 0.
+            // We subtract 0.003 margin to stay in the robust pattern zone.
+            let f = (0.02 + p2 * 0.06 + self.uniforms.bass * 0.02).clamp(0.02, 0.07);
+            let k_sn = f.sqrt() * 0.5 - f;
+            let k = (0.05 + p3 * 0.02 + self.uniforms.mid * 0.01).clamp(0.05, (k_sn - 0.003).max(0.05));
             // Diffusion: Da/Db = 2:1 standard. CFL stability limit: D < 0.25
             let da = 0.2097;
-            let db = 0.05 + p4 * 0.08 + self.uniforms.brilliance * 0.02;
+            let db = (0.05 + p4 * 0.08 + self.uniforms.brilliance * 0.02).clamp(0.05, 0.15);
 
             let rd_uniforms = RDUniforms {
                 feed_rate: f,
