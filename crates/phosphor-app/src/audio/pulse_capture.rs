@@ -146,7 +146,7 @@ const FRAG_SAMPLES: usize = 1024;
 const FRAG_BYTES: u32 = (FRAG_SAMPLES * std::mem::size_of::<f32>()) as u32;
 
 /// How often to log health stats (seconds).
-const HEALTH_LOG_INTERVAL: f64 = 5.0;
+const HEALTH_LOG_INTERVAL: f64 = 30.0;
 
 // --- PulseCapture ---
 
