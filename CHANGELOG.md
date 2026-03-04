@@ -5,6 +5,18 @@
 
 ## Unreleased
 
+### Mycelium Effect (New)
+- **Chain-based growth system**: 2,500 pre-allocated chains (80 segments max each, 200K particles total) — leader particles at tips follow curl noise flow fields while depositing follower particles that form spring-connected tendrils
+- **Self-activation architecture**: dead particles detect when they should activate by reading chain state from the input buffer — no cross-thread writes, no race conditions. Growth propagates via time-based segment intervals
+- **Branching on audio onset**: reserve chains (beyond initial 100 leaders) self-activate by branching from random active chain tips; onset boosts branch probability 15×, brilliance widens branch angles
+- **Spring physics**: followers connected by asymmetric springs (strong toward tip, weak toward root) with critical damping; creates organic elastic motion through the network
+- **Death cascade**: roots age faster with spectral flux; when a root dies, death propagates tip-ward with 50ms/segment delay — visual dissolve from root to tip, then chain slot recycles for new branches
+- **4 color modes**: depth (teal-blue root → forest green → phosphorescent tip), generation (teal/gold/magenta by branch depth), velocity (dim blue → bright green), age (bright green → dark brown)
+- **Beat-phase traveling wave**: periodic brightness pulse travels root→tip synced to detected beat, modulated by RMS
+- **Bioluminescent feedback trails**: background shader with differential RGB decay (green persists longest), organic noise warp for living feel, HDR clamp
+- **Audio integration**: bass→growth speed, onset→branching, mid→curl intensity, brilliance→branch angle, flux→death rate, beat_phase→traveling glow, rms→brightness, centroid→hue shift
+- 200K particles, 8 params, additive blending, bloom postprocess, obstacle collision
+
 ### Chaos Effect (New)
 - **Strange attractor dynamics**: 5 classic attractors (Lorenz, Rössler, Halvorsen, Thomas, Chen) with RK4 integration — particles trace chaotic trajectories that reveal butterfly, torus, and knot-like shapes through accumulated feedback trails
 - **Attractor morphing**: spectral centroid smoothly blends between adjacent attractor types; slider + audio drive crossfade the derivative functions (all attractors normalized to [-1,1] space)
