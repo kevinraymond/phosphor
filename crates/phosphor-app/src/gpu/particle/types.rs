@@ -710,7 +710,7 @@ mod tests {
         let json = r#"{}"#;
         let def: ReactionDiffusionDef = serde_json::from_str(json).unwrap();
         assert_eq!(def.grid_size, 512);
-        assert_eq!(def.steps_per_frame, 8);
+        assert_eq!(def.steps_per_frame, 16);
         assert!(def.compute_shader.is_empty());
     }
 

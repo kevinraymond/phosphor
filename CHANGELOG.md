@@ -5,6 +5,11 @@
 
 ## Unreleased
 
+### Spatial Hash Grid (Improved)
+- **Dynamic grid sizing**: `grid_dims(N)` computes `clamp(sqrt(N/16), 40, 256)` — grid scales automatically with particle count instead of fixed 40×40
+- **Shader constant patching**: SH_GRID_W/H constants in particle_lib, count, prefix_sum, and scatter shaders patched at pipeline creation time
+- **Particle panel slider fix**: emit_rate slider max now scales to 10% of max_count for high-count effects (e.g. 100K emit_rate for 1M particles)
+
 ### Murmur Effect (Upgraded)
 - **Topological K=7 nearest neighbors**: replaced fixed-radius Boids with scale-free K-nearest neighbor queries — flock correlations work from 40K to 1M particles without parameter tuning
 - **Vicsek noise phase transitions**: angular noise (eta parameter) modulated by bass drives order→chaos transitions; proper research-accurate model instead of ad-hoc disorder
