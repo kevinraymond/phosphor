@@ -12,7 +12,7 @@ use super::spatial_hash::SpatialHashGrid;
 use super::sprite::SpriteAtlas;
 use super::types::{
     ImageSampleDef, ParticleAux, ParticleDef, ParticleImageSource,
-    ParticleRenderUniforms, ParticleUniforms, SourceTransition,
+    ParticleRenderUniforms, ParticleUniforms, RDUniforms, SourceTransition,
 };
 
 const WORKGROUP_SIZE: u32 = 256;
@@ -115,6 +115,21 @@ pub struct ParticleSystem {
 
     // Spatial hash grid for particle-particle interaction
     spatial_hash: Option<SpatialHashGrid>,
+
+    // Reaction-diffusion (R-D compute on own pipeline; particle sampling via group 4)
+    rd_textures: Option<[wgpu::Texture; 2]>,
+    rd_views: Option<[wgpu::TextureView; 2]>,
+    rd_sampler: Option<wgpu::Sampler>,
+    rd_uniform_buffer: Option<wgpu::Buffer>,
+    rd_compute_pipeline: Option<ComputePipeline>,
+    rd_compute_bgl: Option<BindGroupLayout>,
+    rd_compute_bgs: Option<[BindGroup; 2]>,
+    rd_particle_bgl: Option<BindGroupLayout>,
+    rd_particle_bgs: Option<[BindGroup; 2]>,
+    rd_current: std::cell::Cell<usize>,
+    rd_steps_per_frame: u32,
+    rd_grid_size: u32,
+    rd_initialized: std::cell::Cell<bool>,
 
     // Depth sort (bitonic merge sort on alive indices by particle size)
     sort_key_buffer: Option<wgpu::Buffer>,
@@ -444,8 +459,27 @@ impl ParticleSystem {
             None
         };
 
+        // Create reaction-diffusion resources if enabled.
+        let (
+            rd_textures,
+            rd_views,
+            rd_sampler,
+            rd_uniform_buffer,
+            rd_compute_pipeline,
+            rd_compute_bgl,
+            rd_compute_bgs,
+            rd_particle_bgl,
+            rd_particle_bgs,
+            rd_steps_per_frame,
+            rd_grid_size,
+        ) = if let Some(ref rd_def) = def.reaction_diffusion {
+            create_rd_resources(device, queue, rd_def)
+        } else {
+            (None, None, None, None, None, None, None, None, None, 0, 0)
+        };
+
         // Build compute pipeline layout matching compute_bind_group_layouts() logic:
-        // groups 0=core, 1=flow field, 2=trails (or empty placeholder), 3=spatial hash
+        // groups 0=core, 1=flow field, 2=trails, 3=spatial hash, 4=R-D (if present)
         let mut bgl_refs: Vec<&BindGroupLayout> = vec![&compute_bgl, &flow_field_bgl];
         if spatial_hash.is_some() {
             // Spatial hash at group 3 requires group 2 to exist (contiguous)
@@ -457,6 +491,13 @@ impl ParticleSystem {
             bgl_refs.push(&spatial_hash.as_ref().unwrap().query_bgl);
         } else if let Some(ref trail_bgl) = trail_compute_bgl {
             bgl_refs.push(trail_bgl);
+        }
+        if let Some(ref rd_pbgl) = rd_particle_bgl {
+            // Group 4 requires groups 2 and 3 to exist (contiguous)
+            while bgl_refs.len() < 4 {
+                bgl_refs.push(&empty_bgl);
+            }
+            bgl_refs.push(rd_pbgl);
         }
 
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -784,6 +825,19 @@ impl ParticleSystem {
             trail_prepare_indirect_pipeline: None,
             trail_prepare_indirect_bind_group: None,
             spatial_hash,
+            rd_textures,
+            rd_views,
+            rd_sampler,
+            rd_uniform_buffer,
+            rd_compute_pipeline,
+            rd_compute_bgl,
+            rd_compute_bgs,
+            rd_particle_bgl,
+            rd_particle_bgs,
+            rd_current: std::cell::Cell::new(0),
+            rd_steps_per_frame,
+            rd_grid_size,
+            rd_initialized: std::cell::Cell::new(false),
             sort_key_buffer,
             sort_params_buffer,
             sort_keygen_pipeline,
@@ -820,7 +874,7 @@ impl ParticleSystem {
     }
 
     /// Build the list of bind group layouts for compute pipeline creation.
-    /// Groups: 0=core, 1=flow field, 2=trails (or empty placeholder), 3=spatial hash (if enabled).
+    /// Groups: 0=core, 1=flow field, 2=trails, 3=spatial hash, 4=R-D (if enabled).
     fn compute_bind_group_layouts(&self) -> Vec<&BindGroupLayout> {
         let mut layouts: Vec<&BindGroupLayout> = vec![&self.compute_bgl, &self.flow_field_bgl];
 
@@ -835,6 +889,14 @@ impl ParticleSystem {
             layouts.push(&hash.query_bgl);
         } else if let Some(trail_bgl) = &self.trail_compute_bgl {
             layouts.push(trail_bgl);
+        }
+
+        // Group 4: R-D texture for particle sampling
+        if let Some(ref rd_pbgl) = self.rd_particle_bgl {
+            while layouts.len() < 4 {
+                layouts.push(&self.empty_bgl);
+            }
+            layouts.push(rd_pbgl);
         }
 
         layouts
@@ -1040,7 +1102,72 @@ impl ParticleSystem {
 
         let workgroups = (self.max_particles + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
 
-        // 0. Spatial hash (if interaction enabled) — build before sim
+        // 0a. Reaction-diffusion compute (if present) — step R-D before particles
+        if let (Some(rd_pipeline), Some(rd_bgs), Some(rd_ubuf)) = (
+            &self.rd_compute_pipeline,
+            &self.rd_compute_bgs,
+            &self.rd_uniform_buffer,
+        ) {
+            // Initialize R-D textures on first dispatch
+            if !self.rd_initialized.get() {
+                self.init_rd_textures(queue);
+                self.rd_initialized.set(true);
+            }
+
+            // Write R-D uniforms from effect params + audio modulation
+            let p2 = self.uniforms.effect_params[2]; // feed_rate param
+            let p3 = self.uniforms.effect_params[3]; // kill_rate param
+            let p4 = self.uniforms.effect_params[4]; // diffuse_b param
+            let p5 = self.uniforms.effect_params[5]; // sim_speed param
+            let p6 = self.uniforms.effect_params[6]; // drop_size param
+
+            // Gray-Scott parameter mapping: narrow ranges centered on known-good regimes
+            // f ∈ [0.02, 0.08]: spots(0.03) → worms(0.042) → coral(0.055) → chaos(0.07)
+            // k ∈ [0.05, 0.07]: the interesting pattern zone is very narrow (~0.060-0.065)
+            let f = 0.02 + p2 * 0.06 + self.uniforms.bass * 0.02;
+            let k = 0.05 + p3 * 0.02 + self.uniforms.mid * 0.01;
+            // Diffusion: Da/Db = 2:1 standard. CFL stability limit: D < 0.25
+            let da = 0.2097;
+            let db = 0.05 + p4 * 0.08 + self.uniforms.brilliance * 0.02;
+
+            let rd_uniforms = RDUniforms {
+                feed_rate: f,
+                kill_rate: k,
+                diffuse_a: da,
+                diffuse_b: db,
+                time: self.uniforms.time,
+                onset: self.uniforms.onset,
+                drop_radius: 0.02 + p6 * 0.08,
+                _pad: 0.0,
+            };
+            queue.write_buffer(rd_ubuf, 0, bytemuck::bytes_of(&rd_uniforms));
+
+            let wg_x = (self.rd_grid_size + 7) / 8;
+            let wg_y = (self.rd_grid_size + 7) / 8;
+
+            // Steps per frame, modulated by sim_speed param and beat
+            let steps = ((self.rd_steps_per_frame as f32
+                * (0.5 + p5)
+                * (1.0 + self.uniforms.beat * 1.0)) as u32)
+                .max(1)
+                .min(32);
+
+            for _step in 0..steps {
+                {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("rd-step"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(rd_pipeline);
+                    pass.set_bind_group(0, &rd_bgs[self.rd_current.get()], &[]);
+                    pass.dispatch_workgroups(wg_x, wg_y, 1);
+                }
+                // Flip R-D ping-pong (barrier via pass drop)
+                self.rd_current.set(1 - self.rd_current.get());
+            }
+        }
+
+        // 0b. Spatial hash (if interaction enabled) — build before sim
         if let Some(hash) = &self.spatial_hash {
             // Read from the input buffer (current side of ping-pong)
             hash.dispatch(encoder, queue, self.current);
@@ -1057,12 +1184,19 @@ impl ParticleSystem {
             pass.set_bind_group(1, &self.flow_field_bind_group, &[]);
             if let Some(trail_bg) = &self.trail_compute_bind_group {
                 pass.set_bind_group(2, trail_bg, &[]);
-            } else if self.spatial_hash.is_some() {
-                // Spatial hash at group 3 requires group 2 to exist (contiguous indices)
+            } else if self.spatial_hash.is_some() || self.rd_particle_bgs.is_some() {
+                // Groups 3/4 require group 2 to exist (contiguous indices)
                 pass.set_bind_group(2, &self.empty_bind_group, &[]);
             }
             if let Some(hash) = &self.spatial_hash {
                 pass.set_bind_group(3, &hash.query_bind_group, &[]);
+            } else if self.rd_particle_bgs.is_some() {
+                // Group 4 requires group 3 to exist (contiguous)
+                pass.set_bind_group(3, &self.empty_bind_group, &[]);
+            }
+            // Group 4: R-D texture for particle sampling
+            if let Some(ref rd_bgs) = self.rd_particle_bgs {
+                pass.set_bind_group(4, &rd_bgs[self.rd_current.get()], &[]);
             }
             pass.dispatch_workgroups(workgroups, 1, 1);
         }
@@ -1897,6 +2031,79 @@ impl ParticleSystem {
         self.current = 1 - self.current;
         self.frame_index = self.frame_index.wrapping_add(1);
     }
+
+    /// Initialize R-D textures: A=1.0, B=0.0 everywhere + seed drops.
+    fn init_rd_textures(&self, queue: &Queue) {
+        let Some(ref textures) = self.rd_textures else { return };
+        let size = self.rd_grid_size;
+        let pixel_count = (size * size) as usize;
+
+        // Build initial state: A=1, B=0 everywhere.
+        // f16 bit patterns: 1.0=0x3C00, 0.5=0x3800, 0.0=0x0000
+        let mut data = vec![0u8; pixel_count * 8]; // 8 bytes per pixel (4 x f16)
+        let f16_one: u16 = 0x3C00;
+        let f16_zero: u16 = 0x0000;
+        let f16_half: u16 = 0x3800;
+
+        // Fill with substrate: A=1.0, B=0.0
+        for i in 0..pixel_count {
+            let offset = i * 8;
+            data[offset..offset + 2].copy_from_slice(&f16_one.to_le_bytes());     // A
+            data[offset + 2..offset + 4].copy_from_slice(&f16_zero.to_le_bytes()); // B
+            data[offset + 4..offset + 6].copy_from_slice(&f16_zero.to_le_bytes());
+            data[offset + 6..offset + 8].copy_from_slice(&f16_one.to_le_bytes());  // alpha
+        }
+
+        // Seed with a dense grid of circular B patches.
+        // Each patch must be ~5px radius minimum so B survives diffusion.
+        // Grid spacing ~30px gives ~17×17 = 289 seeds on a 512 grid.
+        let spacing = 30i32;
+        let seed_radius = 5i32;
+        let seed_r2 = seed_radius * seed_radius;
+        let s = size as i32;
+
+        let mut cy = spacing / 2;
+        while cy < s {
+            let mut cx = spacing / 2;
+            while cx < s {
+                for dy in -seed_radius..=seed_radius {
+                    for dx in -seed_radius..=seed_radius {
+                        if dx * dx + dy * dy > seed_r2 { continue; }
+                        let px = (cx + dx).rem_euclid(s) as usize;
+                        let py = (cy + dy).rem_euclid(s) as usize;
+                        let idx = py * size as usize + px;
+                        let offset = idx * 8;
+                        // A=0.5, B=0.25 in seed regions
+                        data[offset..offset + 2].copy_from_slice(&f16_half.to_le_bytes());
+                        data[offset + 2..offset + 4].copy_from_slice(&0x3400u16.to_le_bytes()); // f16(0.25)
+                    }
+                }
+                cx += spacing;
+            }
+            cy += spacing;
+        }
+
+        // Write to texture [0]
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &textures[0],
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(size * 8),
+                rows_per_image: Some(size),
+            },
+            wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
 }
 
 /// Create the prepare-indirect compute pipeline and bind groups.
@@ -2556,5 +2763,254 @@ fn create_sort_resources(
         Some(sort_bind_groups),
         passes,
         sort_n,
+    )
+}
+
+/// Create reaction-diffusion GPU resources: textures, pipelines, bind groups.
+/// Returns all R-D fields as a tuple matching the struct fields.
+#[allow(clippy::type_complexity)]
+fn create_rd_resources(
+    device: &Device,
+    _queue: &Queue,
+    rd_def: &super::types::ReactionDiffusionDef,
+) -> (
+    Option<[wgpu::Texture; 2]>,          // rd_textures
+    Option<[wgpu::TextureView; 2]>,      // rd_views
+    Option<wgpu::Sampler>,               // rd_sampler
+    Option<wgpu::Buffer>,                // rd_uniform_buffer
+    Option<ComputePipeline>,             // rd_compute_pipeline
+    Option<BindGroupLayout>,             // rd_compute_bgl
+    Option<[BindGroup; 2]>,              // rd_compute_bgs
+    Option<BindGroupLayout>,             // rd_particle_bgl
+    Option<[BindGroup; 2]>,              // rd_particle_bgs
+    u32,                                  // rd_steps_per_frame
+    u32,                                  // rd_grid_size
+) {
+    let grid_size = rd_def.grid_size.max(64).min(2048);
+    let steps = rd_def.steps_per_frame.max(1).min(32);
+
+    // Two Rgba16Float textures for ping-pong R-D simulation
+    let tex_desc = wgpu::TextureDescriptor {
+        label: Some("rd-texture"),
+        size: wgpu::Extent3d {
+            width: grid_size,
+            height: grid_size,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::STORAGE_BINDING
+            | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    };
+    let tex_a = device.create_texture(&tex_desc);
+    let tex_b = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("rd-texture-b"),
+        ..tex_desc
+    });
+
+    let view_a = tex_a.create_view(&wgpu::TextureViewDescriptor::default());
+    let view_b = tex_b.create_view(&wgpu::TextureViewDescriptor::default());
+
+    // Linear sampler with repeat addressing for wrapping boundaries
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("rd-sampler"),
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+
+    // R-D uniform buffer (32 bytes)
+    let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("rd-uniforms"),
+        size: std::mem::size_of::<RDUniforms>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    // R-D compute bind group layout
+    let rd_compute_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: Some("rd-compute-bgl"),
+        entries: &[
+            // binding 0: RDUniforms
+            BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            // binding 1: source texture (read via textureLoad)
+            BindGroupLayoutEntry {
+                binding: 1,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            // binding 2: dest texture (write via textureStore)
+            BindGroupLayoutEntry {
+                binding: 2,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: TextureFormat::Rgba16Float,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                },
+                count: None,
+            },
+        ],
+    });
+
+    // Two R-D compute bind groups (ping-pong)
+    // bg[0]: reads tex_a, writes tex_b
+    let rd_bg0 = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("rd-compute-bg-0"),
+        layout: &rd_compute_bgl,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::TextureView(&view_a),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: BindingResource::TextureView(&view_b),
+            },
+        ],
+    });
+    // bg[1]: reads tex_b, writes tex_a
+    let rd_bg1 = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("rd-compute-bg-1"),
+        layout: &rd_compute_bgl,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::TextureView(&view_b),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: BindingResource::TextureView(&view_a),
+            },
+        ],
+    });
+
+    // Load & compile R-D compute shader
+    let rd_shader_source = if rd_def.compute_shader.is_empty() {
+        include_str!("../../../../../assets/shaders/turing_rd.wgsl").to_string()
+    } else {
+        // Try to load from file, fall back to built-in
+        let base = std::path::Path::new("assets/shaders");
+        let path = base.join(&rd_def.compute_shader);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            log::warn!("Failed to load R-D shader {}: {e}, using built-in", path.display());
+            include_str!("../../../../../assets/shaders/turing_rd.wgsl").to_string()
+        })
+    };
+
+    let rd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("rd-compute-shader"),
+        source: wgpu::ShaderSource::Wgsl(rd_shader_source.into()),
+    });
+
+    let rd_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("rd-compute-layout"),
+        bind_group_layouts: &[&rd_compute_bgl],
+        push_constant_ranges: &[],
+    });
+
+    let rd_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("rd-compute-pipeline"),
+        layout: Some(&rd_pipeline_layout),
+        module: &rd_shader,
+        entry_point: Some("main"),
+        compilation_options: PipelineCompilationOptions::default(),
+        cache: None,
+    });
+
+    // Particle group 4 bind group layout: texture_2d + sampler for textureSampleLevel
+    let rd_particle_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: Some("rd-particle-bgl"),
+        entries: &[
+            BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 1,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    });
+
+    // Two particle group 4 bind groups (one per R-D texture side)
+    // After R-D loop, rd_current points to the latest output
+    let rd_particle_bg0 = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("rd-particle-bg-0"),
+        layout: &rd_particle_bgl,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::TextureView(&view_a),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::Sampler(&sampler),
+            },
+        ],
+    });
+    let rd_particle_bg1 = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("rd-particle-bg-1"),
+        layout: &rd_particle_bgl,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::TextureView(&view_b),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::Sampler(&sampler),
+            },
+        ],
+    });
+
+    (
+        Some([tex_a, tex_b]),
+        Some([view_a, view_b]),
+        Some(sampler),
+        Some(uniform_buffer),
+        Some(rd_pipeline),
+        Some(rd_compute_bgl),
+        Some([rd_bg0, rd_bg1]),
+        Some(rd_particle_bgl),
+        Some([rd_particle_bg0, rd_particle_bg1]),
+        steps,
+        grid_size,
     )
 }

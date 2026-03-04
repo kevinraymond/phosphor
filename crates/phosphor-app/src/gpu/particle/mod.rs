@@ -17,5 +17,5 @@ pub use sprite::SpriteAtlas;
 pub use system::ParticleSystem;
 pub use types::{
     ObstacleMode, ParticleAux, ParticleDef, ParticleImageSource, ParticleRenderUniforms,
-    ParticleUniforms, SourceTransition,
+    ParticleUniforms, RDUniforms, ReactionDiffusionDef, SourceTransition,
 };

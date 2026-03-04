@@ -296,6 +296,11 @@ impl EffectLoader {
             if !particles.compute_shader.is_empty() && !shader_files.contains(&particles.compute_shader) {
                 shader_files.push(particles.compute_shader.clone());
             }
+            if let Some(ref rd) = particles.reaction_diffusion {
+                if !rd.compute_shader.is_empty() && !shader_files.contains(&rd.compute_shader) {
+                    shader_files.push(rd.compute_shader.clone());
+                }
+            }
         }
         for shader_rel in &shader_files {
             let path = self.resolve_shader_path(shader_rel);
@@ -394,7 +399,7 @@ impl EffectLoader {
             }
         }
 
-        // Also update compute_shader if present in particles
+        // Also update compute_shader and R-D shader if present in particles
         if let Some(ref mut particles) = new_effect.particles {
             if !particles.compute_shader.is_empty() {
                 let compute_new = format!("{snake}_sim.wgsl");
@@ -405,6 +410,18 @@ impl EffectLoader {
                     log::info!("Copied compute shader: {} -> {}", compute_src.display(), compute_dst.display());
                 }
                 particles.compute_shader = compute_new;
+            }
+            if let Some(ref mut rd) = particles.reaction_diffusion {
+                if !rd.compute_shader.is_empty() {
+                    let rd_new = format!("{snake}_rd.wgsl");
+                    let rd_src = self.resolve_shader_path(&rd.compute_shader);
+                    let rd_dst = shaders_dir.join(&rd_new);
+                    if !rd_dst.exists() {
+                        std::fs::copy(&rd_src, &rd_dst)?;
+                        log::info!("Copied R-D shader: {} -> {}", rd_src.display(), rd_dst.display());
+                    }
+                    rd.compute_shader = rd_new;
+                }
             }
         }
 

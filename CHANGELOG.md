@@ -5,6 +5,16 @@
 
 ## Unreleased
 
+### Turing Effect (New)
+- **Gray-Scott reaction-diffusion**: full 2D R-D simulation on ping-pong compute textures, running N steps/frame (default 8, audio-modulated up to 32)
+- **Hybrid R-D + particles**: 200K particles sample the R-D field for gradient-based chemotactic forces, flowing toward high-concentration pattern regions
+- **Particle coloring from chemistry**: color, size, and alpha derived from local B concentration — particles are visible in pattern regions, transparent in substrate
+- **Audio-reactive chemistry**: bass→feed rate (2.5× boost), mid→kill rate (2.5× boost), brilliance→diffuse_b, onset injects 4 randomized B drops per beat (PCG hash, 0.35 strength), beat doubles sim steps
+- **Particle audio reactivity**: onset pulses gradient force (3× surge), bass pumps particle size, beat kicks velocity, RMS brightness (0.8 coeff), centroid shifts palette (0.5 coeff)
+- **Gray-Scott parameter space**: feed/kill rate sliders traverse spots → worms → mitosis → coral → chaos regimes
+- **R-D infrastructure**: new `ReactionDiffusionDef` in particle types, `RDUniforms` struct, group 4 bind group for particle compute, `create_rd_resources()` factory
+- 512×512 R-D grid, 8 params (gradient_strength, drag, feed_rate, kill_rate, diffuse_b, sim_speed, drop_size, brightness)
+
 ### Accretion Effect (New)
 - **Tiled N-body gravity**: O(N²) gravitational simulation using workgroup shared-memory tiling (GPU Gems 3 Ch. 31) — every particle attracts every other, forming orbital systems, accretion discs, and slingshot ejections
 - **Angular-momentum-preserving damping**: only radial velocity is damped, preserving tangential (orbital) velocity for stable long-lived disc structure

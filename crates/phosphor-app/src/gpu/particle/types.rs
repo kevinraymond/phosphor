@@ -423,6 +423,38 @@ pub struct ImageSampleDef {
     pub scale: f32,
 }
 
+/// Reaction-diffusion configuration for particle effects.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReactionDiffusionDef {
+    #[serde(default = "default_rd_grid_size")]
+    pub grid_size: u32,
+    #[serde(default = "default_rd_steps")]
+    pub steps_per_frame: u32,
+    #[serde(default)]
+    pub compute_shader: String,
+}
+
+fn default_rd_grid_size() -> u32 {
+    512
+}
+fn default_rd_steps() -> u32 {
+    16
+}
+
+/// Reaction-diffusion uniforms: 32 bytes.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+pub struct RDUniforms {
+    pub feed_rate: f32,
+    pub kill_rate: f32,
+    pub diffuse_a: f32,
+    pub diffuse_b: f32,
+    pub time: f32,
+    pub onset: f32,
+    pub drop_radius: f32,
+    pub _pad: f32,
+}
+
 fn default_sample_mode() -> String {
     "grid".to_string()
 }
@@ -570,6 +602,10 @@ pub struct ParticleDef {
     /// Enable depth sorting (only meaningful with blend="alpha")
     #[serde(default)]
     pub depth_sort: bool,
+
+    /// Reaction-diffusion configuration (optional)
+    #[serde(default)]
+    pub reaction_diffusion: Option<ReactionDiffusionDef>,
 }
 
 fn default_blend() -> String {
@@ -665,6 +701,20 @@ mod tests {
     }
 
     #[test]
+    fn rd_uniforms_size_32() {
+        assert_eq!(std::mem::size_of::<RDUniforms>(), 32);
+    }
+
+    #[test]
+    fn reaction_diffusion_def_defaults() {
+        let json = r#"{}"#;
+        let def: ReactionDiffusionDef = serde_json::from_str(json).unwrap();
+        assert_eq!(def.grid_size, 512);
+        assert_eq!(def.steps_per_frame, 8);
+        assert!(def.compute_shader.is_empty());
+    }
+
+    #[test]
     fn particle_def_serde_defaults() {
         let json = r#"{"emitter":{}}"#;
         let def: ParticleDef = serde_json::from_str(json).unwrap();
@@ -677,6 +727,7 @@ mod tests {
         assert_eq!(def.blend, "additive");
         assert!(def.sprite.is_none());
         assert!(def.image_sample.is_none());
+        assert!(def.reaction_diffusion.is_none());
         // New fields default to disabled
         assert_eq!(def.wind, [0.0, 0.0]);
         assert_eq!(def.vortex_strength, 0.0);

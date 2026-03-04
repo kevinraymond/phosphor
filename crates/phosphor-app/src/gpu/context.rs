@@ -34,6 +34,7 @@ impl GpuContext {
             required_features: wgpu::Features::empty(),
             required_limits: wgpu::Limits {
                 max_storage_buffers_per_shader_stage: 16,
+                max_bind_groups: 5, // groups 0-3 standard + group 4 for R-D texture
                 ..wgpu::Limits::default()
             },
             experimental_features: ExperimentalFeatures::default(),
