@@ -101,6 +101,9 @@ pub struct EffectLoader {
     lib_source: String,
     /// Particle library source (structs, bindings, helpers) prepended to compute shaders.
     particle_lib_source: String,
+    /// Spatial hash grid dimensions, patched into particle_lib SH_GRID_W/H constants.
+    /// Updated when a particle system with interaction is created.
+    pub grid_dims: (u32, u32),
 }
 
 impl EffectLoader {
@@ -139,6 +142,7 @@ impl EffectLoader {
             current_effect: None,
             lib_source,
             particle_lib_source,
+            grid_dims: (40, 40),
         }
     }
 
@@ -234,8 +238,13 @@ impl EffectLoader {
     }
 
     /// Prepend noise library + particle library to a compute shader source.
+    /// Patches spatial hash grid constants (SH_GRID_W/H) to match current grid_dims.
     pub fn prepend_compute_libraries(&self, source: &str) -> String {
-        format!("{}\n{}\n{}", self.lib_source, self.particle_lib_source, source)
+        let (w, h) = self.grid_dims;
+        let patched_plib = self.particle_lib_source
+            .replace("const SH_GRID_W: u32 = 40u;", &format!("const SH_GRID_W: u32 = {w}u;"))
+            .replace("const SH_GRID_H: u32 = 40u;", &format!("const SH_GRID_H: u32 = {h}u;"));
+        format!("{}\n{}\n{}", self.lib_source, patched_plib, source)
     }
 
     /// Prepend the uniform block and library functions to a shader source.
@@ -262,6 +271,7 @@ impl EffectLoader {
             current_effect: None,
             lib_source: lib_source.to_string(),
             particle_lib_source: String::new(),
+            grid_dims: (40, 40),
         }
     }
 

@@ -323,7 +323,7 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
     // Dynamic ranges: extend to include current value so out-of-range
     // values (e.g. Raster's emit_rate=100K, lifetime=999) aren't silently
     // clamped by the slider, which would corrupt ps.def every frame.
-    let emit_max = emit_rate.max(5000.0);
+    let emit_max = emit_rate.max(info.max_count as f32 * 0.1).max(5000.0);
     let burst_max = burst.max(2000);
     let life_max = lifetime.max(30.0);
     let speed_min = speed.min(0.0);

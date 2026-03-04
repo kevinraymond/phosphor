@@ -4,22 +4,23 @@ use wgpu::{
     PipelineCompilationOptions, PipelineLayoutDescriptor, ShaderStages,
 };
 
-/// Grid dimensions covering clip-space [-1,1]x[-1,1].
-/// 40x40 cells, cell_size = 0.05 in clip space.
-const GRID_W: u32 = 40;
-const GRID_H: u32 = 40;
-const NUM_CELLS: u32 = GRID_W * GRID_H; // 1600
-
 const WORKGROUP_SIZE: u32 = 256;
+
+/// Compute grid dimensions that scale with particle count.
+/// Target: ~16 particles per cell. Clamped to [40, 256].
+pub fn grid_dims(max_particles: u32) -> (u32, u32) {
+    let dim = ((max_particles as f64 / 16.0).sqrt() as u32).clamp(40, 256);
+    (dim, dim)
+}
 
 /// GPU spatial hash grid for particle-particle interaction.
 /// 3-pass compute pipeline: count → prefix sum → scatter.
 /// After execution, `sorted_indices` contains particle indices sorted by grid cell,
 /// and `cell_offsets` contains the start index for each cell in `sorted_indices`.
 pub struct SpatialHashGrid {
-    /// Per-cell atomic count buffer (NUM_CELLS * 4 bytes)
+    /// Per-cell atomic count buffer (num_cells * 4 bytes)
     cell_counts_buffer: wgpu::Buffer,
-    /// Per-cell prefix sum result (NUM_CELLS * 4 bytes)
+    /// Per-cell prefix sum result (num_cells * 4 bytes)
     cell_offsets_buffer: wgpu::Buffer,
     /// Sorted particle indices (max_particles * 4 bytes)
     sorted_indices_buffer: wgpu::Buffer,
@@ -37,6 +38,9 @@ pub struct SpatialHashGrid {
     scatter_bind_groups: [BindGroup; 2],
 
     pub max_particles: u32,
+    grid_w: u32,
+    grid_h: u32,
+    num_cells: u32,
 
     /// Bind group layout for the neighbor query in sim shader (group 3)
     pub query_bgl: BindGroupLayout,
@@ -50,17 +54,21 @@ impl SpatialHashGrid {
         pos_life_buffers: &[wgpu::Buffer; 2],
         uniform_buffer: &wgpu::Buffer,
     ) -> Self {
+        let (grid_w, grid_h) = grid_dims(max_particles);
+        let num_cells = grid_w * grid_h;
+        log::info!("Spatial hash grid: {grid_w}x{grid_h} ({num_cells} cells) for {max_particles} particles");
+
         // Buffers
         let cell_counts_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("spatial-hash-cell-counts"),
-            size: (NUM_CELLS * 4) as u64,
+            size: (num_cells * 4) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let cell_offsets_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("spatial-hash-cell-offsets"),
-            size: (NUM_CELLS * 4) as u64,
+            size: (num_cells * 4) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -88,7 +96,8 @@ impl SpatialHashGrid {
         let count_source = include_str!(
             "../../../../../assets/shaders/builtin/spatial_hash_count.wgsl"
         );
-        let count_pipeline = create_compute_pipeline(device, "spatial-hash-count", count_source, &count_bgl);
+        let count_source = patch_grid_constants(count_source, grid_w, grid_h);
+        let count_pipeline = create_compute_pipeline(device, "spatial-hash-count", &count_source, &count_bgl);
 
         let count_bind_groups = [
             create_count_bind_group(
@@ -113,8 +122,12 @@ impl SpatialHashGrid {
         let prefix_sum_source = include_str!(
             "../../../../../assets/shaders/builtin/spatial_hash_prefix_sum.wgsl"
         );
+        let prefix_sum_source = prefix_sum_source.replace(
+            "const NUM_CELLS: u32 = 1600u;",
+            &format!("const NUM_CELLS: u32 = {num_cells}u;"),
+        );
         let prefix_sum_pipeline =
-            create_compute_pipeline(device, "spatial-hash-prefix-sum", prefix_sum_source, &prefix_sum_bgl);
+            create_compute_pipeline(device, "spatial-hash-prefix-sum", &prefix_sum_source, &prefix_sum_bgl);
 
         let prefix_sum_bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("spatial-hash-prefix-sum-bg"),
@@ -149,8 +162,9 @@ impl SpatialHashGrid {
         let scatter_source = include_str!(
             "../../../../../assets/shaders/builtin/spatial_hash_scatter.wgsl"
         );
+        let scatter_source = patch_grid_constants(scatter_source, grid_w, grid_h);
         let scatter_pipeline =
-            create_compute_pipeline(device, "spatial-hash-scatter", scatter_source, &scatter_bgl);
+            create_compute_pipeline(device, "spatial-hash-scatter", &scatter_source, &scatter_bgl);
 
         let scatter_bind_groups = [
             create_scatter_bind_group(
@@ -214,6 +228,9 @@ impl SpatialHashGrid {
             scatter_pipeline,
             scatter_bind_groups,
             max_particles,
+            grid_w,
+            grid_h,
+            num_cells,
             query_bgl,
             query_bind_group,
         }
@@ -226,13 +243,13 @@ impl SpatialHashGrid {
         queue.write_buffer(
             &self.cell_counts_buffer,
             0,
-            &vec![0u8; (NUM_CELLS * 4) as usize],
+            &vec![0u8; (self.num_cells * 4) as usize],
         );
         // Clear cell_offsets to zero
         queue.write_buffer(
             &self.cell_offsets_buffer,
             0,
-            &vec![0u8; (NUM_CELLS * 4) as usize],
+            &vec![0u8; (self.num_cells * 4) as usize],
         );
 
         let workgroups = (self.max_particles + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
@@ -352,6 +369,13 @@ fn create_count_bind_group(
             },
         ],
     })
+}
+
+/// Replace hardcoded GRID_W/GRID_H constants in a shader source string.
+fn patch_grid_constants(source: &str, grid_w: u32, grid_h: u32) -> String {
+    source
+        .replace("const GRID_W: u32 = 40u;", &format!("const GRID_W: u32 = {grid_w}u;"))
+        .replace("const GRID_H: u32 = 40u;", &format!("const GRID_H: u32 = {grid_h}u;"))
 }
 
 fn create_scatter_bind_group(

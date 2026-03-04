@@ -200,6 +200,10 @@ impl App {
         let mut pass_executor = pass_executor;
         if let Some(idx) = effect_index {
             if let Some(ref pd) = effect_loader.effects[idx].particles {
+                if pd.interaction {
+                    use crate::gpu::particle::spatial_hash::grid_dims;
+                    effect_loader.grid_dims = grid_dims(pd.max_count);
+                }
                 let compute_source = if pd.compute_shader.is_empty() {
                     effect_loader.prepend_compute_libraries(
                         include_str!("../../../assets/shaders/builtin/particle_sim.wgsl"),
@@ -1302,6 +1306,14 @@ impl App {
         if passes.is_empty() {
             log::error!("Effect '{}' has no shader or passes defined", effect.name);
             return;
+        }
+
+        // Update spatial hash grid dims for this particle count before building
+        if let Some(ref pd) = effect.particles {
+            if pd.interaction {
+                use crate::gpu::particle::spatial_hash::grid_dims;
+                self.effect_loader.grid_dims = grid_dims(pd.max_count);
+            }
         }
 
         // Build particle system before borrowing layer mutably (avoids borrow conflict)
