@@ -21,8 +21,8 @@ pub struct Particle {
     pub flags: [f32; 4],
 }
 
-/// Particle simulation uniforms: 416 bytes.
-/// Separate from the main 256-byte ShaderUniforms.
+/// Particle simulation uniforms: 528 bytes.
+/// Separate from the main 288-byte ShaderUniforms.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct ParticleUniforms {
@@ -131,7 +131,13 @@ pub struct ParticleUniforms {
     pub obstacle_threshold: f32,  // alpha cutoff (default 0.5)
     pub obstacle_mode: u32,       // 0=bounce, 1=stick, 2=flow, 3=contain
     pub obstacle_elasticity: f32, // restitution/friction (default 0.7)
-    // Total = 416 bytes
+    // 416 bytes above
+
+    // MFCC: 13 coefficients + 3 padding (array<vec4f, 4> on GPU)
+    pub mfcc: [f32; 16],
+    // Chroma: 12 pitch class energies (array<vec4f, 3> on GPU)
+    pub chroma: [f32; 12],
+    // Total = 528 bytes
 }
 
 /// Obstacle collision mode.
@@ -691,8 +697,8 @@ mod tests {
     }
 
     #[test]
-    fn particle_uniforms_size_416() {
-        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 416);
+    fn particle_uniforms_size_528() {
+        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 528);
     }
 
     #[test]

@@ -418,6 +418,9 @@ impl App {
             self.uniforms.beat_phase = features.beat_phase;
             self.uniforms.bpm = features.bpm;
             self.uniforms.beat_strength = features.beat_strength;
+            self.uniforms.mfcc[..13].copy_from_slice(&features.mfcc);
+            self.uniforms.mfcc[13..].fill(0.0);
+            self.uniforms.chroma.copy_from_slice(&features.chroma);
         }
 
         // Drain MIDI and apply to active layer's param_store (skip if locked)
@@ -887,22 +890,8 @@ impl App {
                     ps.uniforms.obstacle_threshold = ps.obstacle_threshold;
                     ps.uniforms.obstacle_mode = ps.obstacle_mode as u32;
                     ps.uniforms.obstacle_elasticity = ps.obstacle_elasticity;
-                    ps.update_audio(
-                        self.uniforms.sub_bass,
-                        self.uniforms.bass,
-                        self.uniforms.mid,
-                        self.uniforms.rms,
-                        self.uniforms.kick,
-                        self.uniforms.onset,
-                        self.uniforms.centroid,
-                        self.uniforms.flux,
-                        self.uniforms.beat,
-                        self.uniforms.beat_phase,
-                        self.uniforms.low_mid,
-                        self.uniforms.upper_mid,
-                        self.uniforms.presence,
-                        self.uniforms.brilliance,
-                    );
+                    let audio = self.latest_audio.unwrap_or_default();
+                    ps.update_audio(&audio);
                 }
             }
         }

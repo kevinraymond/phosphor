@@ -98,6 +98,10 @@ struct ParticleUniforms {
     obstacle_threshold: f32,  // alpha cutoff
     obstacle_mode: u32,       // 0=bounce, 1=stick, 2=flow
     obstacle_elasticity: f32, // restitution/friction
+
+    // MFCC + Chroma audio features
+    mfcc: array<vec4f, 4>,     // 13 MFCCs (indices 0-12 used, 13-15 padding)
+    chroma: array<vec4f, 3>,   // 12 pitch class energies (C=0, C#=1, ..., B=11)
 }
 
 // Access effect param by index (mirrors fragment shader's param() function).
@@ -107,6 +111,14 @@ fn param(i: u32) -> f32 {
         return u.effect_params_0[i];
     }
     return u.effect_params_1[i - 4u];
+}
+
+fn mfcc(i: u32) -> f32 {
+    return u.mfcc[i / 4u][i % 4u];
+}
+
+fn chroma_val(i: u32) -> f32 {
+    return u.chroma[i / 4u][i % 4u];
 }
 
 struct Particle {

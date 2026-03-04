@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
-/// 20 audio features, all normalized to 0.0-1.0 range.
-/// Multi-resolution FFT bands + spectral shape + beat detection.
+/// 45 audio features, all normalized to 0.0-1.0 range.
+/// Multi-resolution FFT bands + spectral shape + beat detection + MFCC + chroma.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct AudioFeatures {
@@ -32,9 +32,15 @@ pub struct AudioFeatures {
     pub beat_phase: f32,  // 0-1 sawtooth cycling at detected tempo
     pub bpm: f32,         // BPM / 300 (normalized 0-1)
     pub beat_strength: f32, // How strong the detected beat was
+
+    // Mel-frequency cepstral coefficients (13)
+    pub mfcc: [f32; 13],
+
+    // Pitch class energies (12): C, C#, D, D#, E, F, F#, G, G#, A, A#, B
+    pub chroma: [f32; 12],
 }
 
-pub const NUM_FEATURES: usize = 20;
+pub const NUM_FEATURES: usize = 45;
 
 impl AudioFeatures {
     pub fn as_slice(&self) -> &[f32; NUM_FEATURES] {
@@ -69,7 +75,7 @@ mod tests {
     #[test]
     fn as_slice_len() {
         let f = AudioFeatures::default();
-        assert_eq!(f.as_slice().len(), 20);
+        assert_eq!(f.as_slice().len(), 45);
     }
 
     #[test]
@@ -83,14 +89,14 @@ mod tests {
     fn field_order_first_and_last() {
         let mut f = AudioFeatures::default();
         f.sub_bass = 0.11;
-        f.beat_strength = 0.99;
+        f.chroma[11] = 0.99;
         let s = f.as_slice();
         assert!((s[0] - 0.11).abs() < 1e-6);
-        assert!((s[19] - 0.99).abs() < 1e-6);
+        assert!((s[44] - 0.99).abs() < 1e-6);
     }
 
     #[test]
-    fn size_is_80_bytes() {
-        assert_eq!(std::mem::size_of::<AudioFeatures>(), 80);
+    fn size_is_180_bytes() {
+        assert_eq!(std::mem::size_of::<AudioFeatures>(), 180);
     }
 }

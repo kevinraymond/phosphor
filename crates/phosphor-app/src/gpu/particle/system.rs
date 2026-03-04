@@ -1059,37 +1059,24 @@ impl ParticleSystem {
     }
 
     /// Copy audio features into particle uniforms.
-    pub fn update_audio(
-        &mut self,
-        sub_bass: f32,
-        bass: f32,
-        mid: f32,
-        rms: f32,
-        kick: f32,
-        onset: f32,
-        centroid: f32,
-        flux: f32,
-        beat: f32,
-        beat_phase: f32,
-        low_mid: f32,
-        upper_mid: f32,
-        presence: f32,
-        brilliance: f32,
-    ) {
-        self.uniforms.sub_bass = sub_bass;
-        self.uniforms.bass = bass;
-        self.uniforms.mid = mid;
-        self.uniforms.rms = rms;
-        self.uniforms.kick = kick;
-        self.uniforms.onset = onset;
-        self.uniforms.centroid = centroid;
-        self.uniforms.flux = flux;
-        self.uniforms.beat = beat;
-        self.uniforms.beat_phase = beat_phase;
-        self.uniforms.low_mid = low_mid;
-        self.uniforms.upper_mid = upper_mid;
-        self.uniforms.presence = presence;
-        self.uniforms.brilliance = brilliance;
+    pub fn update_audio(&mut self, features: &crate::audio::features::AudioFeatures) {
+        self.uniforms.sub_bass = features.sub_bass;
+        self.uniforms.bass = features.bass;
+        self.uniforms.mid = features.mid;
+        self.uniforms.rms = features.rms;
+        self.uniforms.kick = features.kick;
+        self.uniforms.onset = features.onset;
+        self.uniforms.centroid = features.centroid;
+        self.uniforms.flux = features.flux;
+        self.uniforms.beat = features.beat;
+        self.uniforms.beat_phase = features.beat_phase;
+        self.uniforms.low_mid = features.low_mid;
+        self.uniforms.upper_mid = features.upper_mid;
+        self.uniforms.presence = features.presence;
+        self.uniforms.brilliance = features.brilliance;
+        self.uniforms.mfcc[..13].copy_from_slice(&features.mfcc);
+        self.uniforms.mfcc[13..].fill(0.0);
+        self.uniforms.chroma.copy_from_slice(&features.chroma);
     }
 
     /// Run the compute dispatch (particle simulation + prepare indirect args).

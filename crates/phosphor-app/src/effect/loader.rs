@@ -80,6 +80,10 @@ struct PhosphorUniforms {
     params: array<vec4f, 4>,
     feedback_decay: f32,
     frame_index: f32,
+
+    _pad_align: vec2f,
+    mfcc: array<vec4f, 4>,     // 13 MFCCs (indices 0-12 used, 13-15 padding)
+    chroma: array<vec4f, 3>,   // 12 pitch class energies (C=0, C#=1, ..., B=11)
 }
 
 @group(0) @binding(0) var<uniform> u: PhosphorUniforms;
@@ -88,6 +92,14 @@ struct PhosphorUniforms {
 
 fn param(i: u32) -> f32 {
     return u.params[i / 4u][i % 4u];
+}
+
+fn mfcc(i: u32) -> f32 {
+    return u.mfcc[i / 4u][i % 4u];
+}
+
+fn chroma_val(i: u32) -> f32 {
+    return u.chroma[i / 4u][i % 4u];
 }
 
 fn feedback(uv: vec2f) -> vec4f {
