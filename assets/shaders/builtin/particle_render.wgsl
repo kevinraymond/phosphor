@@ -1,5 +1,6 @@
-// Instanced quad particle renderer.
-// Vertex-pulling from storage buffer, 6 vertices per particle (two triangles).
+// Instanced quad particle renderer with GPU-driven indirect draw.
+// Vertex-pulling from storage buffer via alive_indices indirection.
+// Only alive particles are drawn (instance_count set by prepare_indirect shader).
 // Supports: soft circle glow (mode 0), static sprite (mode 1), animated sprite (mode 2).
 
 struct Particle {
@@ -16,11 +17,15 @@ struct RenderUniforms {
     sprite_cols: u32,
     sprite_rows: u32,
     sprite_frames: u32,
-    _pad: u32,
+    frame_index: u32,
+    trail_length: u32,
+    trail_width: f32,
+    _pad: vec2f,
 }
 
 @group(0) @binding(0) var<storage, read> particles: array<Particle>;
 @group(0) @binding(1) var<uniform> ru: RenderUniforms;
+@group(0) @binding(2) var<storage, read> alive_indices: array<u32>;
 
 @group(1) @binding(0) var sprite_tex: texture_2d<f32>;
 @group(1) @binding(1) var sprite_samp: sampler;
@@ -37,17 +42,10 @@ fn vs_main(
     @builtin(vertex_index) vertex_index: u32,
     @builtin(instance_index) instance_index: u32,
 ) -> VertexOutput {
-    let p = particles[instance_index];
+    // Index through alive_indices for GPU-driven rendering
+    let particle_idx = alive_indices[instance_index];
+    let p = particles[particle_idx];
     var out: VertexOutput;
-
-    // Dead particles: collapse to degenerate triangle (GPU clips trivially)
-    if p.pos_life.w <= 0.0 {
-        out.position = vec4f(0.0, 0.0, 0.0, 1.0);
-        out.color = vec4f(0.0);
-        out.quad_uv = vec2f(0.0);
-        out.sprite_frame = 0u;
-        return out;
-    }
 
     // Quad corners: 2 triangles from 6 vertices
     // 0,1,2, 2,3,0 pattern

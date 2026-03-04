@@ -3,6 +3,28 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## v1.2.0 — 2026-02-28
+
+### GPU Particle System
+- GPU-driven pipeline: counter buffer, indirect draw, alive/dead index lists — zero dead particle processing
+- `particle_lib.wgsl` auto-prepended to all compute shaders: shared structs, bindings, hash/rand, emit/alive helpers
+- Alive/dead protocol: atomic emission claims, compact alive index rendering
+- 3D curl noise flow field: 64x64x64 baked texture at `@group(1)`, `sample_flow_field()` helper
+- Trail rendering: per-particle ring buffer, ribbon triangle strips with tapering width/alpha, separate indirect draw
+- Spatial hash grid: 40x40 GPU 3-pass pipeline (count → prefix sum → scatter), neighbor query at `@group(3)`
+- ParticleUniforms extended from 128 to 192 bytes (flow field + trail params)
+- ParticleRenderUniforms extended from 32 to 48 bytes (frame_index + trail params)
+- Particle UI panel: alive/max count with utilization bar, emit rate, burst, lifetime, speed, size, drag sliders, feature badges
+
+### New Effects
+- **Flux**: 30K particles following curl noise flow field, audio-reactive flow strength and speed
+- **Ribbons**: 8K particles with flow field + 16-point trail ribbons, audio-reactive width/opacity
+- **Chaos**: 50K particles tracing Lorenz/Rossler strange attractors with RK4 integration, 3D perspective projection, audio-reactive bifurcation parameters
+- **Helix**: 20K charged particles spiraling via Lorentz force F=q(E+v×B), positive/negative charges, audio-reactive B_z and E fields
+- **Murmuration**: 80K flocking particles with Vicsek model, spatial hash neighbor query, audio-reactive order↔disorder phase transition
+- **Cymatics**: 40K particles forming Chladni nodal line patterns via gradient descent, audio frequency bands select mode numbers
+- **Coral**: 50K particles tracing Turing-like organic growth patterns, hexagonal spots morphing to labyrinthine stripes
+
 ## v1.1.0 — 2026-02-28
 
 ### Scene System
