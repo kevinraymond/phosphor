@@ -99,6 +99,8 @@ pub struct EffectLoader {
     pub effects: Vec<PfxEffect>,
     pub current_effect: Option<usize>,
     lib_source: String,
+    /// Particle library source (structs, bindings, helpers) prepended to compute shaders.
+    particle_lib_source: String,
 }
 
 impl EffectLoader {
@@ -119,10 +121,24 @@ impl EffectLoader {
             }
         }
 
+        // Load particle library source
+        let particle_lib_path = base.join("shaders/lib/particle_lib.wgsl");
+        let particle_lib_source = match std::fs::read_to_string(&particle_lib_path) {
+            Ok(src) => src,
+            Err(e) => {
+                log::warn!(
+                    "Failed to load particle library {}: {e}",
+                    particle_lib_path.display()
+                );
+                String::new()
+            }
+        };
+
         Self {
             effects: Vec::new(),
             current_effect: None,
             lib_source,
+            particle_lib_source,
         }
     }
 
@@ -145,6 +161,15 @@ impl EffectLoader {
         if new_source != self.lib_source {
             self.lib_source = new_source;
             log::info!("Reloaded shader library sources");
+        }
+
+        // Reload particle library
+        let particle_lib_path = base.join("shaders/lib/particle_lib.wgsl");
+        if let Ok(new_plib) = std::fs::read_to_string(&particle_lib_path) {
+            if new_plib != self.particle_lib_source {
+                self.particle_lib_source = new_plib;
+                log::info!("Reloaded particle library source");
+            }
         }
     }
 
@@ -199,13 +224,17 @@ impl EffectLoader {
         Ok(self.prepend_library(&source))
     }
 
-    /// Load a compute shader source. Prepends the noise library but NOT the fragment
-    /// uniform block (compute shaders have their own uniform struct).
+    /// Load a compute shader source. Prepends the noise library and particle library
+    /// (structs, bindings, helpers) but NOT the fragment uniform block.
     pub fn load_compute_source(&self, shader_rel: &str) -> Result<String> {
         let path = self.resolve_shader_path(shader_rel);
         let source = std::fs::read_to_string(&path)?;
-        // Compute shaders get the noise library but not the fragment uniform block
-        Ok(format!("{}\n{}", self.lib_source, source))
+        Ok(self.prepend_compute_libraries(&source))
+    }
+
+    /// Prepend noise library + particle library to a compute shader source.
+    pub fn prepend_compute_libraries(&self, source: &str) -> String {
+        format!("{}\n{}\n{}", self.lib_source, self.particle_lib_source, source)
     }
 
     /// Prepend the uniform block and library functions to a shader source.
@@ -231,6 +260,7 @@ impl EffectLoader {
             effects: Vec::new(),
             current_effect: None,
             lib_source: lib_source.to_string(),
+            particle_lib_source: String::new(),
         }
     }
 

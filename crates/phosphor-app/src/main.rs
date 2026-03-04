@@ -190,13 +190,31 @@ impl ApplicationHandler for PhosphorApp {
                 {
                     let ctx = app.egui_overlay.context();
 
-                    // Get particle count from active layer
-                    let particle_count = app
+                    // Get particle info from active layer
+                    let particle_info = app
                         .layer_stack
                         .active()
                         .and_then(|l| l.as_effect())
                         .and_then(|e| e.pass_executor.particle_system.as_ref())
-                        .map(|ps| ps.max_particles);
+                        .map(|ps| crate::ui::panels::particle_panel::ParticleInfo {
+                            alive_count: ps.alive_count,
+                            max_count: ps.max_particles,
+                            emit_rate: ps.emit_rate,
+                            burst_on_beat: ps.burst_on_beat,
+                            lifetime: ps.def.lifetime,
+                            initial_speed: ps.def.initial_speed,
+                            initial_size: ps.def.initial_size,
+                            size_end: ps.def.size_end,
+                            drag: ps.def.drag,
+                            attraction_strength: ps.def.attraction_strength,
+                            blend_mode: ps.blend_mode.clone(),
+                            has_flow_field: ps.def.flow_field,
+                            has_trails: ps.def.trail_length >= 2,
+                            trail_length: ps.def.trail_length,
+                            has_interaction: ps.def.interaction,
+                            has_sprite: ps.sprite.is_some(),
+                        });
+                    let particle_count = particle_info.as_ref().map(|p| p.max_count);
 
                     // Get active layer's shader error
                     let shader_error = app
@@ -301,6 +319,7 @@ impl ApplicationHandler for PhosphorApp {
                                 active_layer,
                                 media_info,
                                 webcam_info,
+                                particle_info,
                                 scene_info,
                                 &app.status_error,
                                 app.settings.theme,
@@ -991,6 +1010,34 @@ impl ApplicationHandler for PhosphorApp {
                     if let Some(layer) = app.layer_stack.active_mut() {
                         if let Some(m) = layer.as_media_mut() {
                             m.seek_to_secs(secs);
+                        }
+                    }
+                }
+
+                // Handle particle panel signals
+                {
+                    let ctx = app.egui_overlay.context();
+                    let emit_rate: Option<f32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_emit_rate")));
+                    let burst: Option<u32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_burst")));
+                    let lifetime: Option<f32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_lifetime")));
+                    let speed: Option<f32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_speed")));
+                    let size: Option<f32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_size")));
+                    let drag: Option<f32> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_drag")));
+
+                    if emit_rate.is_some() || burst.is_some() || lifetime.is_some()
+                        || speed.is_some() || size.is_some() || drag.is_some()
+                    {
+                        if let Some(layer) = app.layer_stack.active_mut() {
+                            if let Some(effect) = layer.as_effect_mut() {
+                                if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
+                                    if let Some(v) = emit_rate { ps.emit_rate = v; ps.def.emit_rate = v; }
+                                    if let Some(v) = burst { ps.burst_on_beat = v; ps.def.burst_on_beat = v; }
+                                    if let Some(v) = lifetime { ps.def.lifetime = v; }
+                                    if let Some(v) = speed { ps.def.initial_speed = v; }
+                                    if let Some(v) = size { ps.def.initial_size = v; }
+                                    if let Some(v) = drag { ps.def.drag = v; }
+                                }
+                            }
                         }
                     }
                 }

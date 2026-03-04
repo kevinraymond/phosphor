@@ -1,0 +1,112 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect to happen?
+      placeholder: |
+        **What happened:**
+        The application crashed when switching effects.
+
+        **What I expected:**
+        The effect should transition smoothly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Numbered steps to reproduce the issue.
+      placeholder: |
+        1. Launch Phosphor
+        2. Select the "Storm" effect
+        3. Switch to "Murmur" effect
+        4. Observe crash
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Phosphor Version
+      description: Version number, commit hash, or "latest release".
+      placeholder: "v0.8.0"
+    validations:
+      required: true
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      placeholder: "NVIDIA RTX 4090, Apple M3 Max, Intel Arc A770"
+
+  - type: input
+    id: os_version
+    attributes:
+      label: OS Version
+      placeholder: "Ubuntu 24.04, macOS 15.2, Windows 11"
+
+  - type: input
+    id: gpu_driver
+    attributes:
+      label: GPU Driver Version
+      placeholder: "560.35.03, Mesa 24.1"
+
+  - type: checkboxes
+    id: build_features
+    attributes:
+      label: Build Features (source builds only)
+      description: If you built from source, which features did you enable?
+      options:
+        - label: video
+        - label: ndi
+        - label: depth
+        - label: webcam
+        - label: profiling
+
+  - type: dropdown
+    id: audio_backend
+    attributes:
+      label: Audio Backend
+      options:
+        - PulseAudio
+        - PipeWire
+        - ALSA
+        - CoreAudio
+        - WASAPI
+        - None / Unknown
+
+  - type: input
+    id: midi_osc
+    attributes:
+      label: MIDI / OSC / WebSocket
+      description: Relevant devices or configuration, if applicable.
+      placeholder: "Akai APC Mini, OSC on port 9000"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log Output
+      description: "Run with `RUST_LOG=phosphor_app=debug cargo run` and paste relevant output."
+      render: text
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / Video
+      description: Drag and drop any screenshots or screen recordings here.
