@@ -1,3 +1,4 @@
+pub mod compute_raster;
 pub mod emitter;
 pub mod flow_field;
 pub mod image_source;

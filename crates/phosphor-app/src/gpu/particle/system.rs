@@ -6,6 +6,7 @@ use wgpu::{
     TextureView, VertexState,
 };
 
+use super::compute_raster::ComputeRasterizer;
 use super::flow_field::FlowFieldTexture;
 use super::obstacle::ObstacleTexture;
 use super::spatial_hash::SpatialHashGrid;
@@ -149,6 +150,9 @@ pub struct ParticleSystem {
     counter_readback: wgpu::Buffer,
     counter_map_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
     counter_map_ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
+
+    // Compute rasterizer (atomic framebuffer for sub-pixel particles)
+    compute_raster: Option<ComputeRasterizer>,
 
     // Emission accumulator (fractional particles per frame)
     emit_accumulator: f32,
@@ -768,6 +772,35 @@ impl ParticleSystem {
             (None, None, None, None, None, None, Vec::new(), 0)
         };
 
+        // --- Compute rasterizer (optional) ---
+        let use_compute_raster = match def.render_mode.as_str() {
+            "compute" => true,
+            "auto" => {
+                max_particles >= 100_000
+                    && def.sprite.is_none()
+                    && def.trail_length < 2
+                    && def.initial_size <= 0.005
+            }
+            _ => false, // "billboard" or unknown
+        };
+        let compute_raster = if use_compute_raster {
+            // Use a default 1920x1080 size; will be resized on first frame
+            let (cr_w, cr_h) = (1920, 1080);
+            Some(ComputeRasterizer::new(
+                device,
+                hdr_format,
+                cr_w,
+                cr_h,
+                &pos_life_buffers,
+                &vel_size_buffers,
+                &color_buffers,
+                &alive_index_buffers,
+                &counter_buffer,
+            ))
+        } else {
+            None
+        };
+
         Ok(Self {
             max_particles,
             uniforms: bytemuck::Zeroable::zeroed(),
@@ -860,6 +893,7 @@ impl ParticleSystem {
             }),
             counter_map_pending: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             counter_map_ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            compute_raster,
             emit_accumulator: 0.0,
             emit_rate: def.emit_rate,
             burst_on_beat: def.burst_on_beat,
@@ -1251,7 +1285,14 @@ impl ParticleSystem {
             pass.dispatch_workgroups(1, 1, 1);
         }
 
-        // 4. Copy counter buffer to staging for CPU readback (1-frame latency)
+        // 4. Compute raster (if active): clear + draw to atomic framebuffer
+        if let Some(ref cr) = self.compute_raster {
+            let output_idx = 1 - self.current;
+            cr.dispatch_clear(encoder);
+            cr.dispatch_draw(encoder, queue, output_idx, self.max_particles);
+        }
+
+        // 5. Copy counter buffer to staging for CPU readback (1-frame latency)
         // Skip if previous map is still pending (buffer would be mapped → submit error)
         if !self
             .counter_map_pending
@@ -1303,6 +1344,12 @@ impl ParticleSystem {
 
     /// Render particles into the given target using indirect draw.
     pub fn render(&self, encoder: &mut CommandEncoder, queue: &Queue, target: &TextureView) {
+        // Compute raster path: resolve atomic framebuffer to render target
+        if let Some(ref cr) = self.compute_raster {
+            cr.render_resolve(encoder, queue, target, &self.blend_mode);
+            return;
+        }
+
         // Upload render uniforms
         queue.write_buffer(
             &self.render_uniform_buffer,
@@ -2026,6 +2073,27 @@ impl ParticleSystem {
     pub fn flip(&mut self) {
         self.current = 1 - self.current;
         self.frame_index = self.frame_index.wrapping_add(1);
+    }
+
+    /// Whether this particle system uses compute rasterization.
+    pub fn is_compute_raster(&self) -> bool {
+        self.compute_raster.is_some()
+    }
+
+    /// Resize the compute rasterizer framebuffer (call from PassExecutor::resize).
+    pub fn resize_compute_raster(&mut self, device: &Device, width: u32, height: u32) {
+        if let Some(ref mut cr) = self.compute_raster {
+            cr.ensure_size(
+                device,
+                width,
+                height,
+                &self.pos_life_buffers,
+                &self.vel_size_buffers,
+                &self.color_buffers,
+                &self.alive_index_buffers,
+                &self.counter_buffer,
+            );
+        }
     }
 
     /// Initialize R-D textures: A=1.0, B=0.0 everywhere + seed drops.

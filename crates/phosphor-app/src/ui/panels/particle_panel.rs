@@ -22,6 +22,7 @@ pub struct ParticleInfo {
     pub trail_length: u32,
     pub has_interaction: bool,
     pub has_sprite: bool,
+    pub is_compute_raster: bool,
     // Image source info
     pub has_image_source: bool,
     /// "static", "video", or "webcam"
@@ -99,6 +100,13 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
         }
         if info.has_sprite {
             feature_badge(ui, "sprite", tc.accent);
+        }
+        if info.is_compute_raster {
+            feature_badge(
+                ui,
+                "COMPUTE",
+                egui::Color32::from_rgb(0x40, 0xC0, 0xC0),
+            );
         }
     });
 

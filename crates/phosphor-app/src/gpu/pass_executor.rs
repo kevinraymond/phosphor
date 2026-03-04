@@ -199,6 +199,11 @@ impl PassExecutor {
                 pass.has_feedback,
             );
         }
+
+        // Resize compute rasterizer framebuffer if active
+        if let Some(ref mut ps) = self.particle_system {
+            ps.resize_compute_raster(device, width, height);
+        }
     }
 
     /// Try to recompile a specific pass's shader (for hot-reload).

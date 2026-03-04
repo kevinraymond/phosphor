@@ -616,6 +616,10 @@ pub struct ParticleDef {
     /// Reaction-diffusion configuration (optional)
     #[serde(default)]
     pub reaction_diffusion: Option<ReactionDiffusionDef>,
+
+    /// Render mode: "billboard" (default), "compute" (atomic framebuffer), or "auto"
+    #[serde(default = "default_render_mode")]
+    pub render_mode: String,
 }
 
 fn default_blend() -> String {
@@ -666,6 +670,9 @@ fn default_noise_persistence() -> f32 {
 }
 fn default_noise_speed() -> f32 {
     0.5
+}
+fn default_render_mode() -> String {
+    "billboard".to_string()
 }
 
 /// Parse a hex color string to packed RGBA u32.
@@ -756,6 +763,7 @@ mod tests {
         assert!(def.color_gradient.is_empty());
         assert_eq!(def.spin_speed, 0.0);
         assert!(!def.depth_sort);
+        assert_eq!(def.render_mode, "billboard");
     }
 
     #[test]
