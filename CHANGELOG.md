@@ -5,6 +5,17 @@
 
 ## Unreleased
 
+### Murmur Effect (Upgraded)
+- **Topological K=7 nearest neighbors**: replaced fixed-radius Boids with scale-free K-nearest neighbor queries — flock correlations work from 40K to 1M particles without parameter tuning
+- **Vicsek noise phase transitions**: angular noise (eta parameter) modulated by bass drives order→chaos transitions; proper research-accurate model instead of ad-hoc disorder
+- **Predator avoidance**: Lissajous-drifting predator with onset-triggered strike jumps; exponential falloff repulsion causes realistic flock splits
+- **Heading-level roost centering**: quadratic ramp centering force feeds into heading computation (not just position) — prevents alignment-consensus drift that plagued the old position-only correction
+- **KNN-based rim lighting**: edge detection from neighbor anisotropy (COM displacement / k-radius); color_mode slider (0=silhouette, 1=full rim); audio-reactive brightness (RMS) and color temperature (centroid: cool blue ↔ warm amber)
+- **Non-accumulating color**: base color re-derived from gradient each frame instead of reading previous frame's output — prevents wash-out over time
+- **Adaptive separation**: K-th neighbor distance as interaction scale; density-invariant at any particle count
+- **Donor-based emission**: new particles spawn near existing flock members for organic growth
+- 1M particles, 8 params (noise_eta, cohesion, color_mode, predator, separation, speed, smoothing, audio_drive), alpha blending, bloom postprocess
+
 ### Mycelium Effect (New)
 - **Chain-based growth system**: 2,500 pre-allocated chains (80 segments max each, 200K particles total) — leader particles at tips follow curl noise flow fields while depositing follower particles that form spring-connected tendrils
 - **Self-activation architecture**: dead particles detect when they should activate by reading chain state from the input buffer — no cross-thread writes, no race conditions. Growth propagates via time-based segment intervals
