@@ -154,6 +154,9 @@ pub struct ParticleSystem {
     // Compute rasterizer (atomic framebuffer for sub-pixel particles)
     compute_raster: Option<ComputeRasterizer>,
 
+    // Symbiosis (particle-life) force matrix state
+    pub symbiosis_state: Option<super::symbiosis::SymbiosisState>,
+
     // Emission accumulator (fractional particles per frame)
     emit_accumulator: f32,
     pub emit_rate: f32,
@@ -897,6 +900,11 @@ impl ParticleSystem {
             counter_map_pending: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             counter_map_ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             compute_raster,
+            symbiosis_state: if def.symbiosis {
+                Some(super::symbiosis::SymbiosisState::new(4))
+            } else {
+                None
+            },
             emit_accumulator: 0.0,
             emit_rate: def.emit_rate,
             burst_on_beat: def.burst_on_beat,

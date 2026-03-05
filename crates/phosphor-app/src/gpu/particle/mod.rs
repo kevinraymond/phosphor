@@ -6,6 +6,7 @@ pub mod obstacle;
 pub mod source_loader;
 pub mod spatial_hash;
 pub mod sprite;
+pub mod symbiosis;
 pub mod system;
 pub mod types;
 

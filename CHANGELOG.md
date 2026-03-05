@@ -5,6 +5,13 @@
 
 ## Unreleased
 
+### Symbiosis Effect (New)
+- **Multi-species particle life simulation**: 2–8 species interact via an asymmetric 8×8 force matrix, producing emergent ecosystems, crystals, and predator-prey dynamics
+- **6 named presets**: Ecosystem, Crystals, Hunters, Membrane, Chaos, Symmetric — smoothly interpolated on switch
+- **Audio-reactive matrix**: bass boosts force scale, mid modulates friction, presence/brilliance expand interaction radius, onset shuffles random matrix entries for emergent disruption
+- **Toroidal topology**: particles wrap around screen edges with correct wrapped-distance neighbor queries
+- **Force matrix in ParticleUniforms**: 8×8 float matrix (256 bytes) appended to uniforms — no new bind groups needed, all existing effects unaffected
+
 ### Gaussian Area Splat for Compute Rasterizer (Fix)
 - **Soft Gaussian splat for particles >1.5px**: compute raster now matches billboard renderer output for larger particles (e.g., Array at ~2.7px radius). Previously all energy concentrated into a 2×2 bilinear kernel, making dim-colored effects nearly invisible
 - **Three-tier kernel**: single-pixel (≤1px), bilinear 2×2 (1–1.5px), Gaussian area splat (>1.5px, capped at 8px). Weight `col.a × glow²` matches billboard's `SrcAlpha` blend

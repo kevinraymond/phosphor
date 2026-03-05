@@ -102,6 +102,9 @@ struct ParticleUniforms {
     // MFCC + Chroma audio features
     mfcc: array<vec4f, 4>,     // 13 MFCCs (indices 0-12 used, 13-15 padding)
     chroma: array<vec4f, 3>,   // 12 pitch class energies (C=0, C#=1, ..., B=11)
+
+    // Force matrix for particle-life (symbiosis): 8x8 = 64 floats
+    force_matrix: array<vec4f, 16>,
 }
 
 // Access effect param by index (mirrors fragment shader's param() function).
@@ -119,6 +122,12 @@ fn mfcc(i: u32) -> f32 {
 
 fn chroma_val(i: u32) -> f32 {
     return u.chroma[i / 4u][i % 4u];
+}
+
+// Read force matrix entry: from_sp→to_sp interaction strength (8-wide stride).
+fn get_force(from_sp: u32, to_sp: u32) -> f32 {
+    let idx = from_sp * 8u + to_sp;
+    return u.force_matrix[idx / 4u][idx % 4u];
 }
 
 struct Particle {

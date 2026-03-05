@@ -988,6 +988,18 @@ impl App {
                     ps.uniforms.obstacle_elasticity = ps.obstacle_elasticity;
                     let audio = self.latest_audio.unwrap_or_default();
                     ps.update_audio(&audio);
+
+                    // Symbiosis force matrix management
+                    if let Some(ref mut sym) = ps.symbiosis_state {
+                        // param(0) = num_species (0-1 maps to 2-8)
+                        let ns = (p[0] * 6.0 + 2.0).round() as u32;
+                        sym.set_num_species(ns);
+                        // param(6) = preset (0-1 maps to preset index)
+                        let preset_idx = (p[6] * (crate::gpu::particle::symbiosis::SymbiosisPreset::count() as f32 - 0.01)) as usize;
+                        sym.set_preset(preset_idx);
+                        sym.update(dt, &audio);
+                        ps.uniforms.force_matrix = sym.active_matrix();
+                    }
                 }
             }
         }

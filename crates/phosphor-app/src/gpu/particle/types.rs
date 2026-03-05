@@ -21,7 +21,7 @@ pub struct Particle {
     pub flags: [f32; 4],
 }
 
-/// Particle simulation uniforms: 528 bytes.
+/// Particle simulation uniforms: 784 bytes.
 /// Separate from the main 288-byte ShaderUniforms.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
@@ -137,7 +137,10 @@ pub struct ParticleUniforms {
     pub mfcc: [f32; 16],
     // Chroma: 12 pitch class energies (array<vec4f, 3> on GPU)
     pub chroma: [f32; 12],
-    // Total = 528 bytes
+
+    // Force matrix for particle-life (symbiosis): 8x8 = 64 floats (array<vec4f, 16> on GPU)
+    pub force_matrix: [f32; 64],
+    // Total = 784 bytes
 }
 
 /// Obstacle collision mode.
@@ -620,6 +623,10 @@ pub struct ParticleDef {
     /// Render mode: "billboard" (default), "compute" (atomic framebuffer), or "auto"
     #[serde(default = "default_render_mode")]
     pub render_mode: String,
+
+    /// Enable symbiosis (particle-life) force matrix management
+    #[serde(default)]
+    pub symbiosis: bool,
 }
 
 fn default_blend() -> String {
@@ -708,8 +715,8 @@ mod tests {
     }
 
     #[test]
-    fn particle_uniforms_size_528() {
-        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 528);
+    fn particle_uniforms_size_784() {
+        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 784);
     }
 
     #[test]
