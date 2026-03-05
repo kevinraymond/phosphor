@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### WBOIT (Weighted Blended Order-Independent Transparency)
+- **Order-independent transparency**: new `"blend": "wboit"` mode approximates correct alpha compositing in a single unsorted pass — no back-to-front sort needed
+- **Two-pass rendering**: particles render into accumulation (Rgba16Float) + revealage (R8Unorm) targets with WBOIT weight function, then a fullscreen composite blends onto the scene
+- **Automatic compute raster fallback**: WBOIT is incompatible with compute rasterization; `"render_mode": "compute"` + `"wboit"` falls back to billboard with a warning, and `"auto"` mode excludes WBOIT effects
+- **Resize-safe**: WBOIT textures recreated on window resize alongside compute raster framebuffer
+
 ### Symbiosis Effect (New)
 - **Multi-species particle life simulation**: 2–8 species interact via an asymmetric 8×8 force matrix, producing emergent ecosystems, crystals, and predator-prey dynamics
 - **6 named presets**: Ecosystem, Crystals, Hunters, Membrane, Chaos, Symmetric — smoothly interpolated on switch

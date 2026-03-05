@@ -203,6 +203,7 @@ impl PassExecutor {
         // Resize compute rasterizer framebuffer if active
         if let Some(ref mut ps) = self.particle_system {
             ps.resize_compute_raster(device, width, height);
+            ps.resize_wboit(device, width, height);
         }
     }
 

@@ -72,7 +72,7 @@ pub struct ParticleSystem {
     sprite_bind_group: BindGroup,
     sprite_bgl: BindGroupLayout,
     pub sprite: Option<SpriteAtlas>,
-    /// Active blend mode: "additive" or "alpha"
+    /// Active blend mode: "additive", "alpha", or "wboit"
     pub blend_mode: String,
 
     // Flow field + obstacle (group 1 for compute)
@@ -153,6 +153,16 @@ pub struct ParticleSystem {
 
     // Compute rasterizer (atomic framebuffer for sub-pixel particles)
     compute_raster: Option<ComputeRasterizer>,
+
+    // WBOIT (Weighted Blended Order-Independent Transparency)
+    wboit_accum_texture: Option<wgpu::Texture>,
+    wboit_accum_view: Option<wgpu::TextureView>,
+    wboit_reveal_texture: Option<wgpu::Texture>,
+    wboit_reveal_view: Option<wgpu::TextureView>,
+    wboit_render_pipeline: Option<RenderPipeline>,
+    wboit_composite_pipeline: Option<RenderPipeline>,
+    wboit_composite_bind_group: Option<BindGroup>,
+    wboit_composite_bgl: Option<BindGroupLayout>,
 
     // Symbiosis (particle-life) force matrix state
     pub symbiosis_state: Option<super::symbiosis::SymbiosisState>,
@@ -779,12 +789,20 @@ impl ParticleSystem {
 
         // --- Compute rasterizer (optional) ---
         let use_compute_raster = match def.render_mode.as_str() {
-            "compute" => true,
+            "compute" => {
+                if def.blend == "wboit" {
+                    log::warn!("Compute rasterizer is incompatible with WBOIT blend — falling back to billboard");
+                    false
+                } else {
+                    true
+                }
+            }
             "auto" => {
                 max_particles >= 100_000
                     && def.sprite.is_none()
                     && def.trail_length < 2
                     && def.initial_size <= 0.005
+                    && def.blend != "wboit"
             }
             _ => false, // "billboard" or unknown
         };
@@ -805,6 +823,39 @@ impl ParticleSystem {
             ))
         } else {
             None
+        };
+
+        // --- WBOIT resources (optional) ---
+        let (
+            wboit_accum_texture,
+            wboit_accum_view,
+            wboit_reveal_texture,
+            wboit_reveal_view,
+            wboit_render_pipeline,
+            wboit_composite_pipeline,
+            wboit_composite_bind_group,
+            wboit_composite_bgl,
+        ) = if def.blend == "wboit" && compute_raster.is_none() {
+            let (at, av, rt, rv, rp, cp, cbg, cbgl) = create_wboit_resources(
+                device,
+                hdr_format,
+                1920,
+                1080,
+                &render_bgl,
+                &sprite_bgl,
+            );
+            (
+                Some(at),
+                Some(av),
+                Some(rt),
+                Some(rv),
+                Some(rp),
+                Some(cp),
+                Some(cbg),
+                Some(cbgl),
+            )
+        } else {
+            (None, None, None, None, None, None, None, None)
         };
 
         Ok(Self {
@@ -900,6 +951,14 @@ impl ParticleSystem {
             counter_map_pending: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             counter_map_ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             compute_raster,
+            wboit_accum_texture,
+            wboit_accum_view,
+            wboit_reveal_texture,
+            wboit_reveal_view,
+            wboit_render_pipeline,
+            wboit_composite_pipeline,
+            wboit_composite_bind_group,
+            wboit_composite_bgl,
             symbiosis_state: if def.symbiosis {
                 Some(super::symbiosis::SymbiosisState::new(4))
             } else {
@@ -1375,6 +1434,82 @@ impl ParticleSystem {
 
         // The output buffer is the one we just wrote to in compute
         let output_idx = 1 - self.current;
+
+        // WBOIT path: render to accum/reveal targets, then composite onto scene
+        if let (
+            Some(wboit_pipeline),
+            Some(composite_pipeline),
+            Some(accum_view),
+            Some(reveal_view),
+            Some(composite_bg),
+        ) = (
+            &self.wboit_render_pipeline,
+            &self.wboit_composite_pipeline,
+            &self.wboit_accum_view,
+            &self.wboit_reveal_view,
+            &self.wboit_composite_bind_group,
+        ) {
+            // Phase A: Render particles into accum + revealage targets
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("wboit-particle-render"),
+                    color_attachments: &[
+                        // location(0): accumulation — clear to transparent, blend One+One
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: accum_view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                        // location(1): revealage — clear to white (1.0), blend Zero+OneMinusSrc
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: reveal_view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                    ],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                pass.set_pipeline(wboit_pipeline);
+                pass.set_bind_group(0, &self.render_bind_groups[output_idx], &[]);
+                pass.set_bind_group(1, &self.sprite_bind_group, &[]);
+                pass.draw_indirect(&self.indirect_args_buffer, 0);
+            }
+
+            // Phase B: Composite onto scene (LoadOp::Load preserves opaque content)
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("wboit-composite"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                pass.set_pipeline(composite_pipeline);
+                pass.set_bind_group(0, composite_bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            return;
+        }
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("particle-render"),
@@ -2112,6 +2247,47 @@ impl ParticleSystem {
                 &self.counter_buffer,
             );
         }
+    }
+
+    /// Resize WBOIT textures and rebuild composite bind group (call from PassExecutor::resize).
+    pub fn resize_wboit(&mut self, device: &Device, width: u32, height: u32) {
+        if self.wboit_accum_texture.is_none() {
+            return;
+        }
+        let (accum_tex, accum_view) = create_wboit_texture(
+            device,
+            width,
+            height,
+            TextureFormat::Rgba16Float,
+            "wboit-accum",
+        );
+        let (reveal_tex, reveal_view) = create_wboit_texture(
+            device,
+            width,
+            height,
+            TextureFormat::R8Unorm,
+            "wboit-reveal",
+        );
+        // Rebuild composite bind group with new texture views
+        if let Some(ref bgl) = self.wboit_composite_bgl {
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("wboit-composite-sampler"),
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+            self.wboit_composite_bind_group = Some(create_wboit_composite_bind_group(
+                device,
+                bgl,
+                &accum_view,
+                &reveal_view,
+                &sampler,
+            ));
+        }
+        self.wboit_accum_texture = Some(accum_tex);
+        self.wboit_accum_view = Some(accum_view);
+        self.wboit_reveal_texture = Some(reveal_tex);
+        self.wboit_reveal_view = Some(reveal_view);
     }
 
     /// Initialize R-D textures: A=1.0, B=0.0 everywhere + seed drops.
@@ -3247,5 +3423,277 @@ fn create_rd_resources(
         Some([rd_particle_bg0, rd_particle_bg1]),
         steps,
         grid_size,
+    )
+}
+
+/// Create a WBOIT texture + view pair.
+fn create_wboit_texture(
+    device: &Device,
+    width: u32,
+    height: u32,
+    format: TextureFormat,
+    label: &str,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&Default::default());
+    (texture, view)
+}
+
+/// Create the WBOIT composite bind group.
+fn create_wboit_composite_bind_group(
+    device: &Device,
+    layout: &BindGroupLayout,
+    accum_view: &wgpu::TextureView,
+    reveal_view: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+) -> BindGroup {
+    device.create_bind_group(&BindGroupDescriptor {
+        label: Some("wboit-composite-bg"),
+        layout,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::TextureView(accum_view),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::TextureView(reveal_view),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: BindingResource::Sampler(sampler),
+            },
+        ],
+    })
+}
+
+/// Create all WBOIT resources: textures, render pipeline (2 color targets), composite pipeline, bind group.
+#[allow(clippy::type_complexity)]
+fn create_wboit_resources(
+    device: &Device,
+    hdr_format: TextureFormat,
+    width: u32,
+    height: u32,
+    render_bgl: &BindGroupLayout,
+    sprite_bgl: &BindGroupLayout,
+) -> (
+    wgpu::Texture,
+    wgpu::TextureView,
+    wgpu::Texture,
+    wgpu::TextureView,
+    RenderPipeline,
+    RenderPipeline,
+    BindGroup,
+    BindGroupLayout,
+) {
+    // Create accum (Rgba16Float) and revealage (R8Unorm) textures
+    let (accum_tex, accum_view) =
+        create_wboit_texture(device, width, height, TextureFormat::Rgba16Float, "wboit-accum");
+    let (reveal_tex, reveal_view) =
+        create_wboit_texture(device, width, height, TextureFormat::R8Unorm, "wboit-reveal");
+
+    // --- WBOIT render pipeline (2 color targets) ---
+    let wboit_render_source =
+        include_str!("../../../../../assets/shaders/builtin/particle_render_wboit.wgsl");
+    let wboit_render_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("particle-render-wboit"),
+        source: wgpu::ShaderSource::Wgsl(wboit_render_source.into()),
+    });
+
+    let wboit_render_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("particle-render-wboit-layout"),
+        bind_group_layouts: &[render_bgl, sprite_bgl],
+        push_constant_ranges: &[],
+    });
+
+    let wboit_render_pipeline =
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("particle-render-wboit"),
+            layout: Some(&wboit_render_layout),
+            vertex: VertexState {
+                module: &wboit_render_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: PipelineCompilationOptions::default(),
+            },
+            fragment: Some(FragmentState {
+                module: &wboit_render_shader,
+                entry_point: Some("fs_wboit"),
+                targets: &[
+                    // location(0): accumulation — One + One (additive)
+                    Some(ColorTargetState {
+                        format: TextureFormat::Rgba16Float,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    // location(1): revealage — Zero + OneMinusSrc (multiplicative product of (1-alpha))
+                    Some(ColorTargetState {
+                        format: TextureFormat::R8Unorm,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::Zero,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrc,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::Zero,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrc,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+                compilation_options: PipelineCompilationOptions::default(),
+            }),
+            primitive: PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+    // --- WBOIT composite pipeline (fullscreen triangle) ---
+    let composite_source =
+        include_str!("../../../../../assets/shaders/builtin/wboit_composite.wgsl");
+    let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("wboit-composite"),
+        source: wgpu::ShaderSource::Wgsl(composite_source.into()),
+    });
+
+    let composite_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: Some("wboit-composite-bgl"),
+        entries: &[
+            // binding 0: accum texture
+            BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            // binding 1: reveal texture
+            BindGroupLayoutEntry {
+                binding: 1,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            // binding 2: sampler
+            BindGroupLayoutEntry {
+                binding: 2,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    });
+
+    let composite_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("wboit-composite-layout"),
+        bind_group_layouts: &[&composite_bgl],
+        push_constant_ranges: &[],
+    });
+
+    let composite_pipeline =
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wboit-composite"),
+            layout: Some(&composite_layout),
+            vertex: VertexState {
+                module: &composite_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: PipelineCompilationOptions::default(),
+            },
+            fragment: Some(FragmentState {
+                module: &composite_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(ColorTargetState {
+                    format: hdr_format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: PipelineCompilationOptions::default(),
+            }),
+            primitive: PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+    // Composite bind group
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("wboit-composite-sampler"),
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+
+    let composite_bind_group = create_wboit_composite_bind_group(
+        device,
+        &composite_bgl,
+        &accum_view,
+        &reveal_view,
+        &sampler,
+    );
+
+    (
+        accum_tex,
+        accum_view,
+        reveal_tex,
+        reveal_view,
+        wboit_render_pipeline,
+        composite_pipeline,
+        composite_bind_group,
+        composite_bgl,
     )
 }

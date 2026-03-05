@@ -517,7 +517,7 @@ pub struct ParticleDef {
     /// Image sampling for image-to-particle decomposition (optional)
     #[serde(default)]
     pub image_sample: Option<ImageSampleDef>,
-    /// Blend mode: "additive" (default) or "alpha"
+    /// Blend mode: "additive" (default), "alpha", or "wboit"
     #[serde(default = "default_blend")]
     pub blend: String,
     /// Enable 3D curl noise flow field (opt-in)
