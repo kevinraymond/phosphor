@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### UI
+- Amber dirty-state styling for presets panel: custom header with pulsing dot and inline preset name, amber-tinted dirty bar with Update/Reset buttons, amber selected tile, pulsing card border, and bumped tile height to 26px
 - Add effect type indicators to effects panel: left color strip (purple SH / orange PS / teal FB), two-char badge, type legend, and footer breakdown count
 - Show Copy and Edit buttons side by side — Copy enabled for visible built-ins only, Edit enabled for user effects only; fixes Copy being clickable on hidden Phosphor branding effect
 - Add `EffectType` enum (Shader, Particle, Feedback) with optional `effect_type` field in .pfx format — auto-detects from data when absent
