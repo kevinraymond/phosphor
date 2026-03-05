@@ -218,10 +218,10 @@ impl ComputeRasterizer {
         let tile_scatter_offsets_buffer =
             create_tile_buffer(device, "cr-tile-scatter-offsets", num_tiles, true);
 
-        // 4× max_particles worst-case for multi-tile bilinear particles
+        // 9× max_particles worst-case for Gaussian splat particles (up to 3×3 tiles)
         let sorted_particles_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("cr-sorted-particles"),
-            size: (max_particles as u64) * 4 * 4,
+            size: (max_particles as u64) * 9 * 4,
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         });

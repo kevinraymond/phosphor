@@ -60,7 +60,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         let tx = i32(floor(px)) / i32(TILE_SIZE);
         let ty = i32(floor(py)) / i32(TILE_SIZE);
         add_tile(tx, ty);
-    } else {
+    } else if radius_px <= 1.5 {
         // Bilinear 2×2: up to 4 tiles at tile boundaries
         let ix = i32(floor(px - 0.5));
         let iy = i32(floor(py - 0.5));
@@ -77,6 +77,22 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
             add_tile(tx0, ty1);
             if tx1 != tx0 {
                 add_tile(tx1, ty1);
+            }
+        }
+    } else {
+        // Gaussian area splat: bin to all tiles the bounding box overlaps
+        let r = min(radius_px, 8.0);
+        let r_ceil = i32(ceil(r));
+        let cx = i32(floor(px));
+        let cy = i32(floor(py));
+        let tx_min = (cx - r_ceil) / i32(TILE_SIZE);
+        let tx_max = (cx + r_ceil) / i32(TILE_SIZE);
+        let ty_min = (cy - r_ceil) / i32(TILE_SIZE);
+        let ty_max = (cy + r_ceil) / i32(TILE_SIZE);
+
+        for (var ty = ty_min; ty <= ty_max; ty++) {
+            for (var tx = tx_min; tx <= tx_max; tx++) {
+                add_tile(tx, ty);
             }
         }
     }

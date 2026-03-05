@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### Gaussian Area Splat for Compute Rasterizer (Fix)
+- **Soft Gaussian splat for particles >1.5px**: compute raster now matches billboard renderer output for larger particles (e.g., Array at ~2.7px radius). Previously all energy concentrated into a 2×2 bilinear kernel, making dim-colored effects nearly invisible
+- **Three-tier kernel**: single-pixel (≤1px), bilinear 2×2 (1–1.5px), Gaussian area splat (>1.5px, capped at 8px). Weight `col.a × glow²` matches billboard's `SrcAlpha` blend
+- **Multi-tile binning**: particles overlapping multiple 16×16 tiles are binned/scattered to all covered tiles (up to 3×3). Sorted buffer sized 9× max_particles accordingly
+- **Tiled path support**: Gaussian loop in shared-memory tiled shader with per-pixel tile boundary clipping
+
 ### Preset: Particle Image Save/Restore (Fix)
 - **Particle image path now saved in presets**: selecting a different particle image (e.g., skull → phoenix) and updating the preset persists the choice across preset loads
 - **Mark dirty on particle/obstacle changes**: changing particle image, video source, webcam source, video transport settings, or obstacle settings now marks the preset as dirty so the Update button appears

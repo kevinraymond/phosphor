@@ -1,5 +1,5 @@
 // Compute raster draw: each alive particle writes color to atomic framebuffer.
-// Two paths: single-pixel for ≤1px radius, bilinear 2×2 splat for >1px.
+// Three paths: single-pixel (≤1px), bilinear 2×2 (1–1.5px), Gaussian area splat (>1.5px).
 // Dispatch: ceil(max_particles / 256) workgroups, 1D.
 
 struct DrawUniforms {
@@ -71,7 +71,7 @@ fn cs_draw(@builtin(global_invocation_id) gid: vec3u) {
         let ix = i32(floor(px));
         let iy = i32(floor(py));
         write_pixel(ix, iy, col.rgb, col.a);
-    } else {
+    } else if radius_px <= 1.5 {
         // Bilinear 2×2 splat: distribute energy to 4 nearest pixels
         // based on sub-pixel position (16 atomicAdds)
         let fx = fract(px - 0.5);
@@ -88,5 +88,23 @@ fn cs_draw(@builtin(global_invocation_id) gid: vec3u) {
         write_pixel(ix + 1, iy,     col.rgb, col.a * w10);
         write_pixel(ix,     iy + 1, col.rgb, col.a * w01);
         write_pixel(ix + 1, iy + 1, col.rgb, col.a * w11);
+    } else {
+        // Gaussian area splat: soft circle matching billboard renderer output
+        let r = min(radius_px, 8.0);
+        let r_ceil = i32(ceil(r));
+        let cx = i32(floor(px));
+        let cy = i32(floor(py));
+        let inv_r2 = 1.0 / (r * r);
+
+        for (var dy = -r_ceil; dy <= r_ceil; dy++) {
+            for (var dx = -r_ceil; dx <= r_ceil; dx++) {
+                let dist_sq = f32(dx * dx + dy * dy) * inv_r2;
+                if dist_sq > 1.5 {
+                    continue;
+                }
+                let glow = exp(-dist_sq * 2.0);
+                write_pixel(cx + dx, cy + dy, col.rgb, col.a * glow * glow);
+            }
+        }
     }
 }

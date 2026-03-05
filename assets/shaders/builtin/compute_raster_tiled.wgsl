@@ -102,7 +102,7 @@ fn cs_main(
             if lx >= 0 && lx < i32(TILE_SIZE) && ly >= 0 && ly < i32(TILE_SIZE) {
                 write_pixel_shared(u32(lx), u32(ly), col.rgb, col.a);
             }
-        } else {
+        } else if radius_px <= 1.5 {
             // Bilinear 2×2 splat
             let fx = fract(px - 0.5);
             let fy = fract(py - 0.5);
@@ -131,6 +131,34 @@ fn cs_main(
             }
             if lx1 >= 0 && lx1 < i32(TILE_SIZE) && ly1 >= 0 && ly1 < i32(TILE_SIZE) {
                 write_pixel_shared(u32(lx1), u32(ly1), col.rgb, col.a * w11);
+            }
+        } else {
+            // Gaussian area splat: soft circle matching billboard renderer
+            let r = min(radius_px, 8.0);
+            let r_ceil = i32(ceil(r));
+            let cx = i32(floor(px));
+            let cy = i32(floor(py));
+            let inv_r2 = 1.0 / (r * r);
+
+            for (var dy = -r_ceil; dy <= r_ceil; dy++) {
+                let gy = cy + dy;
+                let ly = gy - i32(tile_px_y);
+                if ly < 0 || ly >= i32(TILE_SIZE) {
+                    continue;
+                }
+                for (var dx = -r_ceil; dx <= r_ceil; dx++) {
+                    let gx = cx + dx;
+                    let lx = gx - i32(tile_px_x);
+                    if lx < 0 || lx >= i32(TILE_SIZE) {
+                        continue;
+                    }
+                    let dist_sq = f32(dx * dx + dy * dy) * inv_r2;
+                    if dist_sq > 1.5 {
+                        continue;
+                    }
+                    let glow = exp(-dist_sq * 2.0);
+                    write_pixel_shared(u32(lx), u32(ly), col.rgb, col.a * glow * glow);
+                }
             }
         }
     }
