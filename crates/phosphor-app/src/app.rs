@@ -1253,6 +1253,13 @@ impl App {
         particles.max_count = (particles.max_count as f32 * multiplier).round() as u32;
         particles.emit_rate *= multiplier;
 
+        // Per-effect cap: don't scale past max_scaled_count if set
+        if particles.max_scaled_count > 0 && particles.max_count > particles.max_scaled_count {
+            let ratio = particles.max_scaled_count as f32 / particles.max_count as f32;
+            particles.max_count = particles.max_scaled_count;
+            particles.emit_rate *= ratio;
+        }
+
         // Cap particle count to device storage buffer binding limit.
         // The largest buffer is sorted_particles_buffer = max_particles × 9 × 4 bytes
         // (3×3 tile coverage in compute rasterizer scatter pass).

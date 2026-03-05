@@ -502,6 +502,10 @@ pub struct MorphTargetDef {
 pub struct ParticleDef {
     #[serde(default = "default_max_count")]
     pub max_count: u32,
+    /// Upper limit after quality scaling. Quality multiplier won't push past this.
+    /// If 0 or absent, no per-effect cap is applied.
+    #[serde(default)]
+    pub max_scaled_count: u32,
     /// Custom compute shader (relative to shaders dir). If empty, uses builtin.
     #[serde(default)]
     pub compute_shader: String,

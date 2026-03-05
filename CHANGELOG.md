@@ -13,6 +13,7 @@
 
 ### Fixes
 - Clamp particle count to GPU dispatch dimension limit (`max_compute_workgroups_per_dimension × 256`) to prevent validation errors on high-count effects
+- Add per-effect `max_scaled_count` field — quality multiplier won't push past this ceiling; applied to Accretion (60K), Genesis (24K), Murmur (2.4M), and Symbiosis (4M)
 - Hide Stress test effect from effects panel
 - Fix morph slider animating when auto-cycle mode is "Off" — transition progress now only advances when auto-cycling is active
 - Remove redundant image source UI (IMG badge, image selector dropdown, Load Image/Video/Webcam buttons) from particle panel — morph targets handle image loading
