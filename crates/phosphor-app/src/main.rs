@@ -1885,12 +1885,13 @@ impl ApplicationHandler for PhosphorApp {
                                                 // Reset hold timer so auto-cycle doesn't immediately fire
                                                 morph.hold_timer = 0.0;
                                             }
-                                            // Helper: pick target slot — selected slot, or next empty, or last
-                                            let pick_slot = |count: u32| -> u32 {
+                                            // Helper: pick target slot — selected slot, or next empty (based on def count), or last
+                                            let def_count = ps.def.morph_targets.as_ref().map_or(0, |t| t.len() as u32);
+                                            let pick_slot = || -> u32 {
                                                 if let Some(s) = morph_selected_slot {
                                                     s.min(3)
                                                 } else {
-                                                    count.min(3)
+                                                    def_count.min(3)
                                                 }
                                             };
                                             let mut needs_upload = false;
@@ -1908,7 +1909,7 @@ impl ApplicationHandler for PhosphorApp {
                                             }
 
                                             if let Some(shape) = morph_add_geo {
-                                                let slot = pick_slot(morph.target_count);
+                                                let slot = pick_slot();
                                                 let data = crate::gpu::particle::morph::generate_geometry(
                                                     &shape,
                                                     ps.max_particles,
@@ -1920,16 +1921,17 @@ impl ApplicationHandler for PhosphorApp {
                                                     color: None,
                                                 };
                                                 if let Some(ref mut targets) = ps.def.morph_targets {
-                                                    if (slot as usize) < targets.len() {
-                                                        targets[slot as usize] = def;
-                                                    } else {
-                                                        targets.push(def);
+                                                    while targets.len() <= slot as usize {
+                                                        targets.push(crate::gpu::particle::types::MorphTargetDef {
+                                                            source: String::new(), color: None,
+                                                        });
                                                     }
+                                                    targets[slot as usize] = def;
                                                 }
                                                 needs_upload = true;
                                             }
                                             if let Some(ref text) = morph_add_text {
-                                                let slot = pick_slot(morph.target_count);
+                                                let slot = pick_slot();
                                                 let data = crate::gpu::particle::text_source::render_text_to_particles(
                                                     text,
                                                     ps.max_particles,
@@ -1942,11 +1944,12 @@ impl ApplicationHandler for PhosphorApp {
                                                         color: None,
                                                     };
                                                     if let Some(ref mut targets) = ps.def.morph_targets {
-                                                        if (slot as usize) < targets.len() {
-                                                            targets[slot as usize] = def;
-                                                        } else {
-                                                            targets.push(def);
+                                                        while targets.len() <= slot as usize {
+                                                            targets.push(crate::gpu::particle::types::MorphTargetDef {
+                                                                source: String::new(), color: None,
+                                                            });
                                                         }
+                                                        targets[slot as usize] = def;
                                                     }
                                                     log::info!("Loaded morph text target into slot {}: \"{}\"", slot, text);
                                                     needs_upload = true;
@@ -1969,7 +1972,8 @@ impl ApplicationHandler for PhosphorApp {
                                             let slot = if let Some(s) = morph_selected_slot {
                                                 s.min(3)
                                             } else {
-                                                ps.morph_state.as_ref().map_or(3, |m| m.target_count.min(3))
+                                                // Use def count to stay in sync with morph_targets vec
+                                                (ps.def.morph_targets.as_ref().map_or(0, |t| t.len()) as u32).min(3)
                                             };
                                             let data = ps.snapshot_particles(
                                                 &app.gpu.device,
@@ -1984,11 +1988,12 @@ impl ApplicationHandler for PhosphorApp {
                                                     color: None,
                                                 };
                                                 if let Some(ref mut targets) = ps.def.morph_targets {
-                                                    if (slot as usize) < targets.len() {
-                                                        targets[slot as usize] = def;
-                                                    } else {
-                                                        targets.push(def);
+                                                    while targets.len() <= slot as usize {
+                                                        targets.push(crate::gpu::particle::types::MorphTargetDef {
+                                                            source: String::new(), color: None,
+                                                        });
                                                     }
+                                                    targets[slot as usize] = def;
                                                 }
                                                 ps.upload_morph_targets(
                                                     &app.gpu.device,
@@ -2058,7 +2063,9 @@ impl ApplicationHandler for PhosphorApp {
                                             if morph_pending.is_some() {
                                                 if !aux.is_empty() {
                                                     if let Some(ref mut morph) = ps.morph_state {
-                                                        let slot = morph_pending_slot.unwrap_or_else(|| morph.target_count.min(3));
+                                                        let slot = morph_pending_slot.unwrap_or_else(|| {
+                                                            (ps.def.morph_targets.as_ref().map_or(0, |t| t.len()) as u32).min(3)
+                                                        });
                                                         morph.load_target(slot, aux);
                                                         let filename = std::path::Path::new(&path)
                                                             .file_name()
@@ -2069,11 +2076,12 @@ impl ApplicationHandler for PhosphorApp {
                                                             color: None,
                                                         };
                                                         if let Some(ref mut targets) = ps.def.morph_targets {
-                                                            if (slot as usize) < targets.len() {
-                                                                targets[slot as usize] = def;
-                                                            } else {
-                                                                targets.push(def);
+                                                            while targets.len() <= slot as usize {
+                                                                targets.push(crate::gpu::particle::types::MorphTargetDef {
+                                                                    source: String::new(), color: None,
+                                                                });
                                                             }
+                                                            targets[slot as usize] = def;
                                                         }
                                                         log::info!(
                                                             "Loaded morph target image into slot {}: {} ({}x{})",
@@ -2127,15 +2135,16 @@ impl ApplicationHandler for PhosphorApp {
                                                 // Load evenly-spaced frames into morph slots
                                                 if let Some(ref mut morph) = ps.morph_state {
                                                     // When full, replace all 4 slots with video frames
-                                                    let num_slots = if morph.target_count >= 4 {
+                                                    let def_count = ps.def.morph_targets.as_ref().map_or(0, |t| t.len()) as u32;
+                                                    let num_slots = if def_count >= 4 {
                                                         4u32
                                                     } else {
-                                                        (4 - morph.target_count).min(4)
+                                                        (4 - def_count).min(4)
                                                     };
-                                                    let start_slot = if morph.target_count >= 4 {
+                                                    let start_slot = if def_count >= 4 {
                                                         0u32
                                                     } else {
-                                                        morph.target_count
+                                                        def_count
                                                     };
                                                     let targets = crate::gpu::particle::morph::load_video_morph_targets(
                                                         &frames,
@@ -2152,11 +2161,12 @@ impl ApplicationHandler for PhosphorApp {
                                                                 color: None,
                                                             };
                                                             if let Some(ref mut defs) = ps.def.morph_targets {
-                                                                if (slot as usize) < defs.len() {
-                                                                    defs[slot as usize] = def;
-                                                                } else {
-                                                                    defs.push(def);
+                                                                while defs.len() <= slot as usize {
+                                                                    defs.push(crate::gpu::particle::types::MorphTargetDef {
+                                                                        source: String::new(), color: None,
+                                                                    });
                                                                 }
+                                                                defs[slot as usize] = def;
                                                             }
                                                             log::info!("Loaded morph video frame into slot {}: {}", slot, label);
                                                         }

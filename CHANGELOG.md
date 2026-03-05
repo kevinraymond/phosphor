@@ -8,6 +8,7 @@
 ### Fixes
 - Fix morph slider animating when auto-cycle mode is "Off" — transition progress now only advances when auto-cycling is active
 - Remove redundant image source UI (IMG badge, image selector dropdown, Load Image/Video/Webcam buttons) from particle panel — morph targets handle image loading
+- Fix morph snapshot/image/text/video filling wrong slot when `target_count` diverges from def count — all handlers now use def vector length for slot selection and pad gaps
 
 ### Morph Effect (New)
 - **Shape target morphing**: particles store home positions for up to 4 target shapes and morph between them on beat drops with spring physics and turbulence
