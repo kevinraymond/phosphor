@@ -123,83 +123,7 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
 
     // Image source section (shown only for image emitter effects)
     if info.has_image_source {
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            // Source type badge
-            let badge_text = match info.source_type.as_str() {
-                "video" => "VIDEO",
-                "webcam" => "CAM",
-                _ => "IMG",
-            };
-            let badge_color = match info.source_type.as_str() {
-                "video" => egui::Color32::from_rgb(0x60, 0x80, 0xC0),
-                "webcam" => egui::Color32::from_rgb(0xC0, 0x60, 0x60),
-                _ => tc.text_secondary,
-            };
-            feature_badge(ui, badge_text, badge_color);
-            if !info.source_name.is_empty() {
-                let name = if info.source_name.len() > 20 {
-                    format!("{}...", &info.source_name[..17])
-                } else {
-                    info.source_name.clone()
-                };
-                let label = ui.label(
-                    RichText::new(&name)
-                        .size(SMALL_SIZE)
-                        .color(tc.text_secondary),
-                );
-                if info.source_name.len() > 20 {
-                    label.on_hover_text(&info.source_name);
-                }
-            }
-            if info.is_transitioning {
-                ui.label(
-                    RichText::new("transitioning...")
-                        .size(SMALL_SIZE - 1.0)
-                        .color(tc.accent),
-                );
-            }
-        });
-
-        // Built-in image selector
-        if !info.builtin_images.is_empty() {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("Image")
-                        .size(SMALL_SIZE)
-                        .color(tc.text_secondary),
-                );
-                // Derive current selection label from source_name
-                let current_label = if info.source_type == "static" && !info.source_name.is_empty()
-                {
-                    // Strip "raster_" prefix and ".png" suffix for display
-                    let name = info.source_name.trim_end_matches(".png");
-                    let name = name.strip_prefix("raster_").unwrap_or(name);
-                    name.to_string()
-                } else {
-                    "—".to_string()
-                };
-                egui::ComboBox::from_id_salt("particle_builtin_image")
-                    .selected_text(&current_label)
-                    .width(ui.available_width() - 4.0)
-                    .show_ui(ui, |ui| {
-                        for name in &info.builtin_images {
-                            if ui.selectable_label(*name == current_label, name).clicked() {
-                                ui.ctx().data_mut(|d| {
-                                    d.insert_temp(
-                                        egui::Id::new("particle_select_builtin"),
-                                        name.clone(),
-                                    );
-                                });
-                            }
-                        }
-                    });
-            });
-            ui.add_space(2.0);
-        }
-
-        // Source action buttons
+        // Source loading indicator
         if info.source_loading {
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -208,45 +132,6 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                         .size(SMALL_SIZE)
                         .color(tc.text_secondary),
                 );
-            });
-        } else {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Load Image").size(SMALL_SIZE))
-                            .min_size(egui::vec2(0.0, 24.0)),
-                    )
-                    .clicked()
-                {
-                    ui.ctx().data_mut(|d| {
-                        d.insert_temp(egui::Id::new("particle_load_image"), true);
-                    });
-                }
-                #[cfg(feature = "video")]
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Load Video").size(SMALL_SIZE))
-                            .min_size(egui::vec2(0.0, 24.0)),
-                    )
-                    .clicked()
-                {
-                    ui.ctx().data_mut(|d| {
-                        d.insert_temp(egui::Id::new("particle_load_video"), true);
-                    });
-                }
-                #[cfg(feature = "webcam")]
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Webcam").size(SMALL_SIZE))
-                            .min_size(egui::vec2(0.0, 24.0)),
-                    )
-                    .clicked()
-                {
-                    ui.ctx().data_mut(|d| {
-                        d.insert_temp(egui::Id::new("particle_webcam"), true);
-                    });
-                }
             });
         }
 

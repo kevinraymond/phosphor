@@ -115,8 +115,8 @@ impl MorphState {
     /// Advance progress and handle auto-cycle.
     /// `beat` is 1.0 on detected beats, 0.0 otherwise (discrete signal from beat tracker).
     pub fn update(&mut self, dt: f32, beat: f32) {
-        // Advance transition progress
-        if self.transitioning {
+        // Advance transition progress (only when auto-cycling is active)
+        if self.transitioning && self.auto_cycle != AutoCycle::Off {
             self.progress += dt / self.transition_duration;
             if self.progress >= 1.0 {
                 self.progress = 1.0;
