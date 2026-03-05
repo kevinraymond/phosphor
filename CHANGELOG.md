@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### Particle Quality Setting (New)
+- **Global quality multiplier**: Low (0.25x), Medium (0.5x), High (1x), Ultra (2x), Max (4x) — scales both `max_count` and `emit_rate` proportionally so fill time stays consistent
+- **Default: High (1x)** — no change for existing users; backward-compatible with old settings.json files
+- **Combo box in Global panel**: same pattern as theme selector; changing quality mid-session reloads the active effect to rebuild GPU buffers
+- **Built-in effects upgraded**: all effects now default to 1–2M particles with compute rasterization as the baseline
+
 ### Window Size
 - **Default window size changed to 1920×1080** (was 1280×720)
 
