@@ -60,12 +60,15 @@ impl GpuContext {
             }
         }
 
+        let adapter_limits = adapter.limits();
         let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
             label: Some("phosphor-device"),
             required_features,
             required_limits: wgpu::Limits {
                 max_storage_buffers_per_shader_stage: 16,
                 max_bind_groups: 5, // groups 0-3 standard + group 4 for R-D texture
+                max_storage_buffer_binding_size: adapter_limits.max_storage_buffer_binding_size,
+                max_buffer_size: adapter_limits.max_buffer_size,
                 ..wgpu::Limits::default()
             },
             experimental_features: ExperimentalFeatures::default(),

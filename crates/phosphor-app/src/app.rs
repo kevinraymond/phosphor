@@ -1247,6 +1247,23 @@ impl App {
         let original_count = particles.max_count;
         particles.max_count = (particles.max_count as f32 * multiplier).round() as u32;
         particles.emit_rate *= multiplier;
+
+        // Cap particle count to device storage buffer binding limit.
+        // The largest buffer is sorted_particles_buffer = max_particles × 9 × 4 bytes
+        // (3×3 tile coverage in compute rasterizer scatter pass).
+        let max_binding = self.gpu.device.limits().max_storage_buffer_binding_size as u64;
+        let max_from_binding = (max_binding / (9 * 4)) as u32;
+        if particles.max_count > max_from_binding {
+            log::warn!(
+                "Capping particles from {} to {} (storage buffer binding limit {}MB)",
+                particles.max_count,
+                max_from_binding,
+                max_binding / (1024 * 1024),
+            );
+            particles.max_count = max_from_binding;
+            particles.emit_rate = particles.emit_rate.min(max_from_binding as f32);
+        }
+
         if particles.max_count != original_count {
             log::info!(
                 "Particle quality {}: {} -> {} particles",

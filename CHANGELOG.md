@@ -12,6 +12,10 @@
 - **Toroidal topology**: particles wrap around screen edges with correct wrapped-distance neighbor queries
 - **Force matrix in ParticleUniforms**: 8×8 float matrix (256 bytes) appended to uniforms — no new bind groups needed, all existing effects unaffected
 
+### Fix: CR scatter bind group crash on particle quality change
+- **Request adapter-supported buffer limits**: device now requests the GPU adapter's actual `max_storage_buffer_binding_size` and `max_buffer_size` instead of wgpu defaults (128MB/256MB), allowing high-VRAM GPUs to use their full capacity
+- **Cap particle count to device limits**: after applying quality multiplier, particle count is clamped so the largest buffer (`sorted_particles_buffer` = N×9×4 bytes) stays within the device's storage buffer binding limit — prevents invalid bind groups and crash on quality change
+
 ### Gaussian Area Splat for Compute Rasterizer (Fix)
 - **Soft Gaussian splat for particles >1.5px**: compute raster now matches billboard renderer output for larger particles (e.g., Array at ~2.7px radius). Previously all energy concentrated into a 2×2 bilinear kernel, making dim-colored effects nearly invisible
 - **Three-tier kernel**: single-pixel (≤1px), bilinear 2×2 (1–1.5px), Gaussian area splat (>1.5px, capped at 8px). Weight `col.a × glow²` matches billboard's `SrcAlpha` blend
