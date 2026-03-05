@@ -54,6 +54,9 @@ pub struct LayerPreset {
     /// True if particle source is webcam.
     #[serde(default)]
     pub particle_webcam: Option<bool>,
+    /// Absolute path to static image used as particle source.
+    #[serde(default)]
+    pub particle_image_path: Option<String>,
     /// Obstacle collision image path.
     #[serde(default)]
     pub obstacle_image_path: Option<String>,
@@ -521,6 +524,7 @@ mod tests {
                 particle_video_speed: None,
                 particle_video_looping: None,
                 particle_webcam: None,
+                particle_image_path: None,
                 obstacle_image_path: None,
                 obstacle_mode: None,
                 obstacle_threshold: None,
@@ -586,6 +590,38 @@ mod tests {
         let serialized = serde_json::to_string(&lp).unwrap();
         let lp2: LayerPreset = serde_json::from_str(&serialized).unwrap();
         assert_eq!(lp2.obstacle_depth, Some(true));
+    }
+
+    #[test]
+    fn layer_preset_particle_image_serde() {
+        let json = r#"{
+            "effect_name": "Raster",
+            "particle_image_path": "/home/user/images/skull.png"
+        }"#;
+        let lp: LayerPreset = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            lp.particle_image_path,
+            Some("/home/user/images/skull.png".to_string())
+        );
+        // Roundtrip
+        let serialized = serde_json::to_string(&lp).unwrap();
+        let lp2: LayerPreset = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(lp2.particle_image_path, lp.particle_image_path);
+    }
+
+    #[test]
+    fn layer_preset_particle_image_backward_compat() {
+        // Old preset without particle_image_path should parse with None
+        let json = r#"{
+            "effect_name": "Cascade",
+            "particle_video_path": "/tmp/fire.mp4"
+        }"#;
+        let lp: LayerPreset = serde_json::from_str(json).unwrap();
+        assert!(lp.particle_image_path.is_none());
+        assert_eq!(
+            lp.particle_video_path,
+            Some("/tmp/fire.mp4".to_string())
+        );
     }
 
     #[test]

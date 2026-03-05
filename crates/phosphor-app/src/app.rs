@@ -1303,6 +1303,7 @@ impl App {
                         Ok(aux_data) => {
                             ps.upload_aux_data(&self.gpu.device, &self.gpu.queue, &aux_data);
                             ps.store_current_aux(aux_data.clone());
+                            ps.static_image_path = Some(image_path.to_string_lossy().to_string());
                             log::info!(
                                 "Loaded image '{}': {} particles",
                                 particles.emitter.image,
@@ -1824,6 +1825,7 @@ impl App {
                         None
                     }
                 });
+                let particle_image_path = ps_ref.and_then(|ps| ps.static_image_path.clone());
                 // Capture obstacle info
                 let obstacle_image_path = ps_ref.and_then(|ps| ps.obstacle_image_path.clone());
                 let obstacle_mode = ps_ref
@@ -1855,6 +1857,7 @@ impl App {
                     particle_video_speed,
                     particle_video_looping,
                     particle_webcam,
+                    particle_image_path,
                     obstacle_image_path,
                     obstacle_mode,
                     obstacle_threshold,
@@ -2154,6 +2157,69 @@ impl App {
                                 log::info!("Restored particle webcam source for layer {i}");
                             }
                         }
+                    }
+                }
+            }
+
+            // Restore static particle image source
+            if let Some(ref img_path) = lp.particle_image_path {
+                // Only restore if no video/webcam source takes priority
+                if lp.particle_video_path.is_none() && lp.particle_webcam != Some(true) {
+                    let path = std::path::PathBuf::from(img_path);
+                    if path.exists() {
+                        // Skip if the same image is already loaded
+                        let already_loaded = self
+                            .layer_stack
+                            .layers
+                            .get(i)
+                            .and_then(|l| l.as_effect())
+                            .and_then(|e| e.pass_executor.particle_system.as_ref())
+                            .and_then(|ps| ps.static_image_path.as_ref())
+                            == Some(img_path);
+
+                        if !already_loaded {
+                            if let Some(layer) = self.layer_stack.layers.get_mut(i) {
+                                if let Some(effect) = layer.as_effect_mut() {
+                                    if let Some(ps) =
+                                        effect.pass_executor.particle_system.as_mut()
+                                    {
+                                        match crate::gpu::particle::image_source::sample_image(
+                                            &path,
+                                            &ps.sample_def,
+                                            ps.max_particles,
+                                        ) {
+                                            Ok(aux_data) => {
+                                                ps.upload_aux_data(
+                                                    &self.gpu.device,
+                                                    &self.gpu.queue,
+                                                    &aux_data,
+                                                );
+                                                ps.store_current_aux(aux_data);
+                                                ps.image_source =
+                                                    crate::gpu::particle::ParticleImageSource::Static;
+                                                ps.video_path = None;
+                                                ps.static_image_path = Some(img_path.clone());
+                                                let filename = path
+                                                    .file_name()
+                                                    .map(|f| f.to_string_lossy().to_string())
+                                                    .unwrap_or_default();
+                                                ps.def.emitter.image = filename;
+                                                log::info!(
+                                                    "Restored particle image source for layer {i}: {img_path}"
+                                                );
+                                            }
+                                            Err(e) => {
+                                                log::warn!(
+                                                    "Failed to restore particle image for layer {i}: {e}"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        log::warn!("Particle image '{}' not found for layer {}", img_path, i);
                     }
                 }
             }

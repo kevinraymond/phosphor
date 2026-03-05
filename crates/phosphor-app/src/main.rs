@@ -1165,6 +1165,7 @@ impl ApplicationHandler for PhosphorApp {
                         .data_mut(|d| d.remove_temp(egui::Id::new("obstacle_cmd")));
                     if let Some(cmd) = obstacle_cmd.filter(|c| !matches!(c, ObstacleCommand::None))
                     {
+                        app.preset_store.mark_dirty();
                         if let Some(layer) = app.layer_stack.active_mut() {
                             if let Some(e) = layer.as_effect_mut() {
                                 if let Some(ps) = &mut e.pass_executor.particle_system {
@@ -1403,6 +1404,7 @@ impl ApplicationHandler for PhosphorApp {
                         }
                         #[cfg(feature = "webcam")]
                         app.cleanup_webcam_if_unused();
+                        app.preset_store.mark_dirty();
                     }
                 }
 
@@ -1660,6 +1662,7 @@ impl ApplicationHandler for PhosphorApp {
                         if !app.particle_source_loader.loading {
                             let path = crate::gpu::particle::builtin_raster_path(&name);
                             app.particle_source_loader.load_image(path);
+                            app.preset_store.mark_dirty();
                         }
                     }
 
@@ -1668,6 +1671,7 @@ impl ApplicationHandler for PhosphorApp {
                         ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_image")));
                     if load_image.is_some() && !app.particle_source_loader.loading {
                         app.particle_source_loader.open_image_dialog();
+                        app.preset_store.mark_dirty();
                     }
 
                     // Load video as particle source (dialog + decode on background thread)
@@ -1677,6 +1681,7 @@ impl ApplicationHandler for PhosphorApp {
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_video")));
                         if load_video.is_some() && !app.particle_source_loader.loading {
                             app.particle_source_loader.open_video_dialog();
+                            app.preset_store.mark_dirty();
                         }
                     }
 
@@ -1711,6 +1716,7 @@ impl ApplicationHandler for PhosphorApp {
                                     }
                                 }
                             }
+                            app.preset_store.mark_dirty();
                         }
                     }
 
@@ -1757,6 +1763,9 @@ impl ApplicationHandler for PhosphorApp {
                                     }
                                 }
                             }
+                            if looping.is_some() || speed.is_some() {
+                                app.preset_store.mark_dirty();
+                            }
                         }
                     }
 
@@ -1795,6 +1804,7 @@ impl ApplicationHandler for PhosphorApp {
                                                 ps.has_aux_data = true;
                                                 ps.image_source = crate::gpu::particle::ParticleImageSource::Static;
                                                 ps.video_path = None;
+                                                ps.static_image_path = Some(path.clone());
                                                 // Update emitter image name so UI selector reflects the change
                                                 let filename = std::path::Path::new(&path)
                                                     .file_name()

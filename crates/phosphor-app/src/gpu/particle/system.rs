@@ -168,6 +168,8 @@ pub struct ParticleSystem {
     pub sample_def: ImageSampleDef,
     /// Path to the video file (for preset save/load).
     pub video_path: Option<String>,
+    /// Path to the static image file (for preset save/load).
+    pub static_image_path: Option<String>,
     /// Cached aux data for the current static source (used as transition "from").
     pub current_aux: Vec<ParticleAux>,
 }
@@ -908,6 +910,7 @@ impl ParticleSystem {
                 scale: 1.0,
             }),
             video_path: None,
+            static_image_path: None,
             current_aux: Vec::new(),
         })
     }
@@ -1534,6 +1537,7 @@ impl ParticleSystem {
         self.current_aux = first_aux;
         self.has_aux_data = true;
         self.video_path = Some(path);
+        self.static_image_path = None;
         self.image_source = ParticleImageSource::Video {
             frames,
             delays_ms,
@@ -1562,6 +1566,7 @@ impl ParticleSystem {
 
         self.has_aux_data = true;
         self.video_path = None;
+        self.static_image_path = None;
         let _ = queue; // used for API consistency
         self.image_source = ParticleImageSource::Webcam { width, height };
     }

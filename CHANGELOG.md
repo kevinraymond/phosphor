@@ -5,6 +5,11 @@
 
 ## Unreleased
 
+### Preset: Particle Image Save/Restore (Fix)
+- **Particle image path now saved in presets**: selecting a different particle image (e.g., skull → phoenix) and updating the preset persists the choice across preset loads
+- **Mark dirty on particle/obstacle changes**: changing particle image, video source, webcam source, video transport settings, or obstacle settings now marks the preset as dirty so the Update button appears
+- **Backward compatible**: old presets without `particle_image_path` load normally (default image from .pfx)
+
 ### Particle Quality Setting (New)
 - **Global quality multiplier**: Low (0.25x), Medium (0.5x), High (1x), Ultra (2x), Max (4x) — scales both `max_count` and `emit_rate` proportionally so fill time stays consistent
 - **Default: High (1x)** — no change for existing users; backward-compatible with old settings.json files
