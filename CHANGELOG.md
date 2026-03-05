@@ -5,6 +5,11 @@
 
 ## Unreleased
 
+### UI
+- Add effect type indicators to effects panel: left color strip (purple SH / orange PS / teal FB), two-char badge, type legend, and footer breakdown count
+- Add `EffectType` enum (Shader, Particle, Feedback) with optional `effect_type` field in .pfx format — auto-detects from data when absent
+- Tag 5 feedback effects (Accretion, Array, Chaos, Mycelium, Turing) with explicit `"effect_type": "feedback"` in their .pfx files
+
 ### Fixes
 - Fix morph slider animating when auto-cycle mode is "Off" — transition progress now only advances when auto-cycling is active
 - Remove redundant image source UI (IMG badge, image selector dropdown, Load Image/Video/Webcam buttons) from particle panel — morph targets handle image loading

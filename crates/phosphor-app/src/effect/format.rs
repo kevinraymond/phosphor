@@ -5,6 +5,18 @@ use serde::{Deserialize, Serialize};
 use crate::gpu::particle::types::ParticleDef;
 use crate::params::ParamDef;
 
+/// Visual classification of an effect for the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EffectType {
+    /// Fragment shader only, no particles.
+    Shader,
+    /// Compute particles + background shader.
+    Particle,
+    /// Particles + accumulated-state feedback (trails, RD, N-body, etc.).
+    Feedback,
+}
+
 /// A render pass definition within a multi-pass effect.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PassDef {
@@ -121,12 +133,28 @@ pub struct PfxEffect {
     /// If true, effect is hidden from UI (not shown in effects panel or next/prev cycling).
     #[serde(default)]
     pub hidden: bool,
+    /// Explicit effect type override (shader/particle/feedback).
+    /// If absent, auto-detected: no particles → Shader, particles → Particle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_type: Option<EffectType>,
     /// Path to the .pfx file on disk (not serialized).
     #[serde(skip)]
     pub source_path: Option<PathBuf>,
 }
 
 impl PfxEffect {
+    /// Returns the effect type: explicit if set, otherwise auto-detected.
+    pub fn effect_type(&self) -> EffectType {
+        if let Some(et) = self.effect_type {
+            return et;
+        }
+        if self.particles.is_some() {
+            EffectType::Particle
+        } else {
+            EffectType::Shader
+        }
+    }
+
     /// Normalize: if `passes` is empty but `shader` is set, create a single-pass definition.
     /// Single-pass effects get feedback enabled by default (matches legacy behavior).
     pub fn normalized_passes(&self) -> Vec<PassDef> {
@@ -209,6 +237,7 @@ mod tests {
             particles: None,
             audio_mappings: vec![],
             hidden: false,
+            effect_type: None,
             source_path: None,
         };
         let passes = effect.normalized_passes();
@@ -232,6 +261,7 @@ mod tests {
             particles: None,
             audio_mappings: vec![],
             hidden: false,
+            effect_type: None,
             source_path: None,
         };
         assert!(effect.normalized_passes().is_empty());
@@ -257,6 +287,7 @@ mod tests {
             particles: None,
             audio_mappings: vec![],
             hidden: false,
+            effect_type: None,
             source_path: None,
         };
         let passes = effect.normalized_passes();
@@ -317,6 +348,7 @@ mod tests {
             particles: None,
             audio_mappings: vec![],
             hidden: false,
+            effect_type: None,
             source_path: None,
         }
     }

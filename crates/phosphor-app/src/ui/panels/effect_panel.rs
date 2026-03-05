@@ -1,10 +1,40 @@
-use egui::{Color32, CornerRadius, RichText, Stroke, Ui, Vec2};
+use egui::{Color32, CornerRadius, Rect, RichText, Stroke, Ui, Vec2};
 
+use crate::effect::format::{EffectType, PfxEffect};
 use crate::effect::loader::EffectLoader;
 use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
 const COLS: usize = 3;
+
+// Type colors — matched to audio panel frequency band hues
+const TYPE_COLOR_SHADER: Color32 = Color32::from_rgb(0x77, 0x66, 0xEE); // purple
+const TYPE_COLOR_PARTICLE: Color32 = Color32::from_rgb(0xFF, 0x88, 0x33); // orange
+const TYPE_COLOR_FEEDBACK: Color32 = Color32::from_rgb(0x33, 0xCC, 0xAA); // teal
+
+fn type_color(et: EffectType) -> Color32 {
+    match et {
+        EffectType::Shader => TYPE_COLOR_SHADER,
+        EffectType::Particle => TYPE_COLOR_PARTICLE,
+        EffectType::Feedback => TYPE_COLOR_FEEDBACK,
+    }
+}
+
+fn type_label(et: EffectType) -> &'static str {
+    match et {
+        EffectType::Shader => "SH",
+        EffectType::Particle => "PS",
+        EffectType::Feedback => "FB",
+    }
+}
+
+fn type_title(et: EffectType) -> &'static str {
+    match et {
+        EffectType::Shader => "Shader",
+        EffectType::Particle => "Particle + Shader",
+        EffectType::Feedback => "Feedback",
+    }
+}
 
 pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
     let tc = theme_colors(ui.ctx());
@@ -18,14 +48,17 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
         return;
     }
 
+    // Type legend
+    draw_type_legend(ui, &tc);
+
     // Split effects into built-in and user
-    let builtin: Vec<(usize, &crate::effect::format::PfxEffect)> = loader
+    let builtin: Vec<(usize, &PfxEffect)> = loader
         .effects
         .iter()
         .enumerate()
         .filter(|(_, e)| EffectLoader::is_builtin(e) && !e.hidden)
         .collect();
-    let user: Vec<(usize, &crate::effect::format::PfxEffect)> = loader
+    let user: Vec<(usize, &PfxEffect)> = loader
         .effects
         .iter()
         .enumerate()
@@ -60,7 +93,7 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
                 btn_height,
                 gap,
                 &tc,
-                true, // is_builtin_section
+                true,
                 pending_delete,
                 warning_color,
                 &mut new_pending,
@@ -90,7 +123,7 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
                 btn_height,
                 gap,
                 &tc,
-                false, // not builtin section
+                false,
                 pending_delete,
                 warning_color,
                 &mut new_pending,
@@ -146,12 +179,13 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
                     .data_mut(|d| d.insert_temp(egui::Id::new("copy_builtin_prompt"), true));
             }
         } else {
-            // "Edit Effect" for user effects
+            // "Edit Effect" for user effects — disabled when no effect selected
+            let can_edit = has_effect && !current_is_builtin;
             if ui
                 .add_enabled(
-                    has_effect,
+                    can_edit,
                     egui::Button::new(RichText::new("Edit Effect").size(SMALL_SIZE).color(
-                        if has_effect {
+                        if can_edit {
                             tc.text_primary
                         } else {
                             tc.text_secondary
@@ -187,12 +221,38 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
                 .data_mut(|d| d.insert_temp(egui::Id::new("new_effect_prompt"), true));
         }
     });
+
+    // Footer: type breakdown
+    draw_footer(ui, &builtin, &user, &tc);
 }
+
+// ── Type legend row ──────────────────────────────────────────────────
+
+fn draw_type_legend(ui: &mut Ui, tc: &crate::ui::theme::colors::ThemeColors) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
+        for et in [EffectType::Shader, EffectType::Particle, EffectType::Feedback] {
+            let color = type_color(et);
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(3.0, 10.0), egui::Sense::hover());
+            ui.painter().rect_filled(rect, 1.0, color);
+            ui.label(
+                RichText::new(type_title(et))
+                    .size(8.0)
+                    .color(tc.text_secondary),
+            );
+        }
+    });
+    ui.add_space(4.0);
+    ui.separator();
+    ui.add_space(2.0);
+}
+
+// ── Effect grid ──────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
 fn draw_effect_grid(
     ui: &mut Ui,
-    effects: &[(usize, &crate::effect::format::PfxEffect)],
+    effects: &[(usize, &PfxEffect)],
     loader: &EffectLoader,
     btn_height: f32,
     gap: f32,
@@ -203,7 +263,6 @@ fn draw_effect_grid(
     new_pending: &mut Option<(usize, f64)>,
 ) {
     let now = ui.input(|i| i.time);
-    // Calculate button width from the inner available width (after collapsing header indent)
     let available_width = ui.available_width();
     let total_gaps = (COLS - 1) as f32 * gap;
     let btn_width = ((available_width - total_gaps) / COLS as f32).max(40.0);
@@ -215,6 +274,9 @@ fn draw_effect_grid(
                 let is_current = loader.current_effect == Some(i);
                 let is_armed =
                     !is_builtin_section && pending_delete.map_or(false, |(idx, _)| idx == i);
+
+                let et = effect.effect_type();
+                let et_color = type_color(et);
 
                 let (fill, text_color, stroke) = if is_armed {
                     (warning_color, Color32::WHITE, Stroke::NONE)
@@ -238,47 +300,53 @@ fn draw_effect_grid(
                 .corner_radius(CornerRadius::same(4));
 
                 let response = ui.add_sized(Vec2::new(btn_width, btn_height), btn);
+                let rect = response.rect;
 
-                // Particle badge: scattered burst in top-right corner for effects with particles
-                if effect.particles.is_some() {
-                    let anchor = egui::pos2(response.rect.right() - 5.0, response.rect.top() + 5.0);
-                    let accent_50 = Color32::from_rgba_unmultiplied(
-                        tc.accent.r(),
-                        tc.accent.g(),
-                        tc.accent.b(),
-                        128,
-                    );
-                    let accent_35 = Color32::from_rgba_unmultiplied(
-                        tc.accent.r(),
-                        tc.accent.g(),
-                        tc.accent.b(),
-                        90,
-                    );
-                    let painter = ui.painter();
-                    // Center dot
-                    painter.circle_filled(anchor, 1.2, accent_50);
-                    // Surrounding scattered dots (slightly irregular offsets)
-                    painter.circle_filled(
-                        egui::pos2(anchor.x - 2.8, anchor.y - 0.5),
-                        0.9,
-                        accent_35,
-                    );
-                    painter.circle_filled(
-                        egui::pos2(anchor.x + 2.5, anchor.y + 0.8),
-                        1.0,
-                        accent_35,
-                    );
-                    painter.circle_filled(
-                        egui::pos2(anchor.x + 0.3, anchor.y - 2.7),
-                        0.8,
-                        accent_35,
-                    );
-                    painter.circle_filled(
-                        egui::pos2(anchor.x - 0.6, anchor.y + 2.6),
-                        0.9,
-                        accent_35,
-                    );
-                }
+                // Left type color strip (3px)
+                let strip_rect = Rect::from_min_size(
+                    rect.left_top(),
+                    Vec2::new(3.0, rect.height()),
+                );
+                let strip_alpha = if is_current || is_armed { 1.0 } else { 0.6 };
+                let strip_color = Color32::from_rgba_unmultiplied(
+                    et_color.r(),
+                    et_color.g(),
+                    et_color.b(),
+                    (255.0 * strip_alpha) as u8,
+                );
+                ui.painter().rect_filled(
+                    strip_rect,
+                    CornerRadius {
+                        nw: 4,
+                        sw: 4,
+                        ne: 0,
+                        se: 0,
+                    },
+                    strip_color,
+                );
+
+                // Two-char type badge at right edge
+                let badge_color = if is_armed {
+                    Color32::from_rgba_unmultiplied(255, 255, 255, 140)
+                } else if is_current {
+                    Color32::from_rgba_unmultiplied(255, 255, 255, 180)
+                } else {
+                    Color32::from_rgba_unmultiplied(
+                        et_color.r(),
+                        et_color.g(),
+                        et_color.b(),
+                        if is_current { 230 } else { 128 },
+                    )
+                };
+                let badge_pos =
+                    egui::pos2(rect.right() - 14.0, rect.center().y);
+                ui.painter().text(
+                    badge_pos,
+                    egui::Align2::LEFT_CENTER,
+                    type_label(et),
+                    egui::FontId::monospace(7.0),
+                    badge_color,
+                );
 
                 // Left click: load effect (also clears pending delete)
                 if response.clicked() && !is_current {
@@ -290,49 +358,71 @@ fn draw_effect_grid(
                 // Right click: two-stage delete for user effects only
                 if !is_builtin_section && response.secondary_clicked() {
                     if is_armed {
-                        // Second right-click: confirm delete
                         ui.ctx()
                             .data_mut(|d| d.insert_temp(egui::Id::new("delete_effect"), i));
                         *new_pending = None;
                     } else {
-                        // First right-click: arm for delete
                         *new_pending = Some((i, now));
                     }
                 }
 
-                // Hover text (includes particle count for particle effects)
+                // Hover text
                 let particle_suffix = effect
                     .particles
                     .as_ref()
                     .map(|p| format!(" [{}]", format_count_short(p.max_count)));
+                let type_suffix = format!(" ({})", type_title(et));
                 let hover_text = if is_armed {
                     "Right-click again to DELETE".to_string()
-                } else if is_builtin_section {
-                    let base = if effect.description.is_empty() {
-                        &effect.name
-                    } else {
-                        &effect.description
-                    };
-                    match &particle_suffix {
-                        Some(s) => format!("{base}{s}"),
-                        None => base.to_string(),
-                    }
                 } else {
                     let base = if effect.description.is_empty() {
                         &effect.name
                     } else {
                         &effect.description
                     };
-                    match &particle_suffix {
-                        Some(s) => format!("{base}{s} (right-click to delete)"),
-                        None => format!("{base} (right-click to delete)"),
+                    let mut text = base.to_string();
+                    if let Some(s) = &particle_suffix {
+                        text.push_str(s);
                     }
+                    text.push_str(&type_suffix);
+                    if !is_builtin_section {
+                        text.push_str(" — right-click to delete");
+                    }
+                    text
                 };
                 response.on_hover_text(hover_text);
             }
         });
     }
 }
+
+// ── Footer ───────────────────────────────────────────────────────────
+
+fn draw_footer(
+    ui: &mut Ui,
+    builtin: &[(usize, &PfxEffect)],
+    user: &[(usize, &PfxEffect)],
+    tc: &crate::ui::theme::colors::ThemeColors,
+) {
+    let all: Vec<&PfxEffect> = builtin
+        .iter()
+        .chain(user.iter())
+        .map(|(_, e)| *e)
+        .collect();
+    let sh = all.iter().filter(|e| e.effect_type() == EffectType::Shader).count();
+    let ps = all.iter().filter(|e| e.effect_type() == EffectType::Particle).count();
+    let fb = all.iter().filter(|e| e.effect_type() == EffectType::Feedback).count();
+
+    ui.add_space(4.0);
+    ui.separator();
+    ui.label(
+        RichText::new(format!("{sh} shader · {ps} particle · {fb} feedback"))
+            .size(7.0)
+            .color(tc.text_secondary),
+    );
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────
 
 fn truncate_name(name: &str, max_len: usize) -> String {
     if name.len() <= max_len {
