@@ -174,21 +174,7 @@ pub fn draw_panels(
                 });
 
                 // Presets section
-                let preset_badge = if preset_store.presets.is_empty() {
-                    None
-                } else {
-                    Some(format!("{}", preset_store.presets.len()))
-                };
-                widgets::section(
-                    ui,
-                    "sec_presets",
-                    "Presets",
-                    preset_badge.as_deref(),
-                    true,
-                    |ui| {
-                        preset_panel::draw_preset_panel(ui, preset_store);
-                    },
-                );
+                preset_panel::draw_preset_section(ui, preset_store);
 
                 // Scenes section (default collapsed)
                 if let Some(ref scene) = scene_info {

@@ -39,7 +39,7 @@ pub fn section(
         // Header row — always full width
         let header_response = ui.horizontal(|ui| {
             ui.set_min_width(full_width);
-            draw_section_arrow(ui, state.is_open());
+            draw_section_arrow(ui, state.is_open(), tc.text_secondary);
             ui.label(
                 RichText::new(title.to_uppercase())
                     .size(HEADING_SIZE)
@@ -73,8 +73,7 @@ pub fn section(
 }
 
 /// Draw a solid triangle indicator for collapsible sections.
-fn draw_section_arrow(ui: &mut Ui, is_open: bool) {
-    let tc = theme_colors(ui.ctx());
+pub(crate) fn draw_section_arrow(ui: &mut Ui, is_open: bool, color: Color32) {
     let size = HEADING_SIZE;
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
     let c = rect.center();
@@ -96,7 +95,7 @@ fn draw_section_arrow(ui: &mut Ui, is_open: bool) {
     };
     ui.painter().add(Shape::convex_polygon(
         points,
-        tc.text_secondary,
+        color,
         Stroke::NONE,
     ));
 }
