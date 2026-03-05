@@ -28,7 +28,10 @@ use super::capture::RingBuffer;
 pub fn wasapi_available() -> bool {
     static AVAILABLE: OnceLock<bool> = OnceLock::new();
     *AVAILABLE.get_or_init(|| unsafe {
-        if CoInitializeEx(None, COINIT_MULTITHREADED).is_err() {
+        let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+        // Accept S_OK, S_FALSE, and RPC_E_CHANGED_MODE (0x80010106)
+        let we_initialized = hr.is_ok();
+        if hr.is_err() && hr != windows::core::HRESULT(0x80010106u32 as i32) {
             return false;
         }
         let result: std::result::Result<IMMDeviceEnumerator, _> =
@@ -40,7 +43,9 @@ pub fn wasapi_available() -> bool {
         } else {
             false
         };
-        CoUninitialize();
+        if we_initialized {
+            CoUninitialize();
+        }
         available
     })
 }
@@ -101,17 +106,32 @@ fn query_device_info() -> Result<(String, u32, u16, u16, u16)> {
     }
 }
 
+/// Initialize COM, tolerating RPC_E_CHANGED_MODE (already initialized in another mode).
+/// Returns true if we initialized COM (and should call CoUninitialize), false if it was already init'd.
+fn com_init() -> Result<bool> {
+    unsafe {
+        let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+        if hr.is_ok() {
+            return Ok(true); // We initialized it
+        }
+        // RPC_E_CHANGED_MODE (0x80010106): COM already initialized with different mode — that's fine
+        if hr == windows::core::HRESULT(0x80010106u32 as i32) {
+            log::info!("COM already initialized (apartment-threaded), reusing");
+            return Ok(false); // Already initialized, don't uninitialize
+        }
+        hr.ok().map_err(|e| anyhow::anyhow!("COM init failed: {e}"))?;
+        Ok(true)
+    }
+}
+
 impl WasapiCapture {
     pub fn new() -> Result<Self> {
-        // Initialize COM on this thread to query device info
-        unsafe {
-            CoInitializeEx(None, COINIT_MULTITHREADED)
-                .ok()
-                .map_err(|e| anyhow::anyhow!("COM init failed: {e}"))?;
-        }
+        let we_initialized_com = com_init()?;
 
         let result = query_device_info();
-        unsafe { CoUninitialize() };
+        if we_initialized_com {
+            unsafe { CoUninitialize() };
+        }
         let (device_name, sample_rate, channels, bits_per_sample, block_align) = result?;
 
         let ring = Arc::new(RingBuffer::new());
