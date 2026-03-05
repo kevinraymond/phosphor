@@ -167,6 +167,9 @@ pub struct ParticleSystem {
     // Symbiosis (particle-life) force matrix state
     pub symbiosis_state: Option<super::symbiosis::SymbiosisState>,
 
+    // Morph (shape target morphing) state
+    pub morph_state: Option<super::morph::MorphState>,
+
     // Emission accumulator (fractional particles per frame)
     emit_accumulator: f32,
     pub emit_rate: f32,
@@ -312,7 +315,9 @@ impl ParticleSystem {
         // Auxiliary buffer (home positions for image decomposition)
         // Pre-allocate at max_particles size so updates can use write_buffer without
         // recreating the buffer or bind groups (enables per-frame video source updates).
-        let aux_size = (std::mem::size_of::<ParticleAux>() * max_particles as usize).max(16) as u64;
+        // Morph effects use 4x stride (4 targets per particle interleaved).
+        let aux_multiplier = if def.morph { super::morph::MORPH_MAX_TARGETS as usize } else { 1 };
+        let aux_size = (std::mem::size_of::<ParticleAux>() * max_particles as usize * aux_multiplier).max(16) as u64;
         let aux_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("particle-aux"),
             size: aux_size,
@@ -964,6 +969,11 @@ impl ParticleSystem {
             } else {
                 None
             },
+            morph_state: if def.morph {
+                Some(super::morph::MorphState::new())
+            } else {
+                None
+            },
             emit_accumulator: 0.0,
             emit_rate: def.emit_rate,
             burst_on_beat: def.burst_on_beat,
@@ -1145,6 +1155,16 @@ impl ParticleSystem {
 
         // Depth sort
         self.uniforms.depth_sort = u32::from(self.def.depth_sort);
+
+        // Morph uniforms
+        if let Some(ref morph) = self.morph_state {
+            morph.write_uniforms(
+                &mut self.uniforms.morph_progress,
+                &mut self.uniforms.morph_source,
+                &mut self.uniforms.morph_dest,
+                &mut self.uniforms.morph_flags,
+            );
+        }
 
         self.render_uniforms.resolution = resolution;
         self.render_uniforms.time = time;
@@ -1764,6 +1784,16 @@ impl ParticleSystem {
     /// Store current aux data (called after initial image load so transitions have a "from").
     pub fn store_current_aux(&mut self, aux: Vec<ParticleAux>) {
         self.current_aux = aux;
+    }
+
+    /// Upload morph targets and rebuild strided aux buffer.
+    pub fn upload_morph_targets(&mut self, device: &Device, queue: &Queue) {
+        if let Some(ref morph) = self.morph_state {
+            let strided = morph.build_strided_aux(self.max_particles);
+            if !strided.is_empty() {
+                self.upload_aux_data(device, queue, &strided);
+            }
+        }
     }
 
     /// Reset sprite, aux data, and compute shader to defaults.

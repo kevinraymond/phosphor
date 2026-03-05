@@ -1000,6 +1000,13 @@ impl App {
                         sym.update(dt, &audio);
                         ps.uniforms.force_matrix = sym.active_matrix();
                     }
+
+                    // Morph state management
+                    if let Some(ref mut morph) = ps.morph_state {
+                        // param(7) = style (0-1 maps to transition style 0-4)
+                        morph.transition_style = (p[7] * 4.0).round() as u32;
+                        morph.update(dt, audio.onset);
+                    }
                 }
             }
         }
@@ -1425,6 +1432,40 @@ impl App {
 
                 if particles.interaction {
                     log::info!("Spatial hash enabled for particle interaction");
+                }
+
+                // Morph target loading
+                if particles.morph {
+                    if let Some(ref targets) = particles.morph_targets {
+                        let assets = assets_dir();
+                        for (slot, target_def) in targets.iter().take(4).enumerate() {
+                            match crate::gpu::particle::morph::load_morph_target(
+                                target_def,
+                                particles.max_count,
+                                particles.initial_size,
+                                &assets,
+                            ) {
+                                Ok(data) => {
+                                    log::info!(
+                                        "Morph target {}: '{}' ({} particles)",
+                                        slot,
+                                        target_def.source,
+                                        data.len()
+                                    );
+                                    if let Some(ref mut morph) = ps.morph_state {
+                                        morph.load_target(slot as u32, data);
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Failed to load morph target {}: {e}",
+                                        target_def.source
+                                    );
+                                }
+                            }
+                        }
+                        ps.upload_morph_targets(&self.gpu.device, &self.gpu.queue);
+                    }
                 }
 
                 Some(ps)

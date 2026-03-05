@@ -2,6 +2,7 @@ pub mod compute_raster;
 pub mod emitter;
 pub mod flow_field;
 pub mod image_source;
+pub mod morph;
 pub mod obstacle;
 pub mod source_loader;
 pub mod spatial_hash;

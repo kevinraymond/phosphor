@@ -140,7 +140,13 @@ pub struct ParticleUniforms {
 
     // Force matrix for particle-life (symbiosis): 8x8 = 64 floats (array<vec4f, 16> on GPU)
     pub force_matrix: [f32; 64],
-    // Total = 784 bytes
+
+    // Morph (shape target morphing)
+    pub morph_progress: f32,
+    pub morph_source: u32,
+    pub morph_dest: u32,
+    pub morph_flags: u32, // bit 0 = transitioning, bits 1-3 = transition_style
+    // Total = 800 bytes
 }
 
 /// Obstacle collision mode.
@@ -481,6 +487,16 @@ fn default_one_u32() -> u32 {
     1
 }
 
+/// Morph target definition: specifies a target shape for particle morphing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MorphTargetDef {
+    /// Target source: "image:<path>", "geometry:<shape>", or "random"
+    pub source: String,
+    /// Optional color override
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
 /// .pfx particle definition (JSON).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParticleDef {
@@ -627,6 +643,13 @@ pub struct ParticleDef {
     /// Enable symbiosis (particle-life) force matrix management
     #[serde(default)]
     pub symbiosis: bool,
+
+    /// Enable morph (shape target morphing)
+    #[serde(default)]
+    pub morph: bool,
+    /// Morph target definitions (up to 4)
+    #[serde(default)]
+    pub morph_targets: Option<Vec<MorphTargetDef>>,
 }
 
 fn default_blend() -> String {
@@ -715,8 +738,8 @@ mod tests {
     }
 
     #[test]
-    fn particle_uniforms_size_784() {
-        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 784);
+    fn particle_uniforms_size_800() {
+        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 800);
     }
 
     #[test]

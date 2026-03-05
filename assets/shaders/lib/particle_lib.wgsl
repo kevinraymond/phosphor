@@ -105,6 +105,12 @@ struct ParticleUniforms {
 
     // Force matrix for particle-life (symbiosis): 8x8 = 64 floats
     force_matrix: array<vec4f, 16>,
+
+    // Morph (shape target morphing)
+    morph_progress: f32,
+    morph_source: u32,
+    morph_dest: u32,
+    morph_flags: u32,   // bit 0 = transitioning, bits 1-3 = transition_style
 }
 
 // Access effect param by index (mirrors fragment shader's param() function).
