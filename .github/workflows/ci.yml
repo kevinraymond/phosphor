@@ -89,9 +89,34 @@ jobs:
         run: cargo build --target ${{ matrix.target }}
       - name: Build (video feature)
         run: cargo build --target ${{ matrix.target }} --features video
-      - name: Build (webcam feature, Linux only)
-        if: runner.os == 'Linux'
+      - name: Build (webcam feature)
         run: cargo build --target ${{ matrix.target }} --features webcam
+      - name: Build (all features)
+        run: cargo build --target ${{ matrix.target }} --features "video,webcam,ndi"
+
+      - name: Upload binary (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phosphor-ci-${{ matrix.target }}
+          path: target/${{ matrix.target }}/debug/phosphor-app
+          retention-days: 7
+
+      - name: Upload binary (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phosphor-ci-${{ matrix.target }}
+          path: target/${{ matrix.target }}/debug/phosphor-app
+          retention-days: 7
+
+      - name: Upload binary (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phosphor-ci-${{ matrix.target }}
+          path: target/${{ matrix.target }}/debug/phosphor-app.exe
+          retention-days: 7
 
   tag-release:
     name: Tag release if version changed
