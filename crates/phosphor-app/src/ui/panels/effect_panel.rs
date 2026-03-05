@@ -145,62 +145,59 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
         ui.ctx().request_repaint();
     }
 
-    // Bottom buttons: Edit/Copy Shader + New
+    // Bottom buttons: Copy + Edit + New
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = gap;
 
-        let has_effect = loader.current_effect.is_some();
-        let current_is_builtin = loader
+        let current = loader
             .current_effect
-            .and_then(|i| loader.effects.get(i))
-            .map_or(false, EffectLoader::is_builtin);
+            .and_then(|i| loader.effects.get(i));
+        let can_copy = current.map_or(false, |e| !e.hidden);
+        let is_user = current.map_or(false, |e| !EffectLoader::is_builtin(e));
 
-        if current_is_builtin {
-            // "Copy Effect" for built-in effects
-            if ui
-                .add_enabled(
-                    has_effect,
-                    egui::Button::new(RichText::new("Copy Effect").size(SMALL_SIZE).color(
-                        if has_effect {
-                            tc.text_primary
-                        } else {
-                            tc.text_secondary
-                        },
-                    ))
-                    .fill(tc.card_bg)
-                    .stroke(Stroke::new(1.0, tc.card_border))
-                    .corner_radius(CornerRadius::same(4)),
-                )
-                .on_hover_text("Copy built-in to a new editable effect")
-                .clicked()
-            {
-                ui.ctx()
-                    .data_mut(|d| d.insert_temp(egui::Id::new("copy_builtin_prompt"), true));
-            }
-        } else {
-            // "Edit Effect" for user effects — disabled when no effect selected
-            let can_edit = has_effect && !current_is_builtin;
-            if ui
-                .add_enabled(
-                    can_edit,
-                    egui::Button::new(RichText::new("Edit Effect").size(SMALL_SIZE).color(
-                        if can_edit {
-                            tc.text_primary
-                        } else {
-                            tc.text_secondary
-                        },
-                    ))
-                    .fill(tc.card_bg)
-                    .stroke(Stroke::new(1.0, tc.card_border))
-                    .corner_radius(CornerRadius::same(4)),
-                )
-                .on_hover_text("Open effect in editor")
-                .clicked()
-            {
-                ui.ctx()
-                    .data_mut(|d| d.insert_temp(egui::Id::new("open_shader_editor"), true));
-            }
+        // Copy Effect — enabled for any visible (non-hidden) effect
+        if ui
+            .add_enabled(
+                can_copy,
+                egui::Button::new(RichText::new("Copy").size(SMALL_SIZE).color(
+                    if can_copy {
+                        tc.text_primary
+                    } else {
+                        tc.text_secondary
+                    },
+                ))
+                .fill(tc.card_bg)
+                .stroke(Stroke::new(1.0, tc.card_border))
+                .corner_radius(CornerRadius::same(4)),
+            )
+            .on_hover_text("Copy to a new editable effect")
+            .clicked()
+        {
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(egui::Id::new("copy_builtin_prompt"), true));
+        }
+
+        // Edit Effect — only for user effects
+        if ui
+            .add_enabled(
+                is_user,
+                egui::Button::new(RichText::new("Edit").size(SMALL_SIZE).color(
+                    if is_user {
+                        tc.text_primary
+                    } else {
+                        tc.text_secondary
+                    },
+                ))
+                .fill(tc.card_bg)
+                .stroke(Stroke::new(1.0, tc.card_border))
+                .corner_radius(CornerRadius::same(4)),
+            )
+            .on_hover_text("Open effect in editor")
+            .clicked()
+        {
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(egui::Id::new("open_shader_editor"), true));
         }
 
         if ui

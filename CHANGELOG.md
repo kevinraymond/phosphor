@@ -7,6 +7,7 @@
 
 ### UI
 - Add effect type indicators to effects panel: left color strip (purple SH / orange PS / teal FB), two-char badge, type legend, and footer breakdown count
+- Show Copy and Edit buttons side by side — Copy enabled for visible built-ins only, Edit enabled for user effects only; fixes Copy being clickable on hidden Phosphor branding effect
 - Add `EffectType` enum (Shader, Particle, Feedback) with optional `effect_type` field in .pfx format — auto-detects from data when absent
 - Tag 5 feedback effects (Accretion, Array, Chaos, Mycelium, Turing) with explicit `"effect_type": "feedback"` in their .pfx files
 
