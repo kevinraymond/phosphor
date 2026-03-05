@@ -15,6 +15,7 @@
 - **Render mode field**: `"render_mode"` in .pfx files — `"billboard"` (default), `"compute"`, or `"auto"` (auto-selects compute for ≥100K particles with no sprites/trails and size ≤0.005)
 - **Fullscreen resolve**: render pass with hardware blend state (additive or alpha) reads decoded framebuffer with Reinhard tonemapping for additive mode
 - **COMPUTE badge**: cyan badge in particle panel when compute rasterization is active
+- **Tiled shared-memory accumulation**: 4-pass bin→prefix-sum→scatter→tile-raster pipeline for ≥50K particles. Accumulates in 4 KB workgroup shared memory per 16×16 tile (~100× faster atomics), then flushes to global framebuffer with plain stores. Direct draw path retained as fallback for low counts. Automatic path selection based on 1-frame-latent alive count
 
 ### Performance & Build Optimization
 - **Build profiles**: dev builds use opt-level 1 (deps at 2 for faster shader compilation), release uses thin LTO + codegen-units=1

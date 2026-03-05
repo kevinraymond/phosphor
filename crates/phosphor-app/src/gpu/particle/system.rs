@@ -796,6 +796,7 @@ impl ParticleSystem {
                 &color_buffers,
                 &alive_index_buffers,
                 &counter_buffer,
+                max_particles,
             ))
         } else {
             None
@@ -1285,11 +1286,15 @@ impl ParticleSystem {
             pass.dispatch_workgroups(1, 1, 1);
         }
 
-        // 4. Compute raster (if active): clear + draw to atomic framebuffer
+        // 4. Compute raster (if active): tiled path for high particle counts, direct otherwise
         if let Some(ref cr) = self.compute_raster {
             let output_idx = 1 - self.current;
-            cr.dispatch_clear(encoder);
-            cr.dispatch_draw(encoder, queue, output_idx, self.max_particles);
+            if cr.should_use_tiled(self.alive_count) {
+                cr.dispatch_tiled(encoder, queue, output_idx, self.max_particles);
+            } else {
+                cr.dispatch_clear(encoder);
+                cr.dispatch_draw(encoder, queue, output_idx, self.max_particles);
+            }
         }
 
         // 5. Copy counter buffer to staging for CPU readback (1-frame latency)
