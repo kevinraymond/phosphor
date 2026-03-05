@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use super::image_source;
+use super::text_source;
 use super::types::{ImageSampleDef, MorphTargetDef, ParticleAux};
 
 /// Maximum number of morph targets per effect.
@@ -53,6 +54,35 @@ impl MorphState {
     pub fn load_target(&mut self, slot: u32, data: Vec<ParticleAux>) {
         let slot = slot.min(MORPH_MAX_TARGETS - 1) as usize;
         self.target_aux[slot] = data;
+        self.recount_targets();
+    }
+
+    /// Remove a target slot, shifting higher slots down to fill the gap.
+    /// Returns the number of slots that were shifted.
+    pub fn remove_target(&mut self, slot: u32) -> u32 {
+        let slot = slot.min(MORPH_MAX_TARGETS - 1) as usize;
+        let max = MORPH_MAX_TARGETS as usize;
+        // Shift slots down
+        for i in slot..max - 1 {
+            self.target_aux.swap(i, i + 1);
+        }
+        // Clear the last slot (now a duplicate or already empty)
+        self.target_aux[max - 1] = Vec::new();
+        let old_count = self.target_count;
+        self.recount_targets();
+        // Reset morph indices to stay in bounds
+        if self.target_count > 0 {
+            self.source_index = self.source_index.min(self.target_count - 1);
+            self.dest_index = self.dest_index.min(self.target_count - 1);
+        } else {
+            self.source_index = 0;
+            self.dest_index = 0;
+        }
+        self.transitioning = false;
+        old_count.saturating_sub(self.target_count)
+    }
+
+    fn recount_targets(&mut self) {
         let mut count = 0u32;
         for i in 0..MORPH_MAX_TARGETS as usize {
             if !self.target_aux[i].is_empty() {
@@ -340,6 +370,24 @@ pub fn load_morph_target(
         return Ok(generate_geometry(shape, max_particles, particle_size));
     }
 
+    if let Some(text) = def.source.strip_prefix("text:") {
+        let data = text_source::render_text_to_particles(text, max_particles, particle_size);
+        return if data.is_empty() {
+            Err(format!("Text '{}' produced no particles", text))
+        } else {
+            Ok(data)
+        };
+    }
+
+    if def.source == "snapshot" {
+        // Snapshot targets are runtime-only — can't load from .pfx
+        return Err("Snapshot targets are runtime-only".to_string());
+    }
+
+    if def.source.starts_with("video:") {
+        return Err("Video targets must be loaded via load_video_morph_targets()".to_string());
+    }
+
     if let Some(image_name) = def.source.strip_prefix("image:") {
         let image_path = assets_dir.join("images").join(image_name);
         let sample_def = ImageSampleDef {
@@ -351,6 +399,52 @@ pub fn load_morph_target(
     }
 
     Err(format!("Unknown morph target source: {}", def.source))
+}
+
+/// Load evenly-spaced frames from a decoded video into morph target slots.
+/// Returns a Vec of (frame_index_label, particle_data) for each extracted frame.
+pub fn load_video_morph_targets(
+    frames: &[crate::media::types::DecodedFrame],
+    available_slots: u32,
+    max_particles: u32,
+    path: &str,
+) -> Vec<(String, Vec<ParticleAux>)> {
+    if frames.is_empty() || available_slots == 0 {
+        return Vec::new();
+    }
+
+    let num_frames = (available_slots as usize).min(MORPH_MAX_TARGETS as usize).min(frames.len());
+    let sample_def = ImageSampleDef {
+        mode: "grid".to_string(),
+        threshold: 0.1,
+        scale: 1.0,
+    };
+
+    let filename = std::path::Path::new(path)
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| "video".to_string());
+
+    let mut results = Vec::new();
+    for i in 0..num_frames {
+        let frame_idx = if num_frames == 1 {
+            0
+        } else {
+            i * (frames.len() - 1) / (num_frames - 1)
+        };
+        let frame = &frames[frame_idx];
+        let data = image_source::sample_rgba_buffer(
+            &frame.data,
+            frame.width,
+            frame.height,
+            &sample_def,
+            max_particles,
+        );
+        let label = format!("video:{}:f{}", filename, frame_idx);
+        results.push((label, data));
+    }
+
+    results
 }
 
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {

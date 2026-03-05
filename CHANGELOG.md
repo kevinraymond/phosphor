@@ -14,6 +14,9 @@
 - **Strided aux buffer**: 4x normal aux size interleaves target data (32MB at 500K particles), no bind group changes
 - **ParticleUniforms extended**: 4 new fields (morph_progress, morph_source, morph_dest, morph_flags) — 784→800 bytes, existing effects unaffected
 - **Morph UI controls**: target slot display with click-to-morph buttons, transition progress bar, auto-cycle mode (Off/On Beat/Timed), hold duration slider, transition style dropdown, runtime image and geometry loading into morph slots
+- **Text morph targets**: type any string in the morph panel and particles form the letters — uses fontdue to rasterize Inter-Bold glyphs into a bitmap, then samples through the standard image pipeline. Supports `"text:HELLO"` in .pfx files
+- **Video frame morph targets**: click "+ Video" to load a video file — evenly-spaced frames fill available morph slots (up to 4), cycling between different video frames on beat
+- **Snapshot morph targets**: click "Snapshot" to freeze current particle positions into a new morph target — GPU readback captures alive particles as a reusable shape
 
 ### WBOIT (Weighted Blended Order-Independent Transparency)
 - **Order-independent transparency**: new `"blend": "wboit"` mode approximates correct alpha compositing in a single unsorted pass — no back-to-front sort needed

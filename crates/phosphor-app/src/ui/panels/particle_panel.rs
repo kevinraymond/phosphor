@@ -342,29 +342,18 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
 
     // Morph section
     if info.has_morph {
+        let morph_purple = egui::Color32::from_rgb(0xC0, 0x80, 0xE0);
+        let morph_active = egui::Color32::from_rgb(0x80, 0x50, 0xA0);
+        let morph_dest = egui::Color32::from_rgb(0x60, 0x40, 0x80);
+
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            feature_badge(
-                ui,
-                "MORPH",
-                egui::Color32::from_rgb(0xC0, 0x80, 0xE0),
-            );
+            feature_badge(ui, "MORPH", morph_purple);
             if info.morph_transitioning {
                 ui.label(
-                    RichText::new(format!(
-                        "{} -> {} ({:.0}%)",
-                        info.morph_source_index,
-                        info.morph_dest_index,
-                        info.morph_progress * 100.0
-                    ))
-                    .size(SMALL_SIZE)
-                    .color(tc.accent),
-                );
-            } else {
-                ui.label(
-                    RichText::new(format!("target {}", info.morph_dest_index))
+                    RichText::new(format!("{:.0}%", info.morph_progress * 100.0))
                         .size(SMALL_SIZE)
-                        .color(tc.text_secondary),
+                        .color(tc.accent),
                 );
             }
         });
@@ -380,135 +369,201 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
         if info.morph_transitioning {
             let mut fill_rect = rect;
             fill_rect.set_right(rect.left() + rect.width() * info.morph_progress.min(1.0));
-            painter.rect_filled(
-                fill_rect,
-                2.0,
-                egui::Color32::from_rgb(0xC0, 0x80, 0xE0),
-            );
+            painter.rect_filled(fill_rect, 2.0, morph_purple);
         }
 
         ui.add_space(4.0);
 
-        // Target buttons — click to morph to that target
+        // --- Target slot grid ---
+        // Track which slot is selected for replacement (persisted across frames)
+        let sel_id = egui::Id::new("morph_selected_slot");
+        let selected_slot: Option<u32> = ui.ctx().data(|d| d.get_temp(sel_id));
+
+        // 4 fixed slots in a row: click to morph, right-click or select to replace
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            for i in 0..info.morph_target_count {
-                let label = info
-                    .morph_target_labels
-                    .get(i as usize)
-                    .cloned()
-                    .unwrap_or_else(|| format!("{}", i));
-                let is_current = !info.morph_transitioning && i == info.morph_dest_index;
-                let is_dest = info.morph_transitioning && i == info.morph_dest_index;
-                let btn = if is_current {
+            ui.spacing_mut().item_spacing.x = 3.0;
+            for i in 0..4u32 {
+                let has_target = i < info.morph_target_count;
+                let label = if has_target {
+                    info.morph_target_labels
+                        .get(i as usize)
+                        .cloned()
+                        .unwrap_or_else(|| format!("{}", i))
+                } else {
+                    "empty".to_string()
+                };
+                let is_current = has_target && !info.morph_transitioning && i == info.morph_dest_index;
+                let is_morphing_to = has_target && info.morph_transitioning && i == info.morph_dest_index;
+                let is_selected = selected_slot == Some(i);
+
+                let btn = if is_selected {
                     egui::Button::new(
-                        RichText::new(&label)
-                            .size(SMALL_SIZE)
-                            .color(egui::Color32::WHITE),
+                        RichText::new(&label).size(SMALL_SIZE).color(egui::Color32::WHITE),
                     )
-                    .fill(egui::Color32::from_rgb(0x80, 0x50, 0xA0))
-                } else if is_dest {
+                    .fill(egui::Color32::from_rgb(0xA0, 0x60, 0x30))
+                } else if is_current {
                     egui::Button::new(
-                        RichText::new(&label)
-                            .size(SMALL_SIZE)
-                            .color(egui::Color32::WHITE),
+                        RichText::new(&label).size(SMALL_SIZE).color(egui::Color32::WHITE),
                     )
-                    .fill(egui::Color32::from_rgb(0x60, 0x40, 0x80))
+                    .fill(morph_active)
+                } else if is_morphing_to {
+                    egui::Button::new(
+                        RichText::new(&label).size(SMALL_SIZE).color(egui::Color32::WHITE),
+                    )
+                    .fill(morph_dest)
+                } else if !has_target {
+                    egui::Button::new(
+                        RichText::new(&label).size(SMALL_SIZE).color(tc.text_secondary.gamma_multiply(0.5)),
+                    )
                 } else {
                     egui::Button::new(RichText::new(&label).size(SMALL_SIZE))
                 };
-                if ui.add(btn.min_size(egui::vec2(0.0, 22.0))).clicked() {
-                    ui.ctx().data_mut(|d| {
-                        d.insert_temp(egui::Id::new("morph_trigger_target"), i);
-                    });
+
+                let resp = ui.add(btn.min_size(egui::vec2(0.0, 22.0)));
+
+                if resp.clicked() && has_target {
+                    if is_selected {
+                        // Deselect
+                        ui.ctx().data_mut(|d| d.remove_temp::<u32>(sel_id));
+                    } else {
+                        // Morph to this target
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new("morph_trigger_target"), i);
+                        });
+                    }
+                }
+                if resp.secondary_clicked() {
+                    // Toggle select for replacement
+                    if is_selected {
+                        ui.ctx().data_mut(|d| d.remove_temp::<u32>(sel_id));
+                    } else {
+                        ui.ctx().data_mut(|d| d.insert_temp(sel_id, i));
+                    }
+                }
+                if !has_target && resp.clicked() {
+                    // Select empty slot
+                    ui.ctx().data_mut(|d| d.insert_temp(sel_id, i));
                 }
             }
         });
 
+        // Show slot action hint
+        if let Some(slot) = selected_slot {
+            let slot_label = if slot < info.morph_target_count {
+                info.morph_target_labels
+                    .get(slot as usize)
+                    .cloned()
+                    .unwrap_or_else(|| format!("{}", slot))
+            } else {
+                "empty".to_string()
+            };
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!("Slot {} [{}]", slot, slot_label))
+                        .size(SMALL_SIZE)
+                        .color(egui::Color32::from_rgb(0xA0, 0x60, 0x30)),
+                );
+                if slot < info.morph_target_count {
+                    if ui
+                        .add(egui::Button::new(
+                            RichText::new("Clear").size(SMALL_SIZE - 1.0),
+                        ).min_size(egui::vec2(0.0, 18.0)))
+                        .clicked()
+                    {
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new("morph_clear_slot"), slot);
+                            d.remove_temp::<u32>(sel_id);
+                        });
+                    }
+                }
+            });
+        }
+
+        // --- Manual blend slider ---
+        if info.morph_target_count >= 2 {
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                // Source/dest selectors
+                let src_label = info.morph_target_labels
+                    .get(info.morph_source_index as usize)
+                    .cloned()
+                    .unwrap_or_else(|| format!("{}", info.morph_source_index));
+                let dst_label = info.morph_target_labels
+                    .get(info.morph_dest_index as usize)
+                    .cloned()
+                    .unwrap_or_else(|| format!("{}", info.morph_dest_index));
+
+                // Source picker
+                let mut src = info.morph_source_index;
+                egui::ComboBox::from_id_salt("morph_blend_src")
+                    .selected_text(&src_label)
+                    .width(50.0)
+                    .show_ui(ui, |ui| {
+                        for i in 0..info.morph_target_count {
+                            let label = info.morph_target_labels
+                                .get(i as usize)
+                                .cloned()
+                                .unwrap_or_else(|| format!("{}", i));
+                            if ui.selectable_label(src == i, &label).clicked() {
+                                src = i;
+                            }
+                        }
+                    });
+
+                // Progress slider
+                let mut progress = info.morph_progress;
+                let r = ui.add(
+                    egui::Slider::new(&mut progress, 0.0..=1.0)
+                        .show_value(false)
+                        .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
+                );
+
+                // Dest picker
+                let mut dst = info.morph_dest_index;
+                egui::ComboBox::from_id_salt("morph_blend_dst")
+                    .selected_text(&dst_label)
+                    .width(50.0)
+                    .show_ui(ui, |ui| {
+                        for i in 0..info.morph_target_count {
+                            let label = info.morph_target_labels
+                                .get(i as usize)
+                                .cloned()
+                                .unwrap_or_else(|| format!("{}", i));
+                            if ui.selectable_label(dst == i, &label).clicked() {
+                                dst = i;
+                            }
+                        }
+                    });
+
+                // Emit changes
+                if r.dragged() || r.changed() {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("morph_manual_blend"), progress);
+                    });
+                }
+                if src != info.morph_source_index {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("morph_set_source"), src);
+                    });
+                }
+                if dst != info.morph_dest_index {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("morph_trigger_target"), dst);
+                    });
+                }
+            });
+        }
+
         ui.add_space(2.0);
 
-        // Auto-cycle mode
+        // --- Add targets row ---
+        // The selected slot (or next empty, or last) is the destination
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new("Cycle")
-                    .size(SMALL_SIZE)
-                    .color(tc.text_secondary),
-            );
-            let cycle_labels = ["Off", "On Beat", "Timed"];
-            let mut cycle_mode = info.morph_auto_cycle;
-            egui::ComboBox::from_id_salt("morph_auto_cycle")
-                .selected_text(cycle_labels[cycle_mode.min(2) as usize])
-                .width(80.0)
-                .show_ui(ui, |ui| {
-                    for (i, label) in cycle_labels.iter().enumerate() {
-                        if ui
-                            .selectable_label(cycle_mode == i as u32, *label)
-                            .clicked()
-                        {
-                            cycle_mode = i as u32;
-                            ui.ctx().data_mut(|d| {
-                                d.insert_temp(egui::Id::new("morph_auto_cycle"), cycle_mode);
-                            });
-                        }
-                    }
-                });
-        });
-
-        // Hold duration slider
-        let mut hold = info.morph_hold_duration;
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new("Hold")
-                    .size(SMALL_SIZE)
-                    .color(tc.text_secondary),
-            );
-            let r = ui.add(
-                egui::Slider::new(&mut hold, 0.0..=8.0)
-                    .show_value(true)
-                    .custom_formatter(|v, _| format!("{:.1}s", v)),
-            );
-            if r.changed() {
-                ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::new("morph_hold_duration"), hold);
-                });
-            }
-        });
-
-        // Transition style
-        let style_labels = ["Spring", "Explode", "Flow", "Cascade", "Direct"];
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new("Style")
-                    .size(SMALL_SIZE)
-                    .color(tc.text_secondary),
-            );
-            let mut style = info.morph_transition_style;
-            egui::ComboBox::from_id_salt("morph_style")
-                .selected_text(style_labels[style.min(4) as usize])
-                .width(80.0)
-                .show_ui(ui, |ui| {
-                    for (i, label) in style_labels.iter().enumerate() {
-                        if ui
-                            .selectable_label(style == i as u32, *label)
-                            .clicked()
-                        {
-                            style = i as u32;
-                            ui.ctx().data_mut(|d| {
-                                d.insert_temp(egui::Id::new("morph_style"), style);
-                            });
-                        }
-                    }
-                });
-        });
-
-        // Load image into slot
-        ui.add_space(2.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.spacing_mut().item_spacing.x = 3.0;
             if ui
                 .add(
-                    egui::Button::new(RichText::new("+ Image").size(SMALL_SIZE))
-                        .min_size(egui::vec2(0.0, 22.0)),
+                    egui::Button::new(RichText::new("Image").size(SMALL_SIZE - 1.0))
+                        .min_size(egui::vec2(0.0, 20.0)),
                 )
                 .clicked()
             {
@@ -516,12 +571,12 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                     d.insert_temp(egui::Id::new("morph_load_image"), true);
                 });
             }
-            // Geometry shape dropdown for adding
+            // Geometry dropdown
             let geo_shapes = ["circle", "ring", "grid", "spiral", "heart", "star"];
             let mut selected_geo = String::new();
             egui::ComboBox::from_id_salt("morph_add_geometry")
-                .selected_text("+ Geometry")
-                .width(90.0)
+                .selected_text("Shape")
+                .width(62.0)
                 .show_ui(ui, |ui| {
                     for shape in &geo_shapes {
                         if ui.selectable_label(false, *shape).clicked() {
@@ -534,6 +589,118 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                     d.insert_temp(egui::Id::new("morph_add_geometry"), selected_geo);
                 });
             }
+            if ui
+                .add(
+                    egui::Button::new(RichText::new("Snap").size(SMALL_SIZE - 1.0))
+                        .min_size(egui::vec2(0.0, 20.0)),
+                )
+                .clicked()
+            {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new("morph_snapshot"), true);
+                });
+            }
+            #[cfg(feature = "video")]
+            if ui
+                .add(
+                    egui::Button::new(RichText::new("Video").size(SMALL_SIZE - 1.0))
+                        .min_size(egui::vec2(0.0, 20.0)),
+                )
+                .clicked()
+            {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new("morph_load_video"), true);
+                });
+            }
+        });
+
+        // Text input
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
+            let text_id = egui::Id::new("morph_text_input_buf");
+            let mut text_buf: String = ui.ctx().data_mut(|d| {
+                d.get_persisted_mut_or_default::<String>(text_id).clone()
+            });
+            let te = ui.add(
+                egui::TextEdit::singleline(&mut text_buf)
+                    .desired_width(ui.available_width() - 42.0)
+                    .hint_text("Text...")
+                    .font(egui::TextStyle::Small),
+            );
+            if te.changed() {
+                let buf = text_buf.clone();
+                ui.ctx().data_mut(|d| {
+                    *d.get_persisted_mut_or_default::<String>(text_id) = buf;
+                });
+            }
+            let enter_pressed = te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let add_clicked = ui
+                .add(
+                    egui::Button::new(RichText::new("Add").size(SMALL_SIZE - 1.0))
+                        .min_size(egui::vec2(0.0, 20.0)),
+                )
+                .clicked();
+            if (add_clicked || enter_pressed) && !text_buf.is_empty() {
+                let text = text_buf.clone();
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new("morph_add_text"), text);
+                    *d.get_persisted_mut_or_default::<String>(text_id) = String::new();
+                });
+            }
+        });
+
+        ui.add_space(2.0);
+
+        // --- Settings (compact) ---
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            // Style
+            let style_labels = ["Spring", "Explode", "Flow", "Cascade", "Direct"];
+            let mut style = info.morph_transition_style;
+            egui::ComboBox::from_id_salt("morph_style")
+                .selected_text(style_labels[style.min(4) as usize])
+                .width(70.0)
+                .show_ui(ui, |ui| {
+                    for (i, label) in style_labels.iter().enumerate() {
+                        if ui.selectable_label(style == i as u32, *label).clicked() {
+                            style = i as u32;
+                            ui.ctx().data_mut(|d| {
+                                d.insert_temp(egui::Id::new("morph_style"), style);
+                            });
+                        }
+                    }
+                });
+            // Cycle
+            let cycle_labels = ["Off", "Beat", "Timed"];
+            let mut cycle_mode = info.morph_auto_cycle;
+            egui::ComboBox::from_id_salt("morph_auto_cycle")
+                .selected_text(cycle_labels[cycle_mode.min(2) as usize])
+                .width(55.0)
+                .show_ui(ui, |ui| {
+                    for (i, label) in cycle_labels.iter().enumerate() {
+                        if ui.selectable_label(cycle_mode == i as u32, *label).clicked() {
+                            cycle_mode = i as u32;
+                            ui.ctx().data_mut(|d| {
+                                d.insert_temp(egui::Id::new("morph_auto_cycle"), cycle_mode);
+                            });
+                        }
+                    }
+                });
+            // Hold
+            let mut hold = info.morph_hold_duration;
+            let r = ui.add(
+                egui::DragValue::new(&mut hold)
+                    .range(0.0..=8.0)
+                    .speed(0.05)
+                    .suffix("s")
+                    .custom_formatter(|v, _| format!("{:.1}s", v)),
+            );
+            if r.changed() {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new("morph_hold_duration"), hold);
+                });
+            }
+            r.on_hover_text("Hold duration");
         });
 
         ui.add_space(4.0);

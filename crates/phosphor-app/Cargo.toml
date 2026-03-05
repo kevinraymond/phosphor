@@ -71,6 +71,7 @@ flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 rustc-hash = "2.1.1"
+fontdue = "0.9"
 wgpu-profiler = { version = "0.25", optional = true }
 
 [dev-dependencies]

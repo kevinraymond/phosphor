@@ -227,13 +227,13 @@ impl ParticleSystem {
                 device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(label_a),
                     size: component_size,
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
                     mapped_at_creation: false,
                 }),
                 device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(label_b),
                     size: component_size,
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
                     mapped_at_creation: false,
                 }),
             ]
@@ -1794,6 +1794,83 @@ impl ParticleSystem {
                 self.upload_aux_data(device, queue, &strided);
             }
         }
+    }
+
+    /// Synchronous GPU readback of current particle positions + colors.
+    /// Creates temporary staging buffers, copies, polls to completion, and returns
+    /// alive particles as `Vec<ParticleAux>` suitable for loading into a morph slot.
+    pub fn snapshot_particles(&self, device: &Device, queue: &Queue) -> Vec<ParticleAux> {
+        let buf_size = self.max_particles as u64 * 16; // vec4f = 16 bytes
+
+        let pos_staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("snapshot-pos-staging"),
+            size: buf_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let color_staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("snapshot-color-staging"),
+            size: buf_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("snapshot-copy"),
+        });
+        encoder.copy_buffer_to_buffer(
+            &self.pos_life_buffers[self.current],
+            0,
+            &pos_staging,
+            0,
+            buf_size,
+        );
+        encoder.copy_buffer_to_buffer(
+            &self.color_buffers[self.current],
+            0,
+            &color_staging,
+            0,
+            buf_size,
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        // Block until GPU completes copy
+        let _ = device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+
+        // Map both staging buffers
+        pos_staging
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, |_| {});
+        color_staging
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, |_| {});
+        let _ = device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+
+        let pos_mapped = pos_staging.slice(..).get_mapped_range();
+        let color_mapped = color_staging.slice(..).get_mapped_range();
+        let pos_data: &[f32] = bytemuck::cast_slice(&pos_mapped);
+        let color_data: &[f32] = bytemuck::cast_slice(&color_mapped);
+
+        let mut result = Vec::new();
+        for i in 0..self.max_particles as usize {
+            let life = pos_data[i * 4 + 3];
+            if life > 0.0 {
+                let x = pos_data[i * 4];
+                let y = pos_data[i * 4 + 1];
+                // Pack color from float RGBA to u8 RGBA packed into f32
+                let r = (color_data[i * 4].clamp(0.0, 1.0) * 255.0) as u8;
+                let g = (color_data[i * 4 + 1].clamp(0.0, 1.0) * 255.0) as u8;
+                let b = (color_data[i * 4 + 2].clamp(0.0, 1.0) * 255.0) as u8;
+                let a = (color_data[i * 4 + 3].clamp(0.0, 1.0) * 255.0) as u8;
+                let packed = (r as u32) | ((g as u32) << 8) | ((b as u32) << 16) | ((a as u32) << 24);
+                result.push(ParticleAux {
+                    home: [x, y, f32::from_bits(packed), 0.0],
+                });
+            }
+        }
+
+        log::info!("Snapshot captured {} alive particles", result.len());
+        result
     }
 
     /// Reset sprite, aux data, and compute shader to defaults.
