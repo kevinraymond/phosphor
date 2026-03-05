@@ -1,0 +1,38 @@
+name: Effect / Shader Request
+description: Request a new visual effect
+labels: ["effect"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Effect Description
+      description: What should the effect look like? Describe the visual style.
+      placeholder: |
+        A particle-based aurora borealis with flowing curtains of light
+        that shift between green, blue, and purple.
+    validations:
+      required: true
+
+  - type: textarea
+    id: audio_reactivity
+    attributes:
+      label: Audio Reactivity
+      description: How should it respond to audio? Which frequencies, beats, or features?
+      placeholder: |
+        Bass hits cause the curtains to ripple outward.
+        High frequencies add shimmer to the edges.
+
+  - type: textarea
+    id: references
+    attributes:
+      label: Reference Material
+      description: Links to videos, images, or examples from other VJ software.
+      placeholder: |
+        - https://www.youtube.com/watch?v=...
+        - Similar to "Aurora" in Resolume
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other details, parameter ideas, or performance requirements.
