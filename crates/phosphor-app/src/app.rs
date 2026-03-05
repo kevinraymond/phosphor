@@ -1003,9 +1003,7 @@ impl App {
 
                     // Morph state management
                     if let Some(ref mut morph) = ps.morph_state {
-                        // param(7) = style (0-1 maps to transition style 0-4)
-                        morph.transition_style = (p[7] * 4.0).round() as u32;
-                        morph.update(dt, audio.onset);
+                        morph.update(dt, audio.beat);
                     }
                 }
             }

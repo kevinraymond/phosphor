@@ -275,6 +275,36 @@ impl ApplicationHandler for PhosphorApp {
                                 source_loading: false, // set below
                                 source_loading_name: String::new(),
                                 builtin_images: Vec::new(), // set below
+                                has_morph: ps.morph_state.is_some(),
+                                morph_target_count: ps.morph_state.as_ref().map_or(0, |m| m.target_count),
+                                morph_source_index: ps.morph_state.as_ref().map_or(0, |m| m.source_index),
+                                morph_dest_index: ps.morph_state.as_ref().map_or(0, |m| m.dest_index),
+                                morph_progress: ps.morph_state.as_ref().map_or(0.0, |m| m.progress),
+                                morph_transitioning: ps.morph_state.as_ref().map_or(false, |m| m.transitioning),
+                                morph_transition_style: ps.morph_state.as_ref().map_or(0, |m| m.transition_style),
+                                morph_auto_cycle: ps.morph_state.as_ref().map_or(0, |m| {
+                                    match m.auto_cycle {
+                                        crate::gpu::particle::morph::AutoCycle::Off => 0,
+                                        crate::gpu::particle::morph::AutoCycle::OnBeat => 1,
+                                        crate::gpu::particle::morph::AutoCycle::Timed(_) => 2,
+                                    }
+                                }),
+                                morph_hold_duration: ps.morph_state.as_ref().map_or(2.0, |m| m.hold_duration),
+                                morph_target_labels: ps.def.morph_targets.as_ref().map_or_else(Vec::new, |targets| {
+                                    targets.iter().map(|t| {
+                                        if t.source == "random" {
+                                            "random".to_string()
+                                        } else if let Some(shape) = t.source.strip_prefix("geometry:") {
+                                            shape.to_string()
+                                        } else if let Some(img) = t.source.strip_prefix("image:") {
+                                            let name = img.trim_end_matches(".png");
+                                            let name = name.strip_prefix("raster_").unwrap_or(name);
+                                            name.to_string()
+                                        } else {
+                                            t.source.clone()
+                                        }
+                                    }).collect()
+                                }),
                             }
                         });
                     // Overlay loader state + built-in images onto particle info
@@ -1769,8 +1799,96 @@ impl ApplicationHandler for PhosphorApp {
                         }
                     }
 
+                    // Morph controls
+                    {
+                        let morph_trigger: Option<u32> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_trigger_target")));
+                        let morph_cycle: Option<u32> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_auto_cycle")));
+                        let morph_hold: Option<f32> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_hold_duration")));
+                        let morph_style: Option<u32> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_style")));
+                        let morph_load_img: Option<bool> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_load_image")));
+                        let morph_add_geo: Option<String> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_add_geometry")));
+
+                        if morph_trigger.is_some()
+                            || morph_cycle.is_some()
+                            || morph_hold.is_some()
+                            || morph_style.is_some()
+                            || morph_load_img.is_some()
+                            || morph_add_geo.is_some()
+                        {
+                            if let Some(layer) = app.layer_stack.active_mut() {
+                                if let Some(effect) = layer.as_effect_mut() {
+                                    if let Some(ps) =
+                                        effect.pass_executor.particle_system.as_mut()
+                                    {
+                                        if let Some(ref mut morph) = ps.morph_state {
+                                            if let Some(target) = morph_trigger {
+                                                morph.trigger_morph(target);
+                                            }
+                                            if let Some(mode) = morph_cycle {
+                                                morph.auto_cycle = match mode {
+                                                    0 => crate::gpu::particle::morph::AutoCycle::Off,
+                                                    1 => crate::gpu::particle::morph::AutoCycle::OnBeat,
+                                                    _ => crate::gpu::particle::morph::AutoCycle::Timed(4.0),
+                                                };
+                                            }
+                                            if let Some(hold) = morph_hold {
+                                                morph.hold_duration = hold;
+                                            }
+                                            if let Some(style) = morph_style {
+                                                morph.transition_style = style;
+                                            }
+                                            if let Some(shape) = morph_add_geo {
+                                                let slot = morph.target_count;
+                                                if slot < 4 {
+                                                    let data = crate::gpu::particle::morph::generate_geometry(
+                                                        &shape,
+                                                        ps.max_particles,
+                                                        ps.def.initial_size,
+                                                    );
+                                                    morph.load_target(slot, data);
+                                                    ps.upload_morph_targets(
+                                                        &app.gpu.device,
+                                                        &app.gpu.queue,
+                                                    );
+                                                    // Update pfx target labels
+                                                    if let Some(ref mut targets) = ps.def.morph_targets {
+                                                        targets.push(crate::gpu::particle::types::MorphTargetDef {
+                                                            source: format!("geometry:{}", shape),
+                                                            color: None,
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if morph_load_img.is_some() {
+                                            // Store a flag so we know to load into morph slot
+                                            ctx.data_mut(|d| {
+                                                d.insert_temp(
+                                                    egui::Id::new("morph_image_pending"),
+                                                    true,
+                                                );
+                                            });
+                                            app.particle_source_loader.open_image_dialog();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Drain background particle source loader results
                     if let Some(result) = app.particle_source_loader.try_recv() {
+                        // Check if this image was requested for a morph slot
+                        let morph_pending: Option<bool> = app
+                            .egui_overlay
+                            .context()
+                            .data_mut(|d| d.remove_temp(egui::Id::new("morph_image_pending")));
                         if let Some(layer) = app.layer_stack.active_mut() {
                             if let Some(effect) = layer.as_effect_mut() {
                                 if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
@@ -1786,7 +1904,33 @@ impl ApplicationHandler for PhosphorApp {
                                                 &ps.sample_def,
                                                 ps.max_particles,
                                             );
-                                            if !aux.is_empty() {
+                                            // Load into morph slot if pending, otherwise normal source
+                                            if morph_pending.is_some() {
+                                                if let Some(ref mut morph) = ps.morph_state {
+                                                    let slot = morph.target_count;
+                                                    if slot < 4 && !aux.is_empty() {
+                                                        morph.load_target(slot, aux);
+                                                        ps.upload_morph_targets(
+                                                            &app.gpu.device,
+                                                            &app.gpu.queue,
+                                                        );
+                                                        let filename = std::path::Path::new(&path)
+                                                            .file_name()
+                                                            .map(|f| f.to_string_lossy().to_string())
+                                                            .unwrap_or_default();
+                                                        if let Some(ref mut targets) = ps.def.morph_targets {
+                                                            targets.push(crate::gpu::particle::types::MorphTargetDef {
+                                                                source: format!("image:{}", filename),
+                                                                color: None,
+                                                            });
+                                                        }
+                                                        log::info!(
+                                                            "Loaded morph target image into slot {}: {} ({}x{})",
+                                                            slot, path, width, height
+                                                        );
+                                                    }
+                                                }
+                                            } else if !aux.is_empty() {
                                                 // Start transition from current aux
                                                 if !ps.current_aux.is_empty() {
                                                     ps.source_transition = Some(

@@ -45,7 +45,7 @@ impl MorphState {
             auto_cycle: AutoCycle::OnBeat,
             cycle_timer: 0.0,
             hold_timer: 0.0,
-            hold_duration: 2.0,
+            hold_duration: 1.5,
         }
     }
 
@@ -83,7 +83,8 @@ impl MorphState {
     }
 
     /// Advance progress and handle auto-cycle.
-    pub fn update(&mut self, dt: f32, onset: f32) {
+    /// `beat` is 1.0 on detected beats, 0.0 otherwise (discrete signal from beat tracker).
+    pub fn update(&mut self, dt: f32, beat: f32) {
         // Advance transition progress
         if self.transitioning {
             self.progress += dt / self.transition_duration;
@@ -105,7 +106,7 @@ impl MorphState {
         if !self.transitioning && !holding && self.target_count >= 2 {
             match self.auto_cycle {
                 AutoCycle::OnBeat => {
-                    if onset > 0.8 {
+                    if beat > 0.5 {
                         self.trigger_next();
                     }
                 }

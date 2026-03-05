@@ -8,11 +8,12 @@
 ### Morph Effect (New)
 - **Shape target morphing**: particles store home positions for up to 4 target shapes and morph between them on beat drops with spring physics and turbulence
 - **Multiple target types**: image files, geometry shapes (circle, ring, grid, spiral, heart, star), and random scatter — mixed freely across 4 slots
-- **5 transition styles**: Spring (default), Explode-reform, Flow (curl noise), Cascade (left-to-right wave), and Direct (pure lerp) — selectable via param slider
+- **5 transition styles**: Spring (default), Explode-reform, Flow (curl noise), Cascade (left-to-right wave), and Direct (pure lerp) — selectable via UI dropdown
 - **Per-particle stagger**: each particle transitions at a slightly different time for organic cascading motion
 - **Audio reactivity**: onset triggers morph to next target, bass drives spring vibration, mid adds turbulence during transition, brilliance creates scatter
 - **Strided aux buffer**: 4x normal aux size interleaves target data (32MB at 500K particles), no bind group changes
 - **ParticleUniforms extended**: 4 new fields (morph_progress, morph_source, morph_dest, morph_flags) — 784→800 bytes, existing effects unaffected
+- **Morph UI controls**: target slot display with click-to-morph buttons, transition progress bar, auto-cycle mode (Off/On Beat/Timed), hold duration slider, transition style dropdown, runtime image and geometry loading into morph slots
 
 ### WBOIT (Weighted Blended Order-Independent Transparency)
 - **Order-independent transparency**: new `"blend": "wboit"` mode approximates correct alpha compositing in a single unsorted pass — no back-to-front sort needed

@@ -39,6 +39,17 @@ pub struct ParticleInfo {
     pub source_loading_name: String,
     /// Built-in image names (e.g. "skull", "phoenix") available for quick select.
     pub builtin_images: Vec<String>,
+    // Morph state
+    pub has_morph: bool,
+    pub morph_target_count: u32,
+    pub morph_source_index: u32,
+    pub morph_dest_index: u32,
+    pub morph_progress: f32,
+    pub morph_transitioning: bool,
+    pub morph_transition_style: u32,
+    pub morph_auto_cycle: u32, // 0=Off, 1=OnBeat, 2=Timed
+    pub morph_hold_duration: f32,
+    pub morph_target_labels: Vec<String>,
 }
 
 pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
@@ -326,6 +337,205 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                 });
             }
         }
+        ui.add_space(4.0);
+    }
+
+    // Morph section
+    if info.has_morph {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            feature_badge(
+                ui,
+                "MORPH",
+                egui::Color32::from_rgb(0xC0, 0x80, 0xE0),
+            );
+            if info.morph_transitioning {
+                ui.label(
+                    RichText::new(format!(
+                        "{} -> {} ({:.0}%)",
+                        info.morph_source_index,
+                        info.morph_dest_index,
+                        info.morph_progress * 100.0
+                    ))
+                    .size(SMALL_SIZE)
+                    .color(tc.accent),
+                );
+            } else {
+                ui.label(
+                    RichText::new(format!("target {}", info.morph_dest_index))
+                        .size(SMALL_SIZE)
+                        .color(tc.text_secondary),
+                );
+            }
+        });
+
+        // Transition progress bar
+        let bar_height = 3.0;
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), bar_height),
+            egui::Sense::hover(),
+        );
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 2.0, tc.widget_bg);
+        if info.morph_transitioning {
+            let mut fill_rect = rect;
+            fill_rect.set_right(rect.left() + rect.width() * info.morph_progress.min(1.0));
+            painter.rect_filled(
+                fill_rect,
+                2.0,
+                egui::Color32::from_rgb(0xC0, 0x80, 0xE0),
+            );
+        }
+
+        ui.add_space(4.0);
+
+        // Target buttons — click to morph to that target
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for i in 0..info.morph_target_count {
+                let label = info
+                    .morph_target_labels
+                    .get(i as usize)
+                    .cloned()
+                    .unwrap_or_else(|| format!("{}", i));
+                let is_current = !info.morph_transitioning && i == info.morph_dest_index;
+                let is_dest = info.morph_transitioning && i == info.morph_dest_index;
+                let btn = if is_current {
+                    egui::Button::new(
+                        RichText::new(&label)
+                            .size(SMALL_SIZE)
+                            .color(egui::Color32::WHITE),
+                    )
+                    .fill(egui::Color32::from_rgb(0x80, 0x50, 0xA0))
+                } else if is_dest {
+                    egui::Button::new(
+                        RichText::new(&label)
+                            .size(SMALL_SIZE)
+                            .color(egui::Color32::WHITE),
+                    )
+                    .fill(egui::Color32::from_rgb(0x60, 0x40, 0x80))
+                } else {
+                    egui::Button::new(RichText::new(&label).size(SMALL_SIZE))
+                };
+                if ui.add(btn.min_size(egui::vec2(0.0, 22.0))).clicked() {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("morph_trigger_target"), i);
+                    });
+                }
+            }
+        });
+
+        ui.add_space(2.0);
+
+        // Auto-cycle mode
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Cycle")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
+            let cycle_labels = ["Off", "On Beat", "Timed"];
+            let mut cycle_mode = info.morph_auto_cycle;
+            egui::ComboBox::from_id_salt("morph_auto_cycle")
+                .selected_text(cycle_labels[cycle_mode.min(2) as usize])
+                .width(80.0)
+                .show_ui(ui, |ui| {
+                    for (i, label) in cycle_labels.iter().enumerate() {
+                        if ui
+                            .selectable_label(cycle_mode == i as u32, *label)
+                            .clicked()
+                        {
+                            cycle_mode = i as u32;
+                            ui.ctx().data_mut(|d| {
+                                d.insert_temp(egui::Id::new("morph_auto_cycle"), cycle_mode);
+                            });
+                        }
+                    }
+                });
+        });
+
+        // Hold duration slider
+        let mut hold = info.morph_hold_duration;
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Hold")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
+            let r = ui.add(
+                egui::Slider::new(&mut hold, 0.0..=8.0)
+                    .show_value(true)
+                    .custom_formatter(|v, _| format!("{:.1}s", v)),
+            );
+            if r.changed() {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new("morph_hold_duration"), hold);
+                });
+            }
+        });
+
+        // Transition style
+        let style_labels = ["Spring", "Explode", "Flow", "Cascade", "Direct"];
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Style")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
+            let mut style = info.morph_transition_style;
+            egui::ComboBox::from_id_salt("morph_style")
+                .selected_text(style_labels[style.min(4) as usize])
+                .width(80.0)
+                .show_ui(ui, |ui| {
+                    for (i, label) in style_labels.iter().enumerate() {
+                        if ui
+                            .selectable_label(style == i as u32, *label)
+                            .clicked()
+                        {
+                            style = i as u32;
+                            ui.ctx().data_mut(|d| {
+                                d.insert_temp(egui::Id::new("morph_style"), style);
+                            });
+                        }
+                    }
+                });
+        });
+
+        // Load image into slot
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if ui
+                .add(
+                    egui::Button::new(RichText::new("+ Image").size(SMALL_SIZE))
+                        .min_size(egui::vec2(0.0, 22.0)),
+                )
+                .clicked()
+            {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new("morph_load_image"), true);
+                });
+            }
+            // Geometry shape dropdown for adding
+            let geo_shapes = ["circle", "ring", "grid", "spiral", "heart", "star"];
+            let mut selected_geo = String::new();
+            egui::ComboBox::from_id_salt("morph_add_geometry")
+                .selected_text("+ Geometry")
+                .width(90.0)
+                .show_ui(ui, |ui| {
+                    for shape in &geo_shapes {
+                        if ui.selectable_label(false, *shape).clicked() {
+                            selected_geo = shape.to_string();
+                        }
+                    }
+                });
+            if !selected_geo.is_empty() {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new("morph_add_geometry"), selected_geo);
+                });
+            }
+        });
+
         ui.add_space(4.0);
     }
 
