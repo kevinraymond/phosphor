@@ -12,6 +12,8 @@
 - Tag 5 feedback effects (Accretion, Array, Chaos, Mycelium, Turing) with explicit `"effect_type": "feedback"` in their .pfx files
 
 ### Fixes
+- Clamp particle count to GPU dispatch dimension limit (`max_compute_workgroups_per_dimension × 256`) to prevent validation errors on high-count effects
+- Hide Stress test effect from effects panel
 - Fix morph slider animating when auto-cycle mode is "Off" — transition progress now only advances when auto-cycling is active
 - Remove redundant image source UI (IMG badge, image selector dropdown, Load Image/Video/Webcam buttons) from particle panel — morph targets handle image loading
 - Fix morph snapshot/image/text/video filling wrong slot when `target_count` diverges from def count — all handlers now use def vector length for slot selection and pad gaps

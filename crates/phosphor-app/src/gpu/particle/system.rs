@@ -203,15 +203,21 @@ impl ParticleSystem {
         // With SoA, each buffer is one vec4f per particle (16 bytes), so the limit is higher
         let max_storage = device.limits().max_storage_buffer_binding_size as u64;
         let device_max_particles = (max_storage / super::types::PARTICLE_COMPONENT_STRIDE) as u32;
-        let max_particles = if def.max_count > device_max_particles {
+        // Also clamp to dispatch dimension limit: max_particles / WORKGROUP_SIZE
+        // must fit in a single dispatch dimension (typically 65535).
+        let max_dispatch_per_dim = device.limits().max_compute_workgroups_per_dimension;
+        let dispatch_max_particles = max_dispatch_per_dim * WORKGROUP_SIZE;
+
+        let effective_max = device_max_particles.min(dispatch_max_particles);
+        let max_particles = if def.max_count > effective_max {
             log::warn!(
-                "Particle max_count {} exceeds device limit ({} particles @ {}MB max binding). Clamped to {}.",
+                "Particle max_count {} exceeds device limit (storage: {} particles, dispatch: {} particles). Clamped to {}.",
                 def.max_count,
                 device_max_particles,
-                max_storage / (1024 * 1024),
-                device_max_particles,
+                dispatch_max_particles,
+                effective_max,
             );
-            device_max_particles
+            effective_max
         } else {
             def.max_count
         };
