@@ -92,7 +92,7 @@ jobs:
       - name: Build (webcam feature)
         run: cargo build --target ${{ matrix.target }} --features webcam
       - name: Build (all features)
-        run: cargo build --target ${{ matrix.target }} --features "video,webcam,depth,ndi"
+        run: cargo build --target ${{ matrix.target }} --features "video,webcam,ndi"
 
       - name: Upload binary (Linux)
         if: runner.os == 'Linux'
