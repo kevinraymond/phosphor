@@ -3,6 +3,11 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## v1.2.1 — 2026-03-05
+
+### Bug Fixes
+- Fix webcam "Failed to fulfill requested format" on Windows: cameras that only support raw formats (YUYV/NV12) now work via automatic fallback from MJPEG to any supported format
+
 ## v1.2.0 — 2026-02-28
 
 ### GPU Particle System
