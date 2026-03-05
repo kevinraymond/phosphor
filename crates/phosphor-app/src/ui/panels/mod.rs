@@ -30,6 +30,7 @@ use crate::midi::MidiSystem;
 use crate::osc::OscSystem;
 use crate::params::ParamStore;
 use crate::preset::PresetStore;
+use crate::settings::ParticleQuality;
 use crate::ui::theme::ThemeMode;
 use crate::ui::theme::colors::theme_colors;
 use crate::ui::widgets;
@@ -59,6 +60,7 @@ pub fn draw_panels(
     scene_info: Option<scene_panel::SceneInfo>,
     status_error: &Option<(String, std::time::Instant)>,
     current_theme: ThemeMode,
+    particle_quality: ParticleQuality,
 ) {
     if !visible {
         return;
@@ -267,7 +269,7 @@ pub fn draw_panels(
 
                 // Settings section (default collapsed)
                 widgets::section(ui, "sec_settings", "Global", None, false, |ui| {
-                    settings_panel::draw_settings_panel(ui, current_theme);
+                    settings_panel::draw_settings_panel(ui, current_theme, particle_quality);
                 });
             });
         });

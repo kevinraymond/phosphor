@@ -489,6 +489,7 @@ impl ApplicationHandler for PhosphorApp {
                                 scene_info,
                                 &app.status_error,
                                 app.settings.theme,
+                                app.settings.particle_quality,
                             );
                         }
                         // Sync global postprocess enabled from layer
@@ -761,6 +762,23 @@ impl ApplicationHandler for PhosphorApp {
                     app.egui_overlay.set_theme(theme);
                     app.settings.theme = theme;
                     app.settings.save();
+                }
+
+                // Handle particle quality change from settings panel
+                let set_quality: Option<crate::settings::ParticleQuality> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("set_particle_quality")));
+                if let Some(quality) = set_quality {
+                    app.settings.particle_quality = quality;
+                    app.settings.save();
+                    // Reload active effect to rebuild particle system with new buffer size
+                    let active = app.layer_stack.active_layer;
+                    if let Some(layer) = app.layer_stack.layers.get(active) {
+                        if let Some(effect_idx) = layer.effect_index() {
+                            app.load_effect_on_layer(active, effect_idx);
+                        }
+                    }
                 }
 
                 // Handle audio device switch from UI

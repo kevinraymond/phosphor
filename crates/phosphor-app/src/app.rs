@@ -1225,10 +1225,26 @@ impl App {
     }
 
     /// Build a ParticleSystem from a ParticleDef, or None if the effect doesn't use particles.
+    /// Applies the particle quality multiplier to max_count and emit_rate.
     fn build_particle_system(
         &self,
         particles: &crate::gpu::particle::types::ParticleDef,
     ) -> Option<ParticleSystem> {
+        let multiplier = self.settings.particle_quality.multiplier();
+        let mut particles = particles.clone();
+        let original_count = particles.max_count;
+        particles.max_count = (particles.max_count as f32 * multiplier).round() as u32;
+        particles.emit_rate *= multiplier;
+        if particles.max_count != original_count {
+            log::info!(
+                "Particle quality {}: {} -> {} particles",
+                self.settings.particle_quality.display_name(),
+                original_count,
+                particles.max_count,
+            );
+        }
+        let particles = &particles;
+
         let hdr_format = GpuContext::hdr_format();
         let is_image_emitter = particles.emitter.shape == "image";
 
