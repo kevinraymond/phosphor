@@ -35,9 +35,10 @@ impl DepthEstimator {
         for y in 0..size {
             for x in 0..size {
                 let src_idx = (y * size + x) * 3;
-                chw[0 * size * size + y * size + x] = rgb_f32[src_idx]; // R
-                chw[1 * size * size + y * size + x] = rgb_f32[src_idx + 1]; // G
-                chw[2 * size * size + y * size + x] = rgb_f32[src_idx + 2]; // B
+                let px = y * size + x;
+                chw[px] = rgb_f32[src_idx]; // R (channel 0)
+                chw[size * size + px] = rgb_f32[src_idx + 1]; // G (channel 1)
+                chw[2 * size * size + px] = rgb_f32[src_idx + 2]; // B (channel 2)
             }
         }
 
