@@ -71,8 +71,6 @@ pub fn draw_panels(
     // Status bar must be drawn FIRST so it claims the bottom-most position.
     // Timeline bar draws second and sits directly above it.
     egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-        let midi_port = midi.connected_port().unwrap_or("");
-        let midi_active = midi.connected_port().is_some();
         let midi_recently_active = midi.is_recently_active();
         #[cfg(feature = "ndi")]
         let ndi_running = ctx.data_mut(|d| {
@@ -106,8 +104,7 @@ pub fn draw_panels(
             shader_error,
             uniforms,
             particle_count,
-            midi_port,
-            midi_active,
+            midi.config.enabled,
             midi_recently_active,
             osc.config.enabled,
             osc.is_recently_active(),

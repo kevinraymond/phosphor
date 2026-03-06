@@ -22,36 +22,14 @@ const TRIGGER_PAIRS: &[(TriggerAction, TriggerAction)] = &[
 pub fn draw_midi_panel(ui: &mut Ui, midi: &mut MidiSystem) {
     let tc = theme_colors(ui.ctx());
 
-    // Enable + activity on one row
-    ui.horizontal(|ui| {
-        let mut enabled = midi.config.enabled;
-        if ui
-            .checkbox(&mut enabled, RichText::new("Enable MIDI").size(SMALL_SIZE))
-            .changed()
-        {
-            midi.set_enabled(enabled);
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Last message summary (right-aligned)
-            if let Some(msg) = midi.last_message {
-                ui.label(
-                    RichText::new(format!("CC#{} v:{}", msg.number, msg.value))
-                        .size(SMALL_SIZE)
-                        .color(tc.text_secondary),
-                );
-            }
-            // Activity dot
-            let color = if midi.is_recently_active() {
-                tc.success
-            } else if midi.connected_port().is_some() {
-                Color32::from_rgb(0x55, 0x55, 0x55)
-            } else {
-                Color32::from_rgb(0x33, 0x33, 0x33)
-            };
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-            ui.painter().circle_filled(rect.center(), 4.0, color);
-        });
-    });
+    // Enable checkbox
+    let mut enabled = midi.config.enabled;
+    if ui
+        .checkbox(&mut enabled, RichText::new("Enable MIDI").size(SMALL_SIZE))
+        .changed()
+    {
+        midi.set_enabled(enabled);
+    }
 
     // Port selector
     let current_label = midi.connected_port().unwrap_or("Not connected").to_string();

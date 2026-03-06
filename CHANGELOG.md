@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### UI
+- Remove redundant activity dots from Settings subsection enable rows; status bar always shows MIDI/OSC/WEB/NDI indicators with three-state dots (active/enabled-idle/disabled)
 - Consolidate MIDI, OSC, Web, NDI/Outputs, and Global into single collapsible "Settings" section with subsections — header shows labeled status dots, subsection headers use smaller font/arrow for visual hierarchy, protocol-specific badge colors
 - Trigger grids (MIDI + OSC) use fixed-width label columns (52px) for proper badge alignment across rows
 - OSC TX settings wrapped in subtle bordered frame; Global settings use fixed-width labels aligned to dropdowns

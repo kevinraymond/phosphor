@@ -23,37 +23,14 @@ const TRIGGER_PAIRS: &[(TriggerAction, TriggerAction)] = &[
 pub fn draw_osc_panel(ui: &mut Ui, osc: &mut OscSystem) {
     let tc = theme_colors(ui.ctx());
 
-    // Enable + activity on one row
-    ui.horizontal(|ui| {
-        let mut enabled = osc.config.enabled;
-        if ui
-            .checkbox(&mut enabled, RichText::new("Enable OSC").size(SMALL_SIZE))
-            .changed()
-        {
-            osc.set_enabled(enabled);
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Last address (right-aligned)
-            if let Some(ref addr) = osc.last_address {
-                let short = abbreviate_address(addr);
-                ui.label(
-                    RichText::new(short)
-                        .size(SMALL_SIZE)
-                        .color(tc.text_secondary),
-                );
-            }
-            // Activity dot
-            let color = if osc.is_recently_active() {
-                OSC_GREEN
-            } else if osc.config.enabled {
-                Color32::from_rgb(0x55, 0x55, 0x55)
-            } else {
-                Color32::from_rgb(0x33, 0x33, 0x33)
-            };
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-            ui.painter().circle_filled(rect.center(), 4.0, color);
-        });
-    });
+    // Enable checkbox
+    let mut enabled = osc.config.enabled;
+    if ui
+        .checkbox(&mut enabled, RichText::new("Enable OSC").size(SMALL_SIZE))
+        .changed()
+    {
+        osc.set_enabled(enabled);
+    }
 
     // RX port
     ui.horizontal(|ui| {

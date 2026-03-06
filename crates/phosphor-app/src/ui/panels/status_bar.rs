@@ -4,6 +4,7 @@ use crate::gpu::ShaderUniforms;
 use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
 
+const OFF: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
 const DIM: Color32 = Color32::from_rgb(0x55, 0x55, 0x55);
 const LABEL_COLOR: Color32 = Color32::from_rgb(0x70, 0x70, 0x70);
 
@@ -44,8 +45,7 @@ pub fn draw_status_bar(
     shader_error: &Option<String>,
     uniforms: &ShaderUniforms,
     particle_count: Option<u32>,
-    _midi_port: &str,
-    midi_active: bool,
+    midi_enabled: bool,
     midi_recently_active: bool,
     osc_enabled: bool,
     osc_recently_active: bool,
@@ -130,37 +130,58 @@ pub fn draw_status_bar(
 
             ui.add_space(6.0);
 
-            // NDI
-            if ndi_running {
-                dot(ui, true, Color32::from_rgb(0x40, 0xC0, 0x40));
-                label(ui, "NDI");
-                ui.add_space(6.0);
-            }
+            // NDI — always show (no separate enabled flag; running=on)
+            dot(ui, ndi_running, Color32::from_rgb(0x40, 0xC0, 0x40));
+            label(ui, "NDI");
+            ui.add_space(6.0);
 
-            // Web
-            if web_enabled {
-                dot(
-                    ui,
-                    web_client_count > 0,
-                    Color32::from_rgb(0x50, 0x90, 0xE0),
-                );
-                label(ui, "WEB");
-                ui.add_space(6.0);
+            // Web — always show
+            {
+                let color = if web_client_count > 0 {
+                    Color32::from_rgb(0x50, 0x90, 0xE0)
+                } else if web_enabled {
+                    DIM
+                } else {
+                    OFF
+                };
+                let (rect, _) =
+                    ui.allocate_exact_size(Vec2::new(8.0, 8.0), egui::Sense::hover());
+                ui.painter().circle_filled(rect.center(), 3.0, color);
             }
+            label(ui, "WEB");
+            ui.add_space(6.0);
 
-            // OSC
-            if osc_enabled {
-                dot(ui, osc_recently_active, tc.success);
-                label(ui, "OSC");
-                ui.add_space(6.0);
+            // OSC — always show
+            {
+                let color = if osc_recently_active {
+                    tc.success
+                } else if osc_enabled {
+                    DIM
+                } else {
+                    OFF
+                };
+                let (rect, _) =
+                    ui.allocate_exact_size(Vec2::new(8.0, 8.0), egui::Sense::hover());
+                ui.painter().circle_filled(rect.center(), 3.0, color);
             }
+            label(ui, "OSC");
+            ui.add_space(6.0);
 
-            // MIDI
-            if midi_active {
-                dot(ui, midi_recently_active, tc.success);
-                label(ui, "MIDI");
-                ui.add_space(6.0);
+            // MIDI — always show
+            {
+                let color = if midi_recently_active {
+                    tc.success
+                } else if midi_enabled {
+                    DIM
+                } else {
+                    OFF
+                };
+                let (rect, _) =
+                    ui.allocate_exact_size(Vec2::new(8.0, 8.0), egui::Sense::hover());
+                ui.painter().circle_filled(rect.center(), 3.0, color);
             }
+            label(ui, "MIDI");
+            ui.add_space(6.0);
 
             // Particles
             if let Some(count) = particle_count {
