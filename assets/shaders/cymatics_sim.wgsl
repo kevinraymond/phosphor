@@ -117,44 +117,52 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     var eval_pos = rotate2d(pos, rot_angle);
     eval_pos = fold_symmetry(eval_pos, symmetry_param);
 
-    // Mode numbers from audio — smooth (not floor'd) for crossfade
-    let n_float = 1.0 + u.bass * 3.0 + 0.5;
-    let m_float = 2.0 + u.mid * 5.0 + 0.5;
+    // Curated (n,m) mode pairs: varying the ratio gives qualitatively different shapes.
+    // (2,1)=asymmetric star, (3,2)=triangular, (1,1)=cross, (4,1)=radial spokes, etc.
+    let MODE_N = array<f32, 12>(2.0, 3.0, 1.0, 4.0, 2.0, 3.0, 5.0, 1.0, 4.0, 2.0, 5.0, 3.0);
+    let MODE_M = array<f32, 12>(1.0, 2.0, 1.0, 1.0, 2.0, 1.0, 2.0, 3.0, 3.0, 3.0, 1.0, 3.0);
 
-    // Blend between floor and ceil modes for smooth transitions
-    let n_lo = floor(n_float);
-    let n_hi = n_lo + 1.0;
-    let n_frac = n_float - n_lo;
-    let m_lo = floor(m_float);
-    let m_hi = m_lo + 1.0;
-    let m_frac = m_float - m_lo;
+    // dominant_chroma (0-1) selects mode pair; crossfade between adjacent pairs
+    let chroma_idx = u.dominant_chroma * 11.0;
+    let ci_lo = u32(floor(chroma_idx));
+    let ci_hi = min(ci_lo + 1u, 11u);
+    let ci_frac = chroma_idx - floor(chroma_idx);
 
-    // Evaluate chladni at 4 corners of mode grid, blend
-    let val_ll = chladni(eval_pos, n_lo, m_lo);
-    let val_lh = chladni(eval_pos, n_lo, m_hi);
-    let val_hl = chladni(eval_pos, n_hi, m_lo);
-    let val_hh = chladni(eval_pos, n_hi, m_hi);
-    let val = mix(mix(val_ll, val_lh, m_frac), mix(val_hl, val_hh, m_frac), n_frac);
+    // Evaluate both mode pairs and crossfade (no interpolating n/m individually)
+    let val_lo = chladni(eval_pos, MODE_N[ci_lo], MODE_M[ci_lo]);
+    let val_hi = chladni(eval_pos, MODE_N[ci_hi], MODE_M[ci_hi]);
+    let val = mix(val_lo, val_hi, ci_frac);
 
-    let grad_ll = chladni_gradient(eval_pos, n_lo, m_lo);
-    let grad_lh = chladni_gradient(eval_pos, n_lo, m_hi);
-    let grad_hl = chladni_gradient(eval_pos, n_hi, m_lo);
-    let grad_hh = chladni_gradient(eval_pos, n_hi, m_hi);
-    var grad = mix(mix(grad_ll, grad_lh, m_frac), mix(grad_hl, grad_hh, m_frac), n_frac);
+    let grad_lo = chladni_gradient(eval_pos, MODE_N[ci_lo], MODE_M[ci_lo]);
+    let grad_hi = chladni_gradient(eval_pos, MODE_N[ci_hi], MODE_M[ci_hi]);
+    var grad = mix(grad_lo, grad_hi, ci_frac);
 
     // Un-rotate gradient back to world space
     grad = rotate2d(grad, -rot_angle);
     let grad_len = length(grad);
 
-    // Attraction toward nodal lines (zero crossings)
-    let attract_k = u.attraction_strength;
+    // Attraction toward nodal lines — mfcc(0) drives vibrational energy
+    let attract_k = u.attraction_strength * (0.5 + mfcc(0u) * 1.0);
     if grad_len > 0.01 {
         vel -= normalize(grad) * val * attract_k * dt;
     }
 
-    // Organic diffusion
+    // Organic diffusion — chroma peakedness controls pattern clarity
+    // Compute chroma flatness: max/mean ratio → 0=uniform (noise), 1=peaked (tone)
+    var chroma_sum = 0.0;
+    var chroma_max = 0.0;
+    for (var ci = 0u; ci < 12u; ci++) {
+        let cv = chroma_val(ci);
+        chroma_sum += cv;
+        chroma_max = max(chroma_max, cv);
+    }
+    let chroma_mean = chroma_sum / 12.0;
+    // tonality: 0 = all chroma equal (noise), 1 = one dominant (tonal)
+    let tonality = select(0.0, 1.0 - chroma_mean / chroma_max, chroma_max > 0.01);
+    // Tonal → crisp pattern (low diffusion), noise → blurred (high diffusion)
     let turb = (hash(f32(idx) * 0.37 + u.time * 2.0) - 0.5) * 6.28318;
-    vel += vec2f(cos(turb), sin(turb)) * 0.02 * dt;
+    let diffusion = 0.02 * (0.3 + (1.0 - tonality) * 1.7);
+    vel += vec2f(cos(turb), sin(turb)) * diffusion * dt;
 
     // Onset: scatter
     if u.onset > 0.3 {

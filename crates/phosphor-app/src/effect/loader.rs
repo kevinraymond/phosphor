@@ -81,7 +81,8 @@ struct PhosphorUniforms {
     feedback_decay: f32,
     frame_index: f32,
 
-    _pad_align: vec2f,
+    dominant_chroma: f32,
+    _pad_align: f32,
     mfcc: array<vec4f, 4>,     // 13 MFCCs (indices 0-12 used, 13-15 padding)
     chroma: array<vec4f, 3>,   // 12 pitch class energies (C=0, C#=1, ..., B=11)
 }

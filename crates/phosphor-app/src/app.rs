@@ -461,6 +461,7 @@ impl App {
             self.uniforms.mfcc[..13].copy_from_slice(&features.mfcc);
             self.uniforms.mfcc[13..].fill(0.0);
             self.uniforms.chroma.copy_from_slice(&features.chroma);
+            self.uniforms.dominant_chroma = features.dominant_chroma;
         }
 
         // Drain MIDI and apply to active layer's param_store (skip if locked)

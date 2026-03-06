@@ -247,6 +247,11 @@ impl FeatureSmoother {
                 release: 0.15,
                 bypass: false,
             }, // chroma[11] B
+            SmoothParams {
+                attack: 0.05,
+                release: 0.2,
+                bypass: false,
+            }, // dominant_chroma
         ];
 
         Self {

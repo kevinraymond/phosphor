@@ -49,8 +49,10 @@ pub struct ShaderUniforms {
     pub frame_index: f32,
     // 8 bytes (168 total)
 
+    // Derived audio features
+    pub dominant_chroma: f32,
     // Align to 16-byte boundary for GPU array types
-    pub _pad_align: [f32; 2],
+    pub _pad_align: f32,
     // 8 bytes (176 total)
 
     // MFCC: 13 coefficients + 3 padding (array<vec4f, 4> on GPU)

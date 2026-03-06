@@ -30,10 +30,17 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     // Visualization of Chladni nodal line pattern
     let scale_param = param(1u);
     let glow_param = param(6u);
-    let n = 2.0 + u.bass * 3.0;
-    let m = 3.0 + u.mid * 4.0;
+    // Curated (n,m) mode pairs — matches sim shader
+    let MODE_N = array<f32, 12>(2.0, 3.0, 1.0, 4.0, 2.0, 3.0, 5.0, 1.0, 4.0, 2.0, 5.0, 3.0);
+    let MODE_M = array<f32, 12>(1.0, 2.0, 1.0, 1.0, 2.0, 1.0, 2.0, 3.0, 3.0, 3.0, 1.0, 3.0);
+    let chroma_idx = u.dominant_chroma * 11.0;
+    let ci_lo = u32(floor(chroma_idx));
+    let ci_hi = min(ci_lo + 1u, 11u);
+    let ci_frac = chroma_idx - floor(chroma_idx);
     let pi = 3.14159;
-    let chladni = cos(n * pi * rp.x) * cos(m * pi * rp.y) - cos(m * pi * rp.x) * cos(n * pi * rp.y);
+    let chladni_lo = cos(MODE_N[ci_lo] * pi * rp.x) * cos(MODE_M[ci_lo] * pi * rp.y) - cos(MODE_M[ci_lo] * pi * rp.x) * cos(MODE_N[ci_lo] * pi * rp.y);
+    let chladni_hi = cos(MODE_N[ci_hi] * pi * rp.x) * cos(MODE_M[ci_hi] * pi * rp.y) - cos(MODE_M[ci_hi] * pi * rp.x) * cos(MODE_N[ci_hi] * pi * rp.y);
+    let chladni = mix(chladni_lo, chladni_hi, ci_frac);
     let line_dist = abs(chladni);
     let glow_mult = 0.5 + glow_param * 1.5;
     let line_glow = exp(-line_dist * 18.0) * (0.18 + 0.22 * scale_param) * (0.5 + u.rms * 1.0) * glow_mult;

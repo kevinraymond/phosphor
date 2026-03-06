@@ -108,7 +108,7 @@ pub struct ParticleUniforms {
     pub size_variance: f32,
     pub velocity_inherit: f32,
     pub noise_speed: f32,
-    pub _pad_p2: f32,
+    pub dominant_chroma: f32,
 
     // Lifetime curves (64 bytes) [240..303]
     pub size_curve: [f32; 8],    // 8-point LUT for size over lifetime

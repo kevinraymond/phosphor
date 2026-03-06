@@ -38,9 +38,12 @@ pub struct AudioFeatures {
 
     // Pitch class energies (12): C, C#, D, D#, E, F, F#, G, G#, A, A#, B
     pub chroma: [f32; 12],
+
+    // Derived: dominant pitch class (argmax of chroma), normalized 0-1
+    pub dominant_chroma: f32,
 }
 
-pub const NUM_FEATURES: usize = 45;
+pub const NUM_FEATURES: usize = 46;
 
 impl AudioFeatures {
     pub fn as_slice(&self) -> &[f32; NUM_FEATURES] {
@@ -75,7 +78,7 @@ mod tests {
     #[test]
     fn as_slice_len() {
         let f = AudioFeatures::default();
-        assert_eq!(f.as_slice().len(), 45);
+        assert_eq!(f.as_slice().len(), 46);
     }
 
     #[test]
@@ -89,14 +92,14 @@ mod tests {
     fn field_order_first_and_last() {
         let mut f = AudioFeatures::default();
         f.sub_bass = 0.11;
-        f.chroma[11] = 0.99;
+        f.dominant_chroma = 0.99;
         let s = f.as_slice();
         assert!((s[0] - 0.11).abs() < 1e-6);
-        assert!((s[44] - 0.99).abs() < 1e-6);
+        assert!((s[45] - 0.99).abs() < 1e-6);
     }
 
     #[test]
     fn size_is_180_bytes() {
-        assert_eq!(std::mem::size_of::<AudioFeatures>(), 180);
+        assert_eq!(std::mem::size_of::<AudioFeatures>(), 184);
     }
 }

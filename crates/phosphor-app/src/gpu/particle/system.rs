@@ -1198,6 +1198,7 @@ impl ParticleSystem {
         self.uniforms.mfcc[..13].copy_from_slice(&features.mfcc);
         self.uniforms.mfcc[13..].fill(0.0);
         self.uniforms.chroma.copy_from_slice(&features.chroma);
+        self.uniforms.dominant_chroma = features.dominant_chroma;
     }
 
     /// Run the compute dispatch (particle simulation + prepare indirect args).

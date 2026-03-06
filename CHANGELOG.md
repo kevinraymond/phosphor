@@ -25,6 +25,10 @@
 - Add `EffectType` enum (Shader, Particle, Feedback) with optional `effect_type` field in .pfx format — auto-detects from data when absent
 - Tag 5 feedback effects (Accretion, Array, Chaos, Mycelium, Turing) with explicit `"effect_type": "feedback"` in their .pfx files
 
+### Audio
+- Add `dominant_chroma` feature: CPU-side argmax of 12 chroma bins, normalized 0–1, forwarded to both fragment and particle GPU uniforms
+- Cymatics audio remapping: chroma-driven Chladni mode selection (curated visually-distinct (n,m) pairs per pitch class), mfcc[0] vibrational amplitude, chroma peakedness pattern clarity
+
 ### Effects
 - Add obstacle collision to all 11 remaining particle sim shaders (phosphor, flux, murmur, raster, tesla, genesis, cymatics, symbiosis, turing, morph, as) — obstacles now work across all 16 effects
 

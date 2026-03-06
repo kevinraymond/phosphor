@@ -350,6 +350,17 @@ impl FftAnalyzer {
         // Chroma extraction (from large FFT magnitude)
         self.compute_chroma(&mut out);
 
+        // Dominant chroma: argmax of chroma bins, normalized to 0-1
+        let mut max_idx = 0usize;
+        let mut max_val = out.chroma[0];
+        for i in 1..N_CHROMA {
+            if out.chroma[i] > max_val {
+                max_val = out.chroma[i];
+                max_idx = i;
+            }
+        }
+        out.dominant_chroma = max_idx as f32 / 11.0;
+
         // Beat fields left at 0.0 — filled by beat detector in audio thread
         out
     }

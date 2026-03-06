@@ -74,7 +74,7 @@ struct ParticleUniforms {
     size_variance: f32,
     velocity_inherit: f32,
     noise_speed: f32,
-    _pad_p2: f32,
+    dominant_chroma: f32,
 
     // Lifetime curves (8-point LUTs)
     size_curve: array<vec4f, 2>,
