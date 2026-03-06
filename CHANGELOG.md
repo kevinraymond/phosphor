@@ -31,6 +31,7 @@
 - Murmur audio remapping: mfcc[1] flock cohesion (bright=tight, dark=dispersed), mfcc[3] predator aggressiveness, flux speed agitation, dominant_chroma rim/sky hue; fix emitter waves by probing whole screen + inheriting donor heading
 - Symbiosis audio remapping: mfcc[4-6] per-species force modulation (timbre shifts ecology), dominant_chroma species color rotation, flux interaction radius expansion, zcr Brownian noise jitter
 - Morph audio remapping: dominant_chroma target shape selection (pitch class picks morph target instead of sequential), mfcc[1] transition speed modulation, mfcc[2] mid-transition scatter/explosion strength, chroma-tinted background
+- Flux audio remapping: mfcc[1] curl strength (bright=tight spirals, dark=loose), flux-driven turbulence agitation, dominant_chroma emission/background hue anchor
 - Add `zcr` (zero-crossing rate) to ParticleUniforms for compute shader access
 
 ### Effects
