@@ -63,7 +63,7 @@ libloading = "0.8"
 # Webcam capture
 nokhwa = { version = "0.10", features = ["input-native"], optional = true }
 # ONNX Runtime for depth estimation (MiDaS) — load-dynamic: runtime dylib loading, no build-time linking
-ort = { version = "2.0.0-rc.11", optional = true, default-features = false, features = ["load-dynamic"] }
+ort = { version = "=2.0.0-rc.11", optional = true, default-features = false, features = ["load-dynamic"] }
 # HTTP client for model + runtime download
 ureq = { version = "3", features = ["native-tls"], optional = true }
 # Archive extraction for ONNX Runtime download (tgz on Linux/macOS, zip on Windows)
