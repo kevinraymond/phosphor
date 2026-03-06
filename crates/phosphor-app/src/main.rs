@@ -1130,6 +1130,7 @@ impl ApplicationHandler for PhosphorApp {
                 if let Some(cue_idx) = scene_remove_cue {
                     if cue_idx < app.timeline.cues.len() {
                         app.timeline.cues.remove(cue_idx);
+                        app.timeline.notify_cue_removed(cue_idx);
                         scene_dirty = true;
                     }
                 }

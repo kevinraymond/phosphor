@@ -5,6 +5,10 @@
 
 ## Unreleased
 
+### Fixed
+- Scene cue delete button disappearing when the same preset is added as a cue multiple times (egui widget ID collision)
+- Crash (index out of bounds) when deleting a scene cue while the timeline is playing
+
 ### UI
 - Right panel restyle: single-row param layout (name/slider/value/M/O), compact 16×14 MIDI/OSC badges, smaller Reset All button, large particle count header with 3px health bar, standalone bordered blend mode badge, compact particle param rows replacing grid, tab-strip obstacle source selector with active state styling, compact obstacle slider rows with separate value labels, audio mapping hover background lift with fixed-width 52px feature names
 - Remove redundant activity dots from Settings subsection enable rows; status bar always shows MIDI/OSC/WEB/NDI indicators with three-state dots (active/enabled-idle/disabled)

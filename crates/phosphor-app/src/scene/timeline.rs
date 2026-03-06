@@ -109,6 +109,45 @@ impl Timeline {
         TimelineEvent::LoadCue { cue_index: idx }
     }
 
+    /// Adjust playback state after a cue was removed at `removed`.
+    /// Call this right after `self.cues.remove(removed)`.
+    pub fn notify_cue_removed(&mut self, removed: usize) {
+        if self.cues.is_empty() {
+            self.stop();
+            return;
+        }
+        match &mut self.state {
+            PlaybackState::Idle => {}
+            PlaybackState::Holding { cue_index, .. } => {
+                if *cue_index == removed {
+                    // The cue we were on got deleted — clamp to valid range
+                    *cue_index = removed.min(self.cues.len() - 1);
+                } else if *cue_index > removed {
+                    *cue_index -= 1;
+                }
+            }
+            PlaybackState::Transitioning {
+                from_cue, to_cue, ..
+            } => {
+                if *from_cue == removed || *to_cue == removed {
+                    // Abort transition — hold on the nearest valid cue
+                    let fallback = removed.min(self.cues.len() - 1);
+                    self.state = PlaybackState::Holding {
+                        cue_index: fallback,
+                        elapsed: 0.0,
+                    };
+                } else {
+                    if *from_cue > removed {
+                        *from_cue -= 1;
+                    }
+                    if *to_cue > removed {
+                        *to_cue -= 1;
+                    }
+                }
+            }
+        }
+    }
+
     /// Stop the timeline.
     pub fn stop(&mut self) {
         self.active = false;

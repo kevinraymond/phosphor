@@ -594,6 +594,7 @@ fn draw_cue_row(
         .inner_margin(egui::Margin::symmetric(6, 3))
         .outer_margin(egui::Margin::symmetric(0, 1))
         .show(ui, |ui| {
+            ui.push_id(idx, |ui| {
             let row_hovered = ui.rect_contains_pointer(ui.max_rect());
 
             // ── Top row: cue number + name + hover-reveal × ──
@@ -745,6 +746,7 @@ fn draw_cue_row(
                     );
                 });
             });
+            }); // push_id
         });
 
     let _ = frame_resp.response.interact(egui::Sense::hover());
