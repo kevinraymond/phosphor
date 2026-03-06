@@ -350,6 +350,7 @@ pub fn generate_random(max_particles: u32, particle_size: f32) -> Vec<ParticleAu
         let x = hash_f32(i as f32 * 1.37) * 2.0 - 1.0;
         let y = hash_f32(i as f32 * 2.71 + 7.0) * 2.0 - 1.0;
         let packed = pack_color_for_density(
+            #[allow(clippy::approx_constant)]
             hash_f32(i as f32 * 3.14),
             hash_f32(i as f32 * 5.67 + 3.0),
             hash_f32(i as f32 * 8.91 + 7.0),
