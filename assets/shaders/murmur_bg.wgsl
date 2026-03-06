@@ -25,6 +25,15 @@ fn fs_main(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     // Audio-reactive sky glow
     sky *= 1.0 + u.rms * 0.3;
 
+    // Subtle chroma-driven horizon tint — musical key colors the sky
+    let hue = u.dominant_chroma;
+    let tint_r = abs(fract(hue) * 6.0 - 3.0) - 1.0;
+    let tint_g = 2.0 - abs(fract(hue) * 6.0 - 2.0);
+    let tint_b = 2.0 - abs(fract(hue) * 6.0 - 4.0);
+    let tint = clamp(vec3f(tint_r, tint_g, tint_b), vec3f(0.0), vec3f(1.0));
+    let horizon_blend = smoothstep(0.5, 0.0, uv.y); // strongest at bottom
+    sky += tint * horizon_blend * u.rms * 0.06;
+
     let center = uv - 0.5;
     let vignette = 1.0 - dot(center, center) * 1.2;
     let result = sky * max(vignette, 0.0);

@@ -62,7 +62,9 @@ fn predator_pos() -> vec2f {
 }
 
 fn predator_intensity() -> f32 {
-    return max(u.onset * 2.0, u.kick * 1.5);
+    // mfcc(3u) = formant structure: vocal-like sounds make predator more aggressive
+    let formant_boost = 1.0 + max(mfcc(3u), 0.0) * 1.5;
+    return max(u.onset * 2.0, u.kick * 1.5) * formant_boost;
 }
 
 // ============================================================
@@ -78,12 +80,12 @@ fn emit_particle(idx: u32) -> Particle {
     let theta = hash(seed_base + 1.0) * 6.2831853;
 
     // Try to emit near an existing alive particle (distributes into flock)
-    let probe_angle = hash(seed_base + 10.0) * 6.2831853;
-    let probe_r = hash(seed_base + 11.0) * 0.8;
-    let probe_pos = u.emitter_pos + vec2f(cos(probe_angle), sin(probe_angle)) * probe_r;
+    // Probe random cells across the whole screen, not just near emitter
+    let probe_pos = rand_vec2(seed_base + 10.0) * 0.9; // [-0.9, 0.9]
     let probe_cell = sh_pos_to_cell(probe_pos);
     let probe_range = sh_cell_range(probe_cell.x, probe_cell.y);
     var spawn_pos = u.emitter_pos + vec2f(cos(theta), sin(theta)) * r; // fallback
+    var donor_heading = hash(seed_base + 2.0) * 6.2831853; // random fallback heading
 
     if probe_range.y > 0u {
         let pick = u32(hash(seed_base + 12.0) * f32(probe_range.y)) % probe_range.y;
@@ -93,12 +95,14 @@ fn emit_particle(idx: u32) -> Particle {
             // Spawn near the donor with small random offset
             let jitter = rand_vec2(seed_base + 13.0) * 0.02;
             spawn_pos = donor_pl.xy + jitter;
+            // Inherit donor's heading so new bird flies with the flock immediately
+            donor_heading = flags_in[donor].z;
         }
     }
     let pos = spawn_pos;
 
-    // Random initial heading
-    let angle = hash(seed_base + 2.0) * 6.2831853;
+    // Heading: inherited from donor (or random if no donor found)
+    let angle = donor_heading + (hash(seed_base + 14.0) - 0.5) * 0.3; // small jitter
     let speed = cruise_speed() * (0.8 + 0.4 * hash(seed_base + 3.0));
     let vel = vec2f(cos(angle), sin(angle)) * speed;
 
@@ -165,7 +169,9 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     // --- Read all params + audio modulation ---
     let drive = audio_drive();
     let sep_w = separation_weight();
-    let coh_w = cohesion_weight() * (1.0 + u.mid * drive * 1.5);
+    // mfcc(1u) = spectral tilt: bright timbre tightens flock, dark loosens
+    let timbre_coh = 1.0 + (mfcc(1u) * 0.5 + u.mid * 0.5) * drive * 1.5;
+    let coh_w = cohesion_weight() * timbre_coh;
     let heading_smooth = heading_smoothing();
 
     // Vicsek noise: eta sweeps order→chaos with bass
@@ -324,13 +330,15 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let angle_delta = atan2(sin(raw_heading - heading), cos(raw_heading - heading));
     let new_heading = heading + angle_delta * heading_smooth;
 
-    // --- Speed: base * centroid_mod * per-bird variation * beat pulse ---
+    // --- Speed: base * centroid_mod * flux agitation * per-bird * beat pulse ---
     // Min/max speed clamping prevents stalling (blob collapse) and runaway
     let base_spd = cruise_speed();
     let centroid_mod = 1.0 + (u.centroid - 0.5) * drive * 0.8;
+    // Spectral flux = timbral change rate → flock agitation
+    let flux_mod = 1.0 + u.flux * drive * 0.6;
     let per_bird = 0.85 + hash(f32(idx) * 7.1) * 0.3;
     let beat_pulse = 1.0 + sin(u.beat_phase * PI * 2.0) * 0.08;
-    let speed = clamp(base_spd * centroid_mod * per_bird * beat_pulse, base_spd * 0.5, base_spd * 2.0);
+    let speed = clamp(base_spd * centroid_mod * flux_mod * per_bird * beat_pulse, base_spd * 0.5, base_spd * 2.5);
     let new_vel = vec2f(cos(new_heading), sin(new_heading)) * speed;
 
     // --- Boundary: soft repulsion from screen edges ---
@@ -379,9 +387,13 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     }
     let rim_param = param(2u);  // color_mode: 0=silhouette, 1=full rim
     let rim_intensity = rim_param * (u.rms * drive * 0.6 + u.onset * 0.3);
-    // Centroid shifts rim color: low freq = cool blue-gray, high freq = warm amber
-    let rim_warmth = smoothstep(0.3, 0.7, u.centroid);
-    let rim_color = mix(vec3f(0.45, 0.5, 0.65), vec3f(1.0, 0.7, 0.3), rim_warmth);
+    // Dominant chroma drives rim hue — musical key → flock edge color
+    // Centroid still provides warm/cool bias as secondary influence
+    let hue = u.dominant_chroma + u.centroid * 0.15;
+    let rim_r = abs(fract(hue) * 6.0 - 3.0) - 1.0;
+    let rim_g = 2.0 - abs(fract(hue) * 6.0 - 2.0);
+    let rim_b = 2.0 - abs(fract(hue) * 6.0 - 4.0);
+    let rim_color = clamp(vec3f(rim_r, rim_g, rim_b), vec3f(0.3), vec3f(1.0));
     col += rim_color * edge_factor * rim_intensity * 0.12;
     // Y-depth tint: "closer" (lower) birds slightly warmer
     let y_depth = smoothstep(-0.5, 0.5, -pos.y);
