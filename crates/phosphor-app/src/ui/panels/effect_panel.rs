@@ -225,18 +225,33 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
 
 // ── Type legend row ──────────────────────────────────────────────────
 
+fn type_tooltip(et: EffectType) -> &'static str {
+    match et {
+        EffectType::Shader => "Fragment shader effect \u{2014} runs a pixel shader each frame",
+        EffectType::Particle => "Particle system with compute simulation + render shader",
+        EffectType::Feedback => "Feedback loop \u{2014} accumulates prior frames with decay",
+    }
+}
+
 fn draw_type_legend(ui: &mut Ui, tc: &crate::ui::theme::colors::ThemeColors) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         for et in [EffectType::Shader, EffectType::Particle, EffectType::Feedback] {
             let color = type_color(et);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(3.0, 10.0), egui::Sense::hover());
-            ui.painter().rect_filled(rect, 1.0, color);
-            ui.label(
-                RichText::new(type_title(et))
-                    .size(8.0)
-                    .color(tc.text_secondary),
-            );
+            let resp = ui
+                .horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = ui.spacing().item_spacing.x;
+                    let (rect, _) =
+                        ui.allocate_exact_size(Vec2::new(3.0, 10.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 1.0, color);
+                    ui.label(
+                        RichText::new(type_title(et))
+                            .size(8.0)
+                            .color(tc.text_secondary),
+                    );
+                })
+                .response;
+            resp.on_hover_text(type_tooltip(et));
         }
     });
     ui.add_space(4.0);
