@@ -427,6 +427,24 @@
 - "Edit Shader" → "Edit Effect", "Copy Shader" → "Copy Effect" button labels
 - 12 new unit tests for PfxDiff and merge_from_defs
 
+### Bug Fixes
+- Fix BPM detection reporting double tempo (~290 instead of ~145 BPM): remove cascading octave-up correction that fought multi-ratio disambiguation, tighten tempo prior σ from 1.5 to 1.0, widen frame time clamp to tolerate real audio thread timing, reduce Kalman snap escape from 50 to 30 frames
+
+## v1.2.1 — 2026-03-05
+
+### Audio
+- Add WASAPI loopback capture for Windows — auto-captures desktop audio (what's playing through speakers) without requiring Stereo Mix
+- WASAPI backend uses `windows` crate COM APIs: `IMMDeviceEnumerator` → `IAudioClient` (loopback) → `IAudioCaptureClient`
+- Same fallback pattern as Linux: try WASAPI loopback first, fall back to cpal input devices
+- Supports float32, int16, and int24 formats with stereo→mono downmix
+- Device friendly name shown in status bar (e.g. "Speakers (Realtek Audio)")
+
+### Bug Fixes
+- Fix webcam "Failed to fulfill requested format" on Windows: cameras that only support raw formats (YUYV/NV12) now work via automatic fallback from MJPEG to any supported format
+
+### CI
+- Upload debug build artifacts on PRs for all platforms
+
 ## v1.2.0 — 2026-02-28
 
 ### GPU Particle System

@@ -37,6 +37,28 @@ fn requested_format(resolution: Option<(u32, u32)>) -> RequestedFormat<'static> 
     }
 }
 
+/// Try to open a camera with MJPEG preference, falling back to any supported format.
+/// Many Windows webcams only support raw formats (YUYV/NV12), not MJPEG.
+fn open_camera_with_fallback(
+    device_index: u32,
+    resolution: Option<(u32, u32)>,
+) -> Result<Camera, String> {
+    let try_open = |fmt| -> Result<Camera, String> {
+        let mut c =
+            Camera::new(CameraIndex::Index(device_index), fmt).map_err(|e| e.to_string())?;
+        c.open_stream().map_err(|e| e.to_string())?;
+        Ok(c)
+    };
+
+    try_open(requested_format(resolution)).or_else(|first_err| {
+        log::warn!("Preferred webcam format failed ({first_err}), trying fallback...");
+        try_open(RequestedFormat::new::<RgbAFormat>(
+            RequestedFormatType::AbsoluteHighestResolution,
+        ))
+        .map_err(|_| camera_error_message(device_index, &first_err))
+    })
+}
+
 impl WebcamCapture {
     /// Start capturing from the given camera index at the requested resolution.
     /// Validates the camera can be opened before spawning the capture thread.
@@ -56,16 +78,7 @@ impl WebcamCapture {
         // Validate camera access on calling thread (Camera is !Send so we can't move it).
         // Open, check it works, then close so the capture thread can reopen it.
         let actual_res = {
-            let mut camera = Camera::new(
-                CameraIndex::Index(device_index),
-                requested_format(resolution),
-            )
-            .map_err(|e| camera_error_message(device_index, &e.to_string()))?;
-
-            camera
-                .open_stream()
-                .map_err(|e| camera_error_message(device_index, &e.to_string()))?;
-
+            let mut camera = open_camera_with_fallback(device_index, resolution)?;
             let r = camera.resolution();
             let res = (r.width(), r.height());
             let _ = camera.stop_stream();
@@ -187,21 +200,13 @@ fn capture_thread(
     frame_tx: Sender<WebcamFrame>,
     shutdown: Arc<AtomicBool>,
 ) {
-    let mut camera = match Camera::new(
-        CameraIndex::Index(device_index),
-        requested_format(resolution),
-    ) {
+    let mut camera = match open_camera_with_fallback(device_index, resolution) {
         Ok(c) => c,
         Err(e) => {
-            log::error!("{}", camera_error_message(device_index, &e.to_string()));
+            log::error!("{e}");
             return;
         }
     };
-
-    if let Err(e) = camera.open_stream() {
-        log::error!("{}", camera_error_message(device_index, &e.to_string()));
-        return;
-    }
 
     let res = camera.resolution();
     log::info!(
