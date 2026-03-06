@@ -5,6 +5,9 @@
 
 ## v1.5.0 — 2026-03-06
 
+### Docs
+- Add QUICK-REFERENCE.md with keyboard shortcuts, OSC/MIDI commands, and CLI flags
+
 ### Fixed
 - Scene cue delete button disappearing when the same preset is added as a cue multiple times (egui widget ID collision)
 - Crash (index out of bounds) when deleting a scene cue while the timeline is playing
