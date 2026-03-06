@@ -99,8 +99,8 @@ Cross-platform particle and shader engine for live VJ performance. Built with ra
 - 20-field AudioFeatures: 7 frequency bands, 2 aggregates (rms, kick), 6 spectral shape, 5 beat detection
 - Adaptive normalization: per-feature running min/max replaces all fixed gain multipliers
 - 3-stage beat detection: OnsetDetector (log-magnitude multi-band spectral flux + adaptive threshold) → TempoEstimator (FFT autocorrelation + Kalman filter) → BeatScheduler (predictive state machine with phase correction)
-- TempoEstimator: 8s onset buffer, FFT-based Wiener-Khinchin autocorrelation (|FFT|², mean-subtracted), genre-aware log-Gaussian tempo prior (center 150 BPM, σ=1.5), multi-ratio octave correction (9 ratios incl. 1:3, 1:4), cascading octave-up correction via local peak detection
-- KalmanBpm: log₂-BPM space filter with octave snap (2:1/1:2 within 5%, 50-frame escape), adaptive Q/R, confidence gating (< 0.15 skipped), divergence reset after 15 frames
+- TempoEstimator: 8s onset buffer, FFT-based Wiener-Khinchin autocorrelation (|FFT|², mean-subtracted), genre-aware log-Gaussian tempo prior (center 150 BPM, σ=1.0), multi-ratio octave correction (9 ratios incl. 1:3, 1:4)
+- KalmanBpm: log₂-BPM space filter with octave snap (2:1/1:2 within 5%, 30-frame escape), adaptive Q/R, confidence gating (< 0.15 skipped), divergence reset after 15 frames
 - Dedicated kick detection: half-wave rectified spectral flux in 30-120 Hz from 4096-pt FFT
 - Bass bands use linear RMS, mid/high bands use dB scaling (80dB range)
 - Beat trigger (`beat` field) replaces onset-based beat proxy (`onset > 0.5`)

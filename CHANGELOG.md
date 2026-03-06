@@ -3,6 +3,11 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## Unreleased
+
+### Bug Fixes
+- Fix BPM detection reporting double tempo (~290 instead of ~145 BPM): remove cascading octave-up correction that fought multi-ratio disambiguation, tighten tempo prior σ from 1.5 to 1.0, widen frame time clamp to tolerate real audio thread timing, reduce Kalman snap escape from 50 to 30 frames
+
 ## v1.2.1 — 2026-03-05
 
 ### Audio
