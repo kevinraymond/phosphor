@@ -64,19 +64,24 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
 
     ui.horizontal(|ui| {
         ui.label(
+            RichText::new(format_count(info.alive_count))
+                .size(11.0)
+                .strong()
+                .color(tc.text_primary),
+        );
+        ui.label(
             RichText::new(format!(
-                "{} / {} alive ({:.0}%)",
-                format_count(info.alive_count),
+                "/ {} alive ({:.0}%)",
                 format_count(info.max_count),
                 util * 100.0,
             ))
-            .size(BODY_SIZE)
-            .color(tc.text_primary),
+            .size(SMALL_SIZE)
+            .color(tc.text_secondary),
         );
     });
 
     // Utilization bar
-    let bar_height = 4.0;
+    let bar_height = 3.0;
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), bar_height),
         egui::Sense::hover(),
@@ -96,10 +101,19 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
 
     ui.add_space(6.0);
 
+    // Blend mode badge (standalone, bordered)
+    egui::Frame::NONE
+        .fill(tc.widget_bg)
+        .stroke(egui::Stroke::new(1.0, tc.card_border))
+        .corner_radius(3.0)
+        .inner_margin(egui::Margin::symmetric(6, 2))
+        .show(ui, |ui| {
+            ui.label(RichText::new(&info.blend_mode).size(9.0).color(tc.text_secondary));
+        });
+
     // Feature badges
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        feature_badge(ui, &info.blend_mode, tc.text_secondary);
         if info.has_flow_field {
             feature_badge(ui, "flow field", tc.accent);
         }
@@ -614,111 +628,56 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
     let size_max = size.max(0.1);
     let drag_min = drag.min(0.8);
 
-    egui::Grid::new("particle_params")
-        .num_columns(2)
-        .spacing([8.0, 3.0])
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new("Emit rate")
-                    .size(SMALL_SIZE)
-                    .color(tc.text_secondary),
-            );
-            let r = ui.add(
-                egui::Slider::new(&mut emit_rate, 10.0..=emit_max)
-                    .logarithmic(true)
-                    .show_value(true)
-                    .custom_formatter(|v, _| format!("{:.0}/s", v)),
-            );
-            if r.changed() {
-                ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::new("particle_emit_rate"), emit_rate);
+    // Helper macro for compact param rows: [label left] [slider fills | value right]
+    macro_rules! param_row {
+        ($ui:expr, $label:expr, $val:expr, $range:expr, $log:expr, $fmt:expr, $id:expr) => {{
+            $ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.label(
+                    RichText::new($label)
+                        .size(SMALL_SIZE)
+                        .color(tc.text_secondary),
+                );
+                let fmt_fn: fn(f64, std::ops::RangeInclusive<usize>) -> String = $fmt;
+                let val_text = fmt_fn(*$val as f64, 0..=0);
+                // Right-to-left: value rightmost, slider fills remaining
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.label(
+                        RichText::new(val_text)
+                            .size(SMALL_SIZE)
+                            .color(tc.text_secondary),
+                    );
+                    ui.spacing_mut().slider_width = ui.available_width();
+                    let r = ui.add(
+                        egui::Slider::new($val, $range)
+                            .logarithmic($log)
+                            .show_value(false)
+                            .custom_formatter(fmt_fn),
+                    );
+                    if r.changed() {
+                        let v = *$val;
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new($id), v);
+                        });
+                    }
                 });
-            }
-            ui.end_row();
+            });
+        }};
+    }
 
-            ui.label(
-                RichText::new("Burst")
-                    .size(SMALL_SIZE)
-                    .color(tc.text_secondary),
-            );
-            let r = ui.add(egui::Slider::new(&mut burst, 0..=burst_max).show_value(true));
-            if r.changed() {
-                ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::new("particle_burst"), burst);
-                });
-            }
-            ui.end_row();
-
-            ui.label(
-                RichText::new("Lifetime")
-                    .size(SMALL_SIZE)
-                    .color(tc.text_secondary),
-            );
-            let r = ui.add(
-                egui::Slider::new(&mut lifetime, 0.5..=life_max)
-                    .show_value(true)
-                    .custom_formatter(|v, _| format!("{:.1}s", v)),
-            );
-            if r.changed() {
-                ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::new("particle_lifetime"), lifetime);
-                });
-            }
-            ui.end_row();
-
-            ui.label(
-                RichText::new("Speed")
-                    .size(SMALL_SIZE)
-                    .color(tc.text_secondary),
-            );
-            let r = ui.add(
-                egui::Slider::new(&mut speed, speed_min..=speed_max)
-                    .logarithmic(speed_log)
-                    .show_value(true)
-                    .custom_formatter(|v, _| format!("{:.3}", v)),
-            );
-            if r.changed() {
-                ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::new("particle_speed"), speed);
-                });
-            }
-            ui.end_row();
-
-            ui.label(
-                RichText::new("Size")
-                    .size(SMALL_SIZE)
-                    .color(tc.text_secondary),
-            );
-            let r = ui.add(
-                egui::Slider::new(&mut size, size_min..=size_max)
-                    .logarithmic(true)
-                    .show_value(true)
-                    .custom_formatter(|v, _| format!("{:.4}", v)),
-            );
-            if r.changed() {
-                ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::new("particle_size"), size);
-                });
-            }
-            ui.end_row();
-
-            ui.label(
-                RichText::new("Drag")
-                    .size(SMALL_SIZE)
-                    .color(tc.text_secondary),
-            );
-            let r = ui.add(
-                egui::Slider::new(&mut drag, drag_min..=1.0)
-                    .show_value(true)
-                    .custom_formatter(|v, _| format!("{:.3}", v)),
-            );
-            if r.changed() {
-                ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::new("particle_drag"), drag);
-                });
-            }
-            ui.end_row();
-        });
+    param_row!(ui, "Emit rate", &mut emit_rate, 10.0..=emit_max, true,
+        |v, _| format!("{:.0}/s", v), "particle_emit_rate");
+    param_row!(ui, "Burst", &mut burst, 0..=burst_max, false,
+        |v, _| format!("{:.0}", v), "particle_burst");
+    param_row!(ui, "Lifetime", &mut lifetime, 0.5..=life_max, false,
+        |v, _| format!("{:.1}s", v), "particle_lifetime");
+    param_row!(ui, "Speed", &mut speed, speed_min..=speed_max, speed_log,
+        |v, _| format!("{:.3}", v), "particle_speed");
+    param_row!(ui, "Size", &mut size, size_min..=size_max, true,
+        |v, _| format!("{:.4}", v), "particle_size");
+    param_row!(ui, "Drag", &mut drag, drag_min..=1.0, false,
+        |v, _| format!("{:.3}", v), "particle_drag");
 }
 
 fn feature_badge(ui: &mut Ui, text: &str, color: egui::Color32) {

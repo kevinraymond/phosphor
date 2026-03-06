@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### UI
+- Right panel restyle: single-row param layout (name/slider/value/M/O), compact 16×14 MIDI/OSC badges, smaller Reset All button, large particle count header with 3px health bar, standalone bordered blend mode badge, compact particle param rows replacing grid, tab-strip obstacle source selector with active state styling, compact obstacle slider rows with separate value labels, audio mapping hover background lift with fixed-width 52px feature names
 - Remove redundant activity dots from Settings subsection enable rows; status bar always shows MIDI/OSC/WEB/NDI indicators with three-state dots (active/enabled-idle/disabled)
 - Consolidate MIDI, OSC, Web, NDI/Outputs, and Global into single collapsible "Settings" section with subsections — header shows labeled status dots, subsection headers use smaller font/arrow for visual hierarchy, protocol-specific badge colors
 - Trigger grids (MIDI + OSC) use fixed-width label columns (52px) for proper badge alignment across rows

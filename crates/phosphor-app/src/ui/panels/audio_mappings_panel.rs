@@ -1,4 +1,4 @@
-use egui::{Color32, RichText, Shape, Stroke, Ui, Vec2, pos2};
+use egui::{Color32, Margin, RichText, Shape, Stroke, Ui, Vec2, pos2, vec2};
 
 use crate::effect::format::AudioMapping;
 use crate::ui::theme::colors::theme_colors;
@@ -70,20 +70,43 @@ pub fn draw_audio_mappings(ui: &mut Ui, mappings: &[AudioMapping]) {
     }
 
     for mapping in mappings {
-        ui.horizontal(|ui| {
-            let color = feature_color(&mapping.feature);
-            ui.label(
-                RichText::new(feature_display_name(&mapping.feature))
-                    .size(SMALL_SIZE)
-                    .color(color)
-                    .strong(),
-            );
-            draw_arrow_right(ui, tc.text_secondary);
-            ui.label(
-                RichText::new(&mapping.target)
-                    .size(SMALL_SIZE)
-                    .color(tc.text_primary),
-            );
-        });
+        let id = ui.id().with(&mapping.feature).with(&mapping.target);
+        let hovered: bool = ui.ctx().data(|d| d.get_temp(id).unwrap_or(false));
+
+        let fill = if hovered {
+            Color32::from_rgba_unmultiplied(255, 255, 255, 8)
+        } else {
+            Color32::TRANSPARENT
+        };
+
+        let resp = egui::Frame::NONE
+            .fill(fill)
+            .corner_radius(4.0)
+            .inner_margin(Margin::symmetric(4, 4))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.allocate_ui_with_layout(
+                        vec2(52.0, 16.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                RichText::new(feature_display_name(&mapping.feature))
+                                    .size(SMALL_SIZE)
+                                    .color(feature_color(&mapping.feature))
+                                    .strong(),
+                            );
+                        },
+                    );
+                    draw_arrow_right(ui, tc.text_secondary);
+                    ui.add(egui::Label::new(
+                        RichText::new(&mapping.target)
+                            .size(SMALL_SIZE)
+                            .color(tc.text_primary),
+                    ).truncate());
+                });
+            });
+
+        let is_hovered = resp.response.hovered();
+        ui.ctx().data_mut(|d| d.insert_temp(id, is_hovered));
     }
 }

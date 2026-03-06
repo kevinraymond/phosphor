@@ -110,9 +110,32 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
         );
     });
 
+    // Tab-strip source selector
     ui.horizontal(|ui| {
-        if ui
-            .button("Image")
+        ui.spacing_mut().item_spacing.x = 3.0;
+
+        let tc = &tc;
+        let tab_btn = |ui: &mut Ui, label: &str, is_active: bool| -> egui::Response {
+            let btn = egui::Button::new(
+                RichText::new(label).size(9.0)
+                    .color(if is_active { egui::Color32::WHITE } else { tc.text_secondary })
+            )
+            .fill(if is_active {
+                egui::Color32::from_rgba_unmultiplied(0x3b, 0x82, 0xf6, 50)
+            } else {
+                tc.widget_bg
+            })
+            .stroke(egui::Stroke::new(1.0, if is_active {
+                egui::Color32::from_rgba_unmultiplied(0x3b, 0x82, 0xf6, 100)
+            } else {
+                tc.card_border
+            }))
+            .corner_radius(3.0)
+            .min_size(egui::vec2(0.0, 22.0));
+            ui.add(btn)
+        };
+
+        if tab_btn(ui, "Image", info.source == "image")
             .on_hover_text("Load an image as obstacle shape")
             .clicked()
         {
@@ -121,8 +144,7 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
             });
         }
         if info.video_available {
-            if ui
-                .button("Video")
+            if tab_btn(ui, "Video", info.source == "video")
                 .on_hover_text("Load a video as animated obstacle")
                 .clicked()
             {
@@ -131,9 +153,8 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
                 });
             }
         }
-        if info.webcam_available && info.source != "webcam" {
-            if ui
-                .button("Webcam")
+        if info.webcam_available {
+            if tab_btn(ui, "Webcam", info.source == "webcam")
                 .on_hover_text("Use live webcam feed as obstacle")
                 .clicked()
             {
@@ -142,27 +163,23 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
                 });
             }
         }
-        // Depth button: requires webcam + depth feature
         if info.depth_available && info.webcam_available {
             if info.depth_model_downloaded {
-                if info.source != "depth" {
-                    if ui
-                        .button("Depth")
-                        .on_hover_text("Monocular depth estimation (MiDaS)")
-                        .clicked()
-                    {
-                        ui.ctx().data_mut(|d| {
-                            d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::UseDepth)
-                        });
-                    }
+                if tab_btn(ui, "Depth", info.source == "depth")
+                    .on_hover_text("Monocular depth estimation (MiDaS)")
+                    .clicked()
+                {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::UseDepth)
+                    });
                 }
             } else if info.depth_downloading.is_some() {
                 let pct = info.depth_downloading.unwrap_or(0);
-                ui.add_enabled(false, egui::Button::new(format!("Depth {pct}%")));
+                ui.add_enabled(false, egui::Button::new(
+                    RichText::new(format!("Depth {pct}%")).size(9.0),
+                ).min_size(egui::vec2(0.0, 22.0)));
             } else {
-                // Show "Depth" button that opens confirmation modal
-                if ui
-                    .button("Depth")
+                if tab_btn(ui, "Depth", false)
                     .on_hover_text("Requires one-time download (~80 MB)")
                     .clicked()
                 {
@@ -172,8 +189,7 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
             }
         }
         if !info.source.is_empty() {
-            if ui
-                .button("Clear")
+            if tab_btn(ui, "Clear", false)
                 .on_hover_text("Remove obstacle and stop capture")
                 .clicked()
             {
@@ -225,48 +241,68 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
             });
     });
 
-    // Threshold slider
+    // Threshold slider — compact row
     let mut threshold = info.threshold;
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
         ui.label(
             RichText::new("Threshold")
-                .size(BODY_SIZE)
+                .size(SMALL_SIZE)
                 .color(tc.text_secondary),
         )
         .on_hover_text("Alpha cutoff for collision detection (lower = more sensitive)");
-        if ui
-            .add(egui::Slider::new(&mut threshold, 0.0..=1.0).step_by(0.01))
-            .changed()
-        {
-            ui.ctx().data_mut(|d| {
-                d.insert_temp(
-                    egui::Id::new("obstacle_cmd"),
-                    ObstacleCommand::SetThreshold(threshold),
-                )
-            });
-        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.label(
+                RichText::new(format!("{:.2}", threshold))
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
+            ui.spacing_mut().slider_width = ui.available_width();
+            if ui
+                .add(egui::Slider::new(&mut threshold, 0.0..=1.0).step_by(0.01).show_value(false))
+                .changed()
+            {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(
+                        egui::Id::new("obstacle_cmd"),
+                        ObstacleCommand::SetThreshold(threshold),
+                    )
+                });
+            }
+        });
     });
 
-    // Elasticity slider
+    // Elasticity slider — compact row
     let mut elasticity = info.elasticity;
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
         ui.label(
             RichText::new("Elasticity")
-                .size(BODY_SIZE)
+                .size(SMALL_SIZE)
                 .color(tc.text_secondary),
         )
         .on_hover_text("Energy preserved on bounce (0 = absorb, 1 = full)");
-        if ui
-            .add(egui::Slider::new(&mut elasticity, 0.0..=1.0).step_by(0.01))
-            .changed()
-        {
-            ui.ctx().data_mut(|d| {
-                d.insert_temp(
-                    egui::Id::new("obstacle_cmd"),
-                    ObstacleCommand::SetElasticity(elasticity),
-                )
-            });
-        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.label(
+                RichText::new(format!("{:.2}", elasticity))
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
+            ui.spacing_mut().slider_width = ui.available_width();
+            if ui
+                .add(egui::Slider::new(&mut elasticity, 0.0..=1.0).step_by(0.01).show_value(false))
+                .changed()
+            {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(
+                        egui::Id::new("obstacle_cmd"),
+                        ObstacleCommand::SetElasticity(elasticity),
+                    )
+                });
+            }
+        });
     });
 }
 
