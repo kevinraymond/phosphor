@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### UI
+- Scenes panel visual refresh: 2-column scene grid tiles, two-line cue rows (top: num+name+hover ×, bottom: transition+duration / hold), green active-cue highlighting, pulsing red LIVE dot, GO button green fill, STOP red outline, hover-reveal delete buttons, hold time always visible, scrollable cue list (up to 6 visible), add-cue bar with separator
 - Presets panel: add "Save current state as preset:" label above name input, and make "+ New" button clear all layers to a fresh Phosphor state with two-click confirmation when unsaved changes exist
 - Amber dirty-state styling for presets panel: custom header with pulsing dot and inline preset name, amber-tinted dirty bar with Update/Reset buttons, amber selected tile, pulsing card border, and bumped tile height to 26px
 - Add effect type indicators to effects panel: left color strip (purple SH / orange PS / teal FB), two-char badge, type legend, and footer breakdown count
@@ -15,6 +16,7 @@
 - Tag 5 feedback effects (Accretion, Array, Chaos, Mycelium, Turing) with explicit `"effect_type": "feedback"` in their .pfx files
 
 ### Fixes
+- Fix preset showing as dirty during ParamMorph scene transitions — morph interpolation now resets param changed flags since it's timeline playback, not user edits
 - Clamp particle count to GPU dispatch dimension limit (`max_compute_workgroups_per_dimension × 256`) to prevent validation errors on high-count effects
 - Add per-effect `max_scaled_count` field — quality multiplier won't push past this ceiling; applied to Accretion (60K), Genesis (24K), Murmur (2.4M), and Symbiosis (4M)
 - Hide Stress test effect from effects panel

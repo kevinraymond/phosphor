@@ -779,6 +779,12 @@ impl App {
             } = &self.timeline.state
             {
                 self.apply_morph_interpolation(*progress);
+                // Morph interpolation sets params every frame via param_store.set(),
+                // which marks changed=true. Reset it — this is timeline playback,
+                // not a user edit, so it should not mark the preset dirty.
+                for layer in &mut self.layer_stack.layers {
+                    layer.param_store.changed = false;
+                }
             }
         }
 
