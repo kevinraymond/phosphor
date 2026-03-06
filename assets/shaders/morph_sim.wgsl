@@ -135,6 +135,11 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     var pos = p.pos_life.xy;
     var vel = p.vel_size.xy;
 
+    // MFCC(1) modulates transition speed: bright timbre accelerates, dark slows
+    let mfcc1 = clamp(mfcc(1u) * 0.02, -0.5, 0.5);
+    let speed_mod = 1.0 + mfcc1;
+    let mod_progress = clamp(progress * speed_mod, 0.0, 1.0);
+
     // Per-particle staggered progress using hash for random offset
     let particle_hash = hash(f32(idx) * 1.618);
     var local_t: f32;
@@ -143,11 +148,11 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         // Cascade: spatial stagger (left-to-right wave)
         let spatial_t = (src_pos.x + 1.0) * 0.5; // 0 at left, 1 at right
         let stagger_offset = spatial_t * stagger;
-        local_t = clamp((progress - stagger_offset) / max(trans_w, 0.01), 0.0, 1.0);
+        local_t = clamp((mod_progress - stagger_offset) / max(trans_w, 0.01), 0.0, 1.0);
     } else {
         // Other styles: random per-particle stagger
         let stagger_offset = particle_hash * stagger;
-        local_t = clamp((progress - stagger_offset) / max(trans_w, 0.01), 0.0, 1.0);
+        local_t = clamp((mod_progress - stagger_offset) / max(trans_w, 0.01), 0.0, 1.0);
     }
 
     let eased_t = ease_in_out_cubic(local_t);
@@ -162,11 +167,13 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         vel = vec2f(0.0);
     } else if style == 1u {
         // Explode-reform: burst at start, delayed spring
+        // MFCC(2) amplifies explosion scatter
+        let mfcc2_explode = clamp(mfcc(2u) * 0.02, 0.0, 1.0);
         if is_transitioning {
             if local_t < 0.3 {
                 let burst_seed = f32(idx) * 3.17 + u.time;
                 let burst_dir = vec2f(hash(burst_seed) - 0.5, hash(burst_seed + 5.0) - 0.5);
-                let burst_strength = (1.0 - local_t / 0.3) * 2.0 * (1.0 + u.bass);
+                let burst_strength = (1.0 - local_t / 0.3) * 2.0 * (1.0 + u.bass) * (1.0 + mfcc2_explode);
                 vel += burst_dir * burst_strength * dt * 10.0;
             } else {
                 let reform_t = (local_t - 0.3) / 0.7;
@@ -207,7 +214,9 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
             vel += to_target * spring_k * dt;
 
             if turb_amt > 0.0 {
-                let turb_scale = sin(local_t * PI) * turb_amt;
+                // MFCC(2) drives mid-transition scatter: spectral complexity = more displacement
+                let mfcc2_scatter = clamp(mfcc(2u) * 0.02, 0.0, 1.0);
+                let turb_scale = sin(local_t * PI) * turb_amt * (1.0 + mfcc2_scatter * 2.0);
                 let noise_pos = pos * 4.0 + vec2f(u.time * 0.7);
                 let turb = curl_noise_2d(noise_pos);
                 vel += turb * turb_scale * dt * 2.0;

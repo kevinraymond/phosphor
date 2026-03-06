@@ -1010,7 +1010,7 @@ impl App {
 
                     // Morph state management
                     if let Some(ref mut morph) = ps.morph_state {
-                        morph.update(dt, audio.beat);
+                        morph.update(dt, audio.beat, audio.dominant_chroma);
                     }
                 }
             }

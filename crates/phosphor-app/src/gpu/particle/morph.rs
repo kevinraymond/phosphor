@@ -114,7 +114,8 @@ impl MorphState {
 
     /// Advance progress and handle auto-cycle.
     /// `beat` is 1.0 on detected beats, 0.0 otherwise (discrete signal from beat tracker).
-    pub fn update(&mut self, dt: f32, beat: f32) {
+    /// `dominant_chroma` is 0–1 (pitch class / 11), used for chroma-driven target selection.
+    pub fn update(&mut self, dt: f32, beat: f32, dominant_chroma: f32) {
         // Advance transition progress (only when auto-cycling is active)
         if self.transitioning && self.auto_cycle != AutoCycle::Off {
             self.progress += dt / self.transition_duration;
@@ -137,7 +138,15 @@ impl MorphState {
             match self.auto_cycle {
                 AutoCycle::OnBeat => {
                     if beat > 0.5 {
-                        self.trigger_next();
+                        // Chroma-driven target selection: pitch class picks morph target
+                        let target = ((dominant_chroma * self.target_count as f32).floor() as u32)
+                            % self.target_count;
+                        if target != self.dest_index {
+                            self.trigger_morph(target);
+                        } else {
+                            // Same target — fall back to sequential so we still get a morph
+                            self.trigger_next();
+                        }
                     }
                 }
                 AutoCycle::Timed(interval) => {

@@ -30,6 +30,7 @@
 - Cymatics audio remapping: chroma-driven Chladni mode selection (curated visually-distinct (n,m) pairs per pitch class), mfcc[0] vibrational amplitude, chroma peakedness pattern clarity
 - Murmur audio remapping: mfcc[1] flock cohesion (bright=tight, dark=dispersed), mfcc[3] predator aggressiveness, flux speed agitation, dominant_chroma rim/sky hue; fix emitter waves by probing whole screen + inheriting donor heading
 - Symbiosis audio remapping: mfcc[4-6] per-species force modulation (timbre shifts ecology), dominant_chroma species color rotation, flux interaction radius expansion, zcr Brownian noise jitter
+- Morph audio remapping: dominant_chroma target shape selection (pitch class picks morph target instead of sequential), mfcc[1] transition speed modulation, mfcc[2] mid-transition scatter/explosion strength, chroma-tinted background
 - Add `zcr` (zero-crossing rate) to ParticleUniforms for compute shader access
 
 ### Effects
