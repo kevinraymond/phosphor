@@ -1,9 +1,10 @@
-use egui::{Color32, CornerRadius, RichText, Stroke, Ui, Vec2};
+use egui::{Color32, CornerRadius, Rect, RichText, Stroke, Ui, Vec2};
 
 use crate::scene::timeline::{TimelineInfo, TimelineInfoState};
 use crate::scene::types::{AdvanceMode, TransitionType};
 use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
+use crate::ui::widgets;
 
 /// Info passed from App to the scene panel (avoids borrow conflicts).
 #[derive(Debug, Clone)]
@@ -554,11 +555,11 @@ fn draw_cue_row(
     let is_current = active && idx == current_cue;
     let is_target = transitioning_to == Some(idx);
 
-    // Green for active cue, lighter green for transition target
+    // Accent for active cue, lighter accent for transition target
     let card_fill = if is_current {
-        tc.success.linear_multiply(0.12)
+        tc.accent.linear_multiply(0.12)
     } else if is_target {
-        tc.success.linear_multiply(0.06)
+        tc.accent.linear_multiply(0.06)
     } else {
         tc.card_bg
     };
@@ -566,9 +567,9 @@ fn draw_cue_row(
         Stroke::new(
             1.0,
             Color32::from_rgba_unmultiplied(
-                tc.success.r(),
-                tc.success.g(),
-                tc.success.b(),
+                tc.accent.r(),
+                tc.accent.g(),
+                tc.accent.b(),
                 77, // ~0.3 alpha
             ),
         )
@@ -576,9 +577,9 @@ fn draw_cue_row(
         Stroke::new(
             1.0,
             Color32::from_rgba_unmultiplied(
-                tc.success.r(),
-                tc.success.g(),
-                tc.success.b(),
+                tc.accent.r(),
+                tc.accent.g(),
+                tc.accent.b(),
                 40,
             ),
         )
@@ -599,7 +600,7 @@ fn draw_cue_row(
             ui.horizontal(|ui| {
                 // Cue number (right-aligned in 14px)
                 let num_color = if is_current {
-                    tc.success
+                    tc.accent
                 } else {
                     tc.text_secondary
                 };
@@ -614,7 +615,7 @@ fn draw_cue_row(
 
                 // Preset name — click to jump
                 let name_color = if is_current {
-                    tc.success
+                    tc.accent
                 } else {
                     tc.text_primary
                 };
@@ -747,6 +748,67 @@ fn draw_cue_row(
         });
 
     let _ = frame_resp.response.interact(egui::Sense::hover());
+
+    // ── Bottom progress bar (painted over the frame) ──
+    let card_rect = frame_resp.response.rect;
+    let bar_h = 3.0;
+    let bar_y = card_rect.max.y - bar_h;
+    let bar_full = Rect::from_min_size(
+        egui::pos2(card_rect.min.x, bar_y),
+        Vec2::new(card_rect.width(), bar_h),
+    );
+
+    if let Some(ref tl) = info.timeline {
+        if tl.active {
+            let painter = ui.painter();
+
+            if let TimelineInfoState::Transitioning {
+                to,
+                progress,
+                transition_type,
+                ..
+            } = &tl.state
+            {
+                if *to == idx {
+                    // Transition progress bar with typed color
+                    let bar_color = match transition_type {
+                        TransitionType::Cut => Color32::TRANSPARENT,
+                        TransitionType::Dissolve => tc.accent,
+                        TransitionType::ParamMorph => tc.success,
+                    };
+                    let progress_rect = Rect::from_min_size(
+                        bar_full.min,
+                        Vec2::new(bar_full.width() * progress, bar_h),
+                    );
+                    painter.rect_filled(progress_rect, CornerRadius::ZERO, bar_color);
+                    // Stripes over the progress portion
+                    let stripe_color = Color32::from_rgba_unmultiplied(
+                        bar_color.r(),
+                        bar_color.g(),
+                        bar_color.b(),
+                        60,
+                    );
+                    widgets::draw_diagonal_stripes(painter, progress_rect, stripe_color, 4.0);
+                }
+            } else if let TimelineInfoState::Holding {
+                elapsed,
+                hold_secs,
+            } = &tl.state
+            {
+                if idx == tl.current_cue {
+                    // Hold progress bar (green)
+                    if let Some(hold) = hold_secs {
+                        let frac = (elapsed / hold).min(1.0);
+                        let progress_rect = Rect::from_min_size(
+                            bar_full.min,
+                            Vec2::new(bar_full.width() * frac, bar_h),
+                        );
+                        painter.rect_filled(progress_rect, CornerRadius::ZERO, tc.accent);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn truncate_scene_name(name: &str, max_chars: usize) -> String {

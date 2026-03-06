@@ -6,7 +6,8 @@
 ## Unreleased
 
 ### UI
-- Scenes panel visual refresh: 2-column scene grid tiles, two-line cue rows (top: num+name+hover ×, bottom: transition+duration / hold), green active-cue highlighting, pulsing red LIVE dot, GO button green fill, STOP red outline, hover-reveal delete buttons, hold time always visible, scrollable cue list (up to 6 visible), add-cue bar with separator
+- Scenes panel visual refresh: 2-column scene grid tiles, two-line cue rows with bottom progress bars (hold elapsed + transition progress with stripes), accent active-cue highlighting, pulsing red LIVE dot, GO button green fill, STOP red outline, hover-reveal delete buttons, hold time always visible, scrollable cue list (up to 6 visible), add-cue bar with separator
+- Timeline bar polish: accent-colored active cue, striped from-cue during transitions, two-line target cue label (name + "Morph 58%"), transition-typed playhead colors
 - Presets panel: add "Save current state as preset:" label above name input, and make "+ New" button clear all layers to a fresh Phosphor state with two-click confirmation when unsaved changes exist
 - Amber dirty-state styling for presets panel: custom header with pulsing dot and inline preset name, amber-tinted dirty bar with Update/Reset buttons, amber selected tile, pulsing card border, and bumped tile height to 26px
 - Add effect type indicators to effects panel: left color strip (purple SH / orange PS / teal FB), two-char badge, type legend, and footer breakdown count

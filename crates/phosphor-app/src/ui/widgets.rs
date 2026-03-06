@@ -104,3 +104,22 @@ pub(crate) fn draw_section_arrow(ui: &mut Ui, is_open: bool, color: Color32) {
 pub fn badge(ui: &mut Ui, text: &str, color: Color32) {
     ui.label(RichText::new(text).size(SMALL_SIZE).color(color));
 }
+
+/// Draw diagonal stripes over a rect (clipped). Used for transition effects.
+pub fn draw_diagonal_stripes(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    color: Color32,
+    spacing: f32,
+) {
+    let clipped = painter.with_clip_rect(rect);
+    let stroke = Stroke::new(1.5, color);
+    let h = rect.height();
+    let mut offset = -h;
+    while offset < rect.width() {
+        let from = egui::pos2(rect.left() + offset, rect.bottom());
+        let to = egui::pos2(rect.left() + offset + h, rect.top());
+        clipped.line_segment([from, to], stroke);
+        offset += spacing;
+    }
+}
