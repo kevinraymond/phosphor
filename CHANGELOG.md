@@ -21,6 +21,7 @@
 - Add effect type indicators to effects panel: left color strip (purple SH / orange PS / teal FB), two-char badge, type legend, and footer breakdown count
 - Add hover tooltips to effect type color legend explaining Shader, Particle+Shader, and Feedback categories
 - Show Copy and Edit buttons side by side — Copy enabled for visible built-ins only, Edit enabled for user effects only; fixes Copy being clickable on hidden Phosphor branding effect
+- Add "msc: N" badge to PARTICLES panel showing `max_scaled_count` with tooltip; merge blend mode and feature badges into single wrapping horizontal row; normalize morph section to 9pt font
 - Add `EffectType` enum (Shader, Particle, Feedback) with optional `effect_type` field in .pfx format — auto-detects from data when absent
 - Tag 5 feedback effects (Accretion, Array, Chaos, Mycelium, Turing) with explicit `"effect_type": "feedback"` in their .pfx files
 

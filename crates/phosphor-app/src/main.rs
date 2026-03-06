@@ -262,6 +262,7 @@ impl ApplicationHandler for PhosphorApp {
                                 has_interaction: ps.def.interaction,
                                 has_sprite: ps.sprite.is_some(),
                                 is_compute_raster: ps.is_compute_raster(),
+                                max_scaled_count: ps.def.max_scaled_count,
                                 has_image_source: ps.has_aux_data
                                     || ps.def.emitter.shape == "image",
                                 source_type,
