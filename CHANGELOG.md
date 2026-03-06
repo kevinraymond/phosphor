@@ -6,6 +6,9 @@
 ## Unreleased
 
 ### UI
+- Consolidate MIDI, OSC, Web, NDI/Outputs, and Global into single collapsible "Settings" section with subsections — header shows labeled status dots, subsection headers use smaller font/arrow for visual hierarchy, protocol-specific badge colors
+- Trigger grids (MIDI + OSC) use fixed-width label columns (52px) for proper badge alignment across rows
+- OSC TX settings wrapped in subtle bordered frame; Global settings use fixed-width labels aligned to dropdowns
 - Layers panel visual refresh: type color legend (FX/MD/WC), left color strip per card, layer index numbers, type badges, type-colored add buttons (all three on one row), subtle "Clear All" text link with red hover/confirm, footer type breakdown counts, hover-only delete buttons, stronger dimming for disabled layers
 - Reorder sidebar panels: Effects → Layers → Presets → Scenes
 - Layer badge shows "N/8" capacity format

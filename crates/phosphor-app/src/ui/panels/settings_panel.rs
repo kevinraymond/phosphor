@@ -12,11 +12,19 @@ pub fn draw_settings_panel(
 ) {
     let tc = theme_colors(ui.ctx());
 
+    let label_width = 52.0;
+
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("Theme")
-                .size(SMALL_SIZE)
-                .color(tc.text_secondary),
+        ui.allocate_ui_with_layout(
+            egui::vec2(label_width, ui.spacing().interact_size.y),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    RichText::new("Theme")
+                        .size(SMALL_SIZE)
+                        .color(tc.text_secondary),
+                );
+            },
         );
         egui::ComboBox::from_id_salt("theme_selector")
             .selected_text(RichText::new(current_theme.display_name()).size(SMALL_SIZE))
@@ -37,10 +45,16 @@ pub fn draw_settings_panel(
     });
 
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("Particle Quality")
-                .size(SMALL_SIZE)
-                .color(tc.text_secondary),
+        ui.allocate_ui_with_layout(
+            egui::vec2(label_width, ui.spacing().interact_size.y),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    RichText::new("Particle\nQuality")
+                        .size(SMALL_SIZE)
+                        .color(tc.text_secondary),
+                );
+            },
         );
         egui::ComboBox::from_id_salt("particle_quality_selector")
             .selected_text(RichText::new(current_quality.display_name()).size(SMALL_SIZE))

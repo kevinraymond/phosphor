@@ -199,64 +199,169 @@ pub fn draw_panels(
                     });
                 }
 
-                // MIDI section (default collapsed)
-                let midi_badge = if !midi.config.enabled {
-                    Some("OFF")
-                } else if midi.connected_port().is_some() {
-                    Some("ON")
-                } else {
-                    None
-                };
-                widgets::section(ui, "sec_midi", "MIDI", midi_badge, false, |ui| {
-                    midi_panel::draw_midi_panel(ui, midi);
-                });
-
-                // OSC section (default collapsed)
-                let osc_badge = if !osc.config.enabled {
-                    Some("OFF")
-                } else {
-                    Some("ON")
-                };
-                widgets::section(ui, "sec_osc", "OSC", osc_badge, false, |ui| {
-                    osc_panel::draw_osc_panel(ui, osc);
-                });
-
-                // Web section (default collapsed)
-                let web_badge_text;
-                let web_badge = if !web.config.enabled {
-                    "OFF"
-                } else if web.client_count > 0 {
-                    web_badge_text = format!(
-                        "{} client{}",
-                        web.client_count,
-                        if web.client_count == 1 { "" } else { "s" }
-                    );
-                    &web_badge_text
-                } else {
-                    "ON"
-                };
-                widgets::section(ui, "sec_web", "Web", Some(web_badge), false, |ui| {
-                    web_panel::draw_web_panel(ui, web);
-                });
-
-                // NDI Outputs section (feature-gated, default collapsed)
+                // Consolidated Settings section
+                let midi_on = midi.config.enabled && midi.connected_port().is_some();
+                let osc_on = osc.config.enabled;
+                let web_on = web.config.enabled;
                 #[cfg(feature = "ndi")]
-                {
-                    let ndi_info: Option<ndi_panel::NdiInfo> = ui
-                        .ctx()
-                        .data_mut(|d| d.remove_temp(egui::Id::new("ndi_info")));
-                    if let Some(info) = ndi_info {
-                        let ndi_badge = if info.running { "ON" } else { "OFF" };
-                        widgets::section(ui, "sec_ndi", "Outputs", Some(ndi_badge), false, |ui| {
-                            ndi_panel::draw_ndi_panel(ui, &info);
-                        });
-                    }
-                }
+                let ndi_info: Option<ndi_panel::NdiInfo> = ui
+                    .ctx()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("ndi_info")));
+                #[cfg(feature = "ndi")]
+                let ndi_on = ndi_info.as_ref().map_or(false, |i| i.running);
 
-                // Settings section (default collapsed)
-                widgets::section(ui, "sec_settings", "Global", None, false, |ui| {
-                    settings_panel::draw_settings_panel(ui, current_theme, particle_quality);
-                });
+                let dot_active_midi = egui::Color32::from_rgb(0x60, 0xA0, 0xE0);
+                let dot_active_osc = egui::Color32::from_rgb(0x50, 0xC0, 0x70);
+                let dot_active_web = egui::Color32::from_rgb(0x50, 0x90, 0xE0);
+                #[cfg(feature = "ndi")]
+                let dot_active_ndi = egui::Color32::from_rgb(0x40, 0xC0, 0x40);
+                let dot_off = egui::Color32::from_rgb(0x33, 0x33, 0x33);
+
+                widgets::section_with_header(
+                    ui,
+                    "sec_settings",
+                    "Settings",
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let dim_label = egui::Color32::from_white_alpha(38); // ~0.15
+                        let on_label = egui::Color32::from_white_alpha(90); // ~0.35
+                        // Helper: dot + tiny label (right-to-left order)
+                        let mut status_dot = |ui: &mut egui::Ui,
+                                              on: bool,
+                                              color: egui::Color32,
+                                              label: &str| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 3.0;
+                                let (r, _) = ui.allocate_exact_size(
+                                    egui::vec2(4.0, 4.0),
+                                    egui::Sense::hover(),
+                                );
+                                let c = if on { color } else { dot_off };
+                                ui.painter().circle_filled(r.center(), 2.0, c);
+                                ui.label(
+                                    egui::RichText::new(label)
+                                        .size(7.0)
+                                        .color(if on { on_label } else { dim_label }),
+                                );
+                            });
+                        };
+                        // Drawn right-to-left, so reverse visual order
+                        #[cfg(feature = "ndi")]
+                        status_dot(ui, ndi_on, dot_active_ndi, "NDI");
+                        status_dot(ui, web_on, dot_active_web, "WEB");
+                        status_dot(ui, osc_on, dot_active_osc, "OSC");
+                        status_dot(ui, midi_on, dot_active_midi, "MIDI");
+                    },
+                    false,
+                    |ui| {
+                        let tc = theme_colors(ui.ctx());
+                        let dim = tc.text_secondary;
+
+                        // MIDI subsection
+                        let (midi_badge, midi_color) = if !midi.config.enabled {
+                            (Some("OFF"), dim)
+                        } else if midi.connected_port().is_some() {
+                            (Some("ON"), dot_active_midi)
+                        } else {
+                            (None, dim)
+                        };
+                        widgets::subsection(
+                            ui,
+                            "sub_midi",
+                            "MIDI",
+                            midi_badge,
+                            midi_color,
+                            true,
+                            |ui| {
+                                midi_panel::draw_midi_panel(ui, midi);
+                            },
+                        );
+
+                        // OSC subsection
+                        let (osc_badge, osc_color) = if !osc.config.enabled {
+                            (Some("OFF"), dim)
+                        } else {
+                            (Some("ON"), dot_active_osc)
+                        };
+                        widgets::subsection(
+                            ui,
+                            "sub_osc",
+                            "OSC",
+                            osc_badge,
+                            osc_color,
+                            true,
+                            |ui| {
+                                osc_panel::draw_osc_panel(ui, osc);
+                            },
+                        );
+
+                        // Web subsection (default collapsed)
+                        let web_badge_text;
+                        let (web_badge, web_color) = if !web.config.enabled {
+                            ("OFF", dim)
+                        } else if web.client_count > 0 {
+                            web_badge_text = format!(
+                                "{} client{}",
+                                web.client_count,
+                                if web.client_count == 1 { "" } else { "s" }
+                            );
+                            (web_badge_text.as_str(), dot_active_web)
+                        } else {
+                            ("ON", dot_active_web)
+                        };
+                        widgets::subsection(
+                            ui,
+                            "sub_web",
+                            "Web",
+                            Some(web_badge),
+                            web_color,
+                            false,
+                            |ui| {
+                                web_panel::draw_web_panel(ui, web);
+                            },
+                        );
+
+                        // NDI Outputs subsection (feature-gated)
+                        #[cfg(feature = "ndi")]
+                        {
+                            if let Some(ref info) = ndi_info {
+                                let (ndi_badge, ndi_color) = if info.running {
+                                    ("ON", dot_active_ndi)
+                                } else {
+                                    ("OFF", dim)
+                                };
+                                widgets::subsection(
+                                    ui,
+                                    "sub_ndi",
+                                    "Outputs",
+                                    Some(ndi_badge),
+                                    ndi_color,
+                                    true,
+                                    |ui| {
+                                        ndi_panel::draw_ndi_panel(ui, info);
+                                    },
+                                );
+                            }
+                        }
+
+                        // Global subsection
+                        widgets::subsection(
+                            ui,
+                            "sub_global",
+                            "Global",
+                            None,
+                            dim,
+                            true,
+                            |ui| {
+                                settings_panel::draw_settings_panel(
+                                    ui,
+                                    current_theme,
+                                    particle_quality,
+                                );
+                            },
+                        );
+                    },
+                );
             });
         });
 

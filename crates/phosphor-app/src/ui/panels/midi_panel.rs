@@ -96,23 +96,47 @@ pub fn draw_midi_panel(ui: &mut Ui, midi: &mut MidiSystem) {
     }
 
     // Triggers
-    ui.separator();
+    ui.add_space(4.0);
     ui.label(
         RichText::new("TRIGGERS")
-            .size(HEADING_SIZE)
-            .color(tc.text_secondary)
-            .strong(),
+            .size(8.0)
+            .color(tc.text_secondary),
     );
+    ui.add_space(2.0);
 
+    let half = ui.available_width() / 2.0;
+    let label_w = 52.0;
+    let badge_w = half - label_w - 8.0; // remaining space for badge
     egui::Grid::new("midi_triggers")
         .num_columns(4)
-        .spacing([4.0, 2.0])
+        .min_col_width(0.0)
+        .spacing([4.0, 3.0])
         .show(ui, |ui| {
             for (left, right) in TRIGGER_PAIRS {
-                ui.label(RichText::new(left.short_name()).size(SMALL_SIZE));
-                draw_trigger_badge(ui, midi, *left);
-                ui.label(RichText::new(right.short_name()).size(SMALL_SIZE));
-                draw_trigger_badge(ui, midi, *right);
+                ui.add_sized(
+                    [label_w, MIN_INTERACT_HEIGHT],
+                    egui::Label::new(
+                        RichText::new(left.short_name())
+                            .size(SMALL_SIZE)
+                            .color(tc.text_secondary),
+                    ),
+                );
+                ui.add_sized([badge_w, MIN_INTERACT_HEIGHT], |ui: &mut Ui| {
+                    ui.horizontal(|ui| draw_trigger_badge(ui, midi, *left))
+                        .response
+                });
+                ui.add_sized(
+                    [label_w, MIN_INTERACT_HEIGHT],
+                    egui::Label::new(
+                        RichText::new(right.short_name())
+                            .size(SMALL_SIZE)
+                            .color(tc.text_secondary),
+                    ),
+                );
+                ui.add_sized([badge_w, MIN_INTERACT_HEIGHT], |ui: &mut Ui| {
+                    ui.horizontal(|ui| draw_trigger_badge(ui, midi, *right))
+                        .response
+                });
                 ui.end_row();
             }
         });
