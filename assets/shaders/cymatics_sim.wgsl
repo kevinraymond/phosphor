@@ -171,6 +171,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     vel *= 1.0 - (1.0 - u.drag) * dt * 60.0;
 
     // Soft boundary
+    let prev_pos = pos;
     var new_pos = pos + vel * dt;
     let edge = 0.9;
     let bstr = 3.0;
@@ -179,6 +180,11 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     if new_pos.y > edge  { vel.y -= (new_pos.y - edge) * bstr * dt; }
     if new_pos.y < -edge { vel.y -= (new_pos.y + edge) * bstr * dt; }
     new_pos = clamp(new_pos, vec2f(-1.05), vec2f(1.05));
+
+    // Obstacle collision
+    let coll = apply_obstacle_collision(new_pos, vel, prev_pos);
+    new_pos = coll.xy;
+    vel = coll.zw;
 
     // Size: larger on nodal lines, with stronger contrast
     let on_line = exp(-abs(val) * 10.0);

@@ -321,6 +321,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         force -= normalize(pos) * pull;
     }
 
+    let prev_pos = pos;
     var new_pos = pos + vel * dt;
     // Hard clamp well outside viewport as safety net
     let max_r = 1.5;
@@ -329,6 +330,11 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         new_pos = new_pos / new_d * max_r;
         vel *= 0.5;
     }
+
+    // Obstacle collision
+    let coll = apply_obstacle_collision(new_pos, vel, prev_pos);
+    new_pos = coll.xy;
+    vel = coll.zw;
 
     // ===================================================================
     // RENDERING — species-based coloring

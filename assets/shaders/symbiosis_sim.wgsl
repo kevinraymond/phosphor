@@ -219,7 +219,13 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         vel = vel / spd * max_speed;
     }
 
-    let new_pos = wrap_pos(pos + vel * dt);
+    // Obstacle collision before wrapping
+    let prev_pos = pos;
+    var unwrapped_pos = pos + vel * dt;
+    let coll = apply_obstacle_collision(unwrapped_pos, vel, prev_pos);
+    unwrapped_pos = coll.xy;
+    vel = coll.zw;
+    let new_pos = wrap_pos(unwrapped_pos);
 
     // --- Color ---
     let hue = f32(my_species) / f32(ns);

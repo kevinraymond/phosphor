@@ -387,7 +387,13 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     }
 
     // === INTEGRATE POSITION ===
+    let prev_pos = pos;
     pos += vel * dt + helix_offset * dt * 60.0;
+
+    // Obstacle collision
+    let coll = apply_obstacle_collision(pos, vel, prev_pos);
+    pos = coll.xy;
+    vel = coll.zw;
 
     // === SINK POLE RECYCLING ===
     // When a particle reaches its sink pole, kill it so it gets re-emitted

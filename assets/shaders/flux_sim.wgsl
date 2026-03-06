@@ -98,8 +98,16 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     // Drag
     vel *= 1.0 - (1.0 - u.drag) * dt * 60.0;
 
-    // Wrap particles that go off-screen (keeps density uniform)
+    // Integrate + obstacle collision before wrapping
+    let prev_pos = p.pos_life.xy;
     var new_pos = p.pos_life.xy + vel * dt;
+
+    // Obstacle collision (before wrap to avoid teleport artifacts)
+    let coll = apply_obstacle_collision(new_pos, vel, prev_pos);
+    new_pos = coll.xy;
+    vel = coll.zw;
+
+    // Wrap particles that go off-screen (keeps density uniform)
     if new_pos.x > 1.1 { new_pos.x -= 2.2; }
     if new_pos.x < -1.1 { new_pos.x += 2.2; }
     if new_pos.y > 1.1 { new_pos.y -= 2.2; }

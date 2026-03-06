@@ -131,6 +131,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         return;
     }
 
+    let prev_pos = p.pos_life.xy;
     var pos = p.pos_life.xy;
     var vel = p.vel_size.xy;
 
@@ -258,6 +259,11 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     if speed > 3.0 {
         vel = vel * (3.0 / speed);
     }
+
+    // Obstacle collision
+    let coll = apply_obstacle_collision(pos, vel, prev_pos);
+    pos = coll.xy;
+    vel = coll.zw;
 
     // Interpolate color
     var color: vec4f;

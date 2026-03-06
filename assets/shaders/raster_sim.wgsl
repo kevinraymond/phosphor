@@ -242,7 +242,13 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     }
 
     // Integrate
+    let prev_pos = pos;
     pos += vel * dt;
+
+    // Obstacle collision
+    let coll = apply_obstacle_collision(pos, vel, prev_pos);
+    pos = coll.xy;
+    vel = coll.zw;
 
     // Preserve original image color
     let color = home_color;

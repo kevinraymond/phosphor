@@ -24,6 +24,9 @@
 - Add `EffectType` enum (Shader, Particle, Feedback) with optional `effect_type` field in .pfx format — auto-detects from data when absent
 - Tag 5 feedback effects (Accretion, Array, Chaos, Mycelium, Turing) with explicit `"effect_type": "feedback"` in their .pfx files
 
+### Effects
+- Add obstacle collision to all 11 remaining particle sim shaders (phosphor, flux, murmur, raster, tesla, genesis, cymatics, symbiosis, turing, morph, as) — obstacles now work across all 16 effects
+
 ### Fixes
 - Fix preset showing as dirty during ParamMorph scene transitions — morph interpolation now resets param changed flags since it's timeline playback, not user edits
 - Clamp particle count to GPU dispatch dimension limit (`max_compute_workgroups_per_dimension × 256`) to prevent validation errors on high-count effects

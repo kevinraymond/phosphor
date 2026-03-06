@@ -343,8 +343,14 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     if pos.y < -1.0 + edge { boundary.y -= (pos.y + 1.0 - edge) * bstr; }
 
 
-    let vel = new_vel + boundary * dt;
-    let new_pos = pos + vel * dt;
+    var vel = new_vel + boundary * dt;
+    let prev_pos = pos;
+    var new_pos = pos + vel * dt;
+
+    // Obstacle collision
+    let coll = apply_obstacle_collision(new_pos, vel, prev_pos);
+    new_pos = coll.xy;
+    vel = coll.zw;
 
     // --- Depth-based sizing ---
     let depth = 1.0 - (new_pos.y + 1.0) * 0.15;

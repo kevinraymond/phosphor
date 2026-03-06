@@ -124,8 +124,15 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         vel = vel * (1.5 / speed);
     }
 
-    // Integrate position with wrapping to [-1,1]
+    // Integrate position with obstacle collision before wrapping
+    let prev_pos = pos;
     var new_pos = pos + vel * dt;
+
+    // Obstacle collision (before wrap to avoid teleport artifacts)
+    let coll = apply_obstacle_collision(new_pos, vel, prev_pos);
+    new_pos = coll.xy;
+    vel = coll.zw;
+
     new_pos = fract(new_pos * 0.5 + 0.5) * 2.0 - 1.0;
 
     // Color from B concentration via palette
