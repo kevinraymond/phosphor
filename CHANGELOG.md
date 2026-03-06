@@ -3,7 +3,7 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
-## Unreleased
+## v1.5.0 — 2026-03-06
 
 ### Fixed
 - Scene cue delete button disappearing when the same preset is added as a cue multiple times (egui widget ID collision)
