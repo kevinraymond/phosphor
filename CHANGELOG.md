@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### UI
+- Presets panel: add "Save current state as preset:" label above name input, and make "+ New" button clear all layers to a fresh Phosphor state with two-click confirmation when unsaved changes exist
 - Amber dirty-state styling for presets panel: custom header with pulsing dot and inline preset name, amber-tinted dirty bar with Update/Reset buttons, amber selected tile, pulsing card border, and bumped tile height to 26px
 - Add effect type indicators to effects panel: left color strip (purple SH / orange PS / teal FB), two-char badge, type legend, and footer breakdown count
 - Add hover tooltips to effect type color legend explaining Shader, Particle+Shader, and Feedback categories

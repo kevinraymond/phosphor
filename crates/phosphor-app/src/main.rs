@@ -964,6 +964,15 @@ impl ApplicationHandler for PhosphorApp {
                     app.preset_store.current_preset = None;
                     app.preset_store.dirty = false;
                 }
+                let new_preset: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("new_preset")));
+                if new_preset.is_some() {
+                    app.preset_store.current_preset = None;
+                    app.preset_store.dirty = false;
+                    app.clear_all_layers();
+                }
                 let copy_preset_index: Option<usize> = app
                     .egui_overlay
                     .context()

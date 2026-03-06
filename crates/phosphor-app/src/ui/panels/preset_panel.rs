@@ -250,6 +250,11 @@ fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
     }
 
     // Compact save row
+    ui.label(
+        RichText::new("Save current state as preset:")
+            .size(SMALL_SIZE)
+            .color(tc.text_secondary),
+    );
     let mut name = ui
         .ctx()
         .data_mut(|d| d.get_temp::<String>(egui::Id::new("preset_save_name")))
@@ -424,27 +429,46 @@ fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
             }
         }
 
+        let dirty_and_selected = store.current_preset.is_some() && store.dirty;
+        let now = ui.input(|i| i.time);
+        let new_armed: Option<f64> = ui
+            .ctx()
+            .data_mut(|d| d.get_temp(egui::Id::new("new_preset_armed")));
+        let is_armed = new_armed.map_or(false, |t| now - t < 3.0);
+
+        let (label, fill, stroke_color) = if dirty_and_selected && is_armed {
+            ("Discard changes?", tc.warning.linear_multiply(0.25), tc.warning)
+        } else {
+            ("+ New", tc.card_bg, tc.card_border)
+        };
+
         if ui
             .add(
                 egui::Button::new(
-                    RichText::new("+ New")
+                    RichText::new(label)
                         .size(SMALL_SIZE)
                         .color(tc.text_primary),
                 )
-                .fill(tc.card_bg)
-                .stroke(Stroke::new(1.0, tc.card_border))
+                .fill(fill)
+                .stroke(Stroke::new(1.0, stroke_color))
                 .corner_radius(CornerRadius::same(4)),
             )
-            .on_hover_text("Deselect current preset to save as new")
+            .on_hover_text("Clear all layers and start fresh")
             .clicked()
         {
-            ui.ctx().data_mut(|d| {
-                d.insert_temp(egui::Id::new("deselect_preset"), true);
-            });
-            // Focus the name input by clearing it
-            ui.ctx().data_mut(|d| {
-                d.insert_temp(egui::Id::new("preset_save_name"), String::new());
-            });
+            if dirty_and_selected && !is_armed {
+                // First click: arm for confirmation
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new("new_preset_armed"), now);
+                });
+            } else {
+                // Not dirty, or second click: proceed
+                ui.ctx().data_mut(|d| {
+                    d.remove_temp::<f64>(egui::Id::new("new_preset_armed"));
+                    d.insert_temp(egui::Id::new("new_preset"), true);
+                    d.insert_temp(egui::Id::new("preset_save_name"), String::new());
+                });
+            }
         }
     });
 }
