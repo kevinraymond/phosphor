@@ -21,7 +21,7 @@ pub struct Particle {
     pub flags: [f32; 4],
 }
 
-/// Particle simulation uniforms: 784 bytes.
+/// Particle simulation uniforms: 832 bytes.
 /// Separate from the main 288-byte ShaderUniforms.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
@@ -146,7 +146,11 @@ pub struct ParticleUniforms {
     pub morph_source: u32,
     pub morph_dest: u32,
     pub morph_flags: u32, // bit 0 = transitioning, bits 1-3 = transition_style
-    // Total = 800 bytes
+
+    // Zero-crossing rate (32 bytes: f32 + 12 pad to align vec3f + vec3f pad)
+    pub zcr: f32,
+    pub _pad_zcr: [f32; 7],
+    // Total = 832 bytes
 }
 
 /// Obstacle collision mode.
@@ -561,6 +565,10 @@ pub struct ParticleDef {
     /// Enable spatial hash grid for particle-particle interaction
     #[serde(default)]
     pub interaction: bool,
+    /// Maximum spatial hash grid dimension (0 = use default count-based heuristic).
+    /// Effects with large interaction radii (e.g. Symbiosis) need coarser grids.
+    #[serde(default)]
+    pub grid_max: u32,
 
     // --- Phase 1: Forces ---
     /// Directional wind force [x, y]
@@ -742,8 +750,8 @@ mod tests {
     }
 
     #[test]
-    fn particle_uniforms_size_800() {
-        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 800);
+    fn particle_uniforms_size_832() {
+        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 832);
     }
 
     #[test]

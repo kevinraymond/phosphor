@@ -111,6 +111,16 @@ struct ParticleUniforms {
     morph_source: u32,
     morph_dest: u32,
     morph_flags: u32,   // bit 0 = transitioning, bits 1-3 = transition_style
+
+    // Zero-crossing rate
+    zcr: f32,
+    _pad_zcr_a: f32,
+    _pad_zcr_b: f32,
+    _pad_zcr_c: f32,
+    _pad_zcr_d: f32,
+    _pad_zcr_e: f32,
+    _pad_zcr_f: f32,
+    _pad_zcr_g: f32,
 }
 
 // Access effect param by index (mirrors fragment shader's param() function).

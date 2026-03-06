@@ -8,8 +8,11 @@ const WORKGROUP_SIZE: u32 = 256;
 
 /// Compute grid dimensions that scale with particle count.
 /// Target: ~16 particles per cell. Clamped to [40, 256].
-pub fn grid_dims(max_particles: u32) -> (u32, u32) {
-    let dim = ((max_particles as f64 / 16.0).sqrt() as u32).clamp(40, 256);
+/// `grid_max_override`: if > 0, caps the upper bound (for effects with large interaction radii).
+pub fn grid_dims(max_particles: u32, grid_max_override: u32) -> (u32, u32) {
+    let upper = if grid_max_override > 0 { grid_max_override } else { 256 };
+    let lower = upper.min(40);
+    let dim = ((max_particles as f64 / 16.0).sqrt() as u32).clamp(lower, upper);
     (dim, dim)
 }
 
@@ -51,10 +54,11 @@ impl SpatialHashGrid {
     pub fn new(
         device: &Device,
         max_particles: u32,
+        grid_max_override: u32,
         pos_life_buffers: &[wgpu::Buffer; 2],
         uniform_buffer: &wgpu::Buffer,
     ) -> Self {
-        let (grid_w, grid_h) = grid_dims(max_particles);
+        let (grid_w, grid_h) = grid_dims(max_particles, grid_max_override);
         let num_cells = grid_w * grid_h;
         log::info!(
             "Spatial hash grid: {grid_w}x{grid_h} ({num_cells} cells) for {max_particles} particles"

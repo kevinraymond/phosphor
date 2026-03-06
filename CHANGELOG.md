@@ -29,6 +29,8 @@
 - Add `dominant_chroma` feature: CPU-side argmax of 12 chroma bins, normalized 0–1, forwarded to both fragment and particle GPU uniforms
 - Cymatics audio remapping: chroma-driven Chladni mode selection (curated visually-distinct (n,m) pairs per pitch class), mfcc[0] vibrational amplitude, chroma peakedness pattern clarity
 - Murmur audio remapping: mfcc[1] flock cohesion (bright=tight, dark=dispersed), mfcc[3] predator aggressiveness, flux speed agitation, dominant_chroma rim/sky hue; fix emitter waves by probing whole screen + inheriting donor heading
+- Symbiosis audio remapping: mfcc[4-6] per-species force modulation (timbre shifts ecology), dominant_chroma species color rotation, flux interaction radius expansion, zcr Brownian noise jitter
+- Add `zcr` (zero-crossing rate) to ParticleUniforms for compute shader access
 
 ### Effects
 - Add obstacle collision to all 11 remaining particle sim shaders (phosphor, flux, murmur, raster, tesla, genesis, cymatics, symbiosis, turing, morph, as) — obstacles now work across all 16 effects

@@ -490,6 +490,7 @@ impl ParticleSystem {
             Some(SpatialHashGrid::new(
                 device,
                 max_particles,
+                def.grid_max,
                 &pos_life_buffers,
                 &uniform_buffer,
             ))
@@ -1199,6 +1200,7 @@ impl ParticleSystem {
         self.uniforms.mfcc[13..].fill(0.0);
         self.uniforms.chroma.copy_from_slice(&features.chroma);
         self.uniforms.dominant_chroma = features.dominant_chroma;
+        self.uniforms.zcr = features.zcr;
     }
 
     /// Run the compute dispatch (particle simulation + prepare indirect args).
@@ -2067,6 +2069,7 @@ impl ParticleSystem {
         let hash = SpatialHashGrid::new(
             device,
             self.max_particles,
+            self.def.grid_max,
             &self.pos_life_buffers,
             &self.uniform_buffer,
         );

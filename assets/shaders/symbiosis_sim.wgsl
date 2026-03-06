@@ -28,7 +28,7 @@ const MAX_PER_CELL: u32 = 48u;
 // ============================================================
 
 fn num_species() -> u32 { return u32(round(param(0u) * 6.0 + 2.0)); }
-fn force_scale() -> f32 { return mix(0.5, 8.0, param(1u)); }
+fn force_scale() -> f32 { return mix(0.1, 3.0, param(1u)); }
 fn friction() -> f32 { return mix(0.02, 0.5, param(2u)); }
 fn max_radius() -> f32 { return mix(0.02, 0.25, param(3u)); }
 fn min_radius_frac() -> f32 { return mix(0.1, 0.5, param(4u)); }
@@ -92,8 +92,8 @@ fn emit_particle(idx: u32) -> Particle {
     let ns = num_species();
     let species = u32(hash(seed_base + 2.0) * f32(ns)) % ns;
 
-    // Species color
-    let hue = f32(species) / f32(ns);
+    // Species color (hue rotated by dominant_chroma for pitch-class mapping)
+    let hue = fract(f32(species) / f32(ns) + u.dominant_chroma);
     let col = hsv2rgb(hue, 0.85, 0.9);
 
     p.pos_life = vec4f(pos, 0.0, 1.0);
@@ -150,15 +150,19 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     // Audio-modulated params
     let fscale = force_scale() * (1.0 + u.bass * drive * 1.5);
     let fric = friction() * (1.0 - u.mid * drive * 0.3);
-    let r_max = max_radius() * (1.0 + (u.presence + u.brilliance) * 0.5 * drive * 0.3);
+    let r_max = max_radius() * (1.0 + (u.presence + u.brilliance) * 0.5 * drive * 0.3
+                                  + u.flux * drive * 0.4);
     let r_min = r_max * min_radius_frac();
 
-    // --- Neighbor iteration: 9-cell spatial hash scan ---
+    // --- Neighbor iteration: dynamic-radius spatial hash scan ---
+    // Cell size = 2.0 / grid_w; search enough cells to cover r_max
+    let cell_size = 2.0 / f32(SH_GRID_W);
+    let search_r = max(1, i32(ceil(r_max / cell_size)));
     let my_cell = sh_pos_to_cell(pos);
     var total_force = vec2f(0.0);
 
-    for (var dy = -1; dy <= 1; dy++) {
-        for (var dx = -1; dx <= 1; dx++) {
+    for (var dy = -search_r; dy <= search_r; dy++) {
+        for (var dx = -search_r; dx <= search_r; dx++) {
             // Toroidal cell wrapping
             var cx = my_cell.x + dx;
             var cy = my_cell.y + dy;
@@ -199,7 +203,13 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
                     } else {
                         strength = (r_max - dist) / (r_max - mid);
                     }
-                    let f = get_force(my_species % ns, other_species % ns);
+                    var f = get_force(my_species % ns, other_species % ns);
+                    // MFCC-driven force modulation: mfcc(4..6) modulate species 0..2's outgoing forces
+                    // Raw MFCCs can be ~±50, so clamp to ±1 before applying as force multiplier
+                    if my_species < 3u {
+                        let mfcc_mod = clamp(mfcc(4u + my_species) * 0.05, -1.0, 1.0);
+                        f *= (1.0 + mfcc_mod * drive);
+                    }
                     total_force += dir * f * strength * fscale;
                 }
             }
@@ -208,6 +218,14 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
 
     // Integration
     vel += total_force * dt;
+
+    // ZCR-driven Brownian noise: noisy signals = jittery particles
+    let jitter_strength = u.zcr * drive * 0.04;
+    let jitter = vec2f(
+        hash(u.seed + f32(idx) * 3.7) * 2.0 - 1.0,
+        hash(u.seed + f32(idx) * 7.3 + 1.0) * 2.0 - 1.0
+    ) * jitter_strength;
+    vel += jitter;
 
     // Friction damping
     vel *= pow(1.0 - fric, dt * 60.0);
@@ -228,7 +246,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let new_pos = wrap_pos(unwrapped_pos);
 
     // --- Color ---
-    let hue = f32(my_species) / f32(ns);
+    let hue = fract(f32(my_species) / f32(ns) + u.dominant_chroma);
     let cm = color_mode();
     let speed_brightness = clamp(spd * 3.0, 0.3, 1.0);
     let sat = mix(0.85, max(0.4, 0.85 - spd * 0.5), cm);

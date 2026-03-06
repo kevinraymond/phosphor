@@ -234,7 +234,7 @@ impl App {
             if let Some(ref pd) = effect_loader.effects[idx].particles {
                 if pd.interaction {
                     use crate::gpu::particle::spatial_hash::grid_dims;
-                    effect_loader.grid_dims = grid_dims(pd.max_count);
+                    effect_loader.grid_dims = grid_dims(pd.max_count, pd.grid_max);
                 }
                 let compute_source = if pd.compute_shader.is_empty() {
                     effect_loader.prepend_compute_libraries(include_str!(
@@ -1515,7 +1515,7 @@ impl App {
         if let Some(ref pd) = effect.particles {
             if pd.interaction {
                 use crate::gpu::particle::spatial_hash::grid_dims;
-                self.effect_loader.grid_dims = grid_dims(pd.max_count);
+                self.effect_loader.grid_dims = grid_dims(pd.max_count, pd.grid_max);
             }
         }
 
