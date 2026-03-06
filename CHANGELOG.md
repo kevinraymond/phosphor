@@ -6,6 +6,9 @@
 ## Unreleased
 
 ### UI
+- Layers panel visual refresh: type color legend (FX/MD/WC), left color strip per card, layer index numbers, type badges, type-colored add buttons (all three on one row), subtle "Clear All" text link with red hover/confirm, footer type breakdown counts, hover-only delete buttons, stronger dimming for disabled layers
+- Reorder sidebar panels: Effects → Layers → Presets → Scenes
+- Layer badge shows "N/8" capacity format
 - Scenes panel visual refresh: 2-column scene grid tiles, two-line cue rows with bottom progress bars (hold elapsed + transition progress with stripes), accent active-cue highlighting, pulsing red LIVE dot, GO button green fill, STOP red outline, hover-reveal delete buttons, hold time always visible, scrollable cue list (up to 6 visible), add-cue bar with separator
 - Timeline bar polish: accent-colored active cue, striped from-cue during transitions, two-line target cue label (name + "Morph 58%"), transition-typed playhead colors
 - Presets panel: add "Save current state as preset:" label above name input, and make "+ New" button clear all layers to a fresh Phosphor state with two-click confirmation when unsaved changes exist

@@ -173,6 +173,12 @@ pub fn draw_panels(
                     effect_panel::draw_effect_panel(ui, effect_loader);
                 });
 
+                // Layers section
+                let layer_badge = format!("{}/{}", layers.len(), 8);
+                widgets::section(ui, "sec_layers", "Layers", Some(&layer_badge), true, |ui| {
+                    layer_panel::draw_layer_panel(ui, layers, active_layer);
+                });
+
                 // Presets section
                 preset_panel::draw_preset_section(ui, preset_store);
 
@@ -192,12 +198,6 @@ pub fn draw_panels(
                         scene_panel::draw_scene_panel(ui, scene);
                     });
                 }
-
-                // Layers section
-                let layer_badge = format!("{}", layers.len());
-                widgets::section(ui, "sec_layers", "Layers", Some(&layer_badge), true, |ui| {
-                    layer_panel::draw_layer_panel(ui, layers, active_layer);
-                });
 
                 // MIDI section (default collapsed)
                 let midi_badge = if !midi.config.enabled {
