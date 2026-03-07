@@ -5,7 +5,7 @@ use crossbeam_channel::{Receiver, Sender};
 use nokhwa::Camera;
 use nokhwa::pixel_format::RgbAFormat;
 use nokhwa::utils::{
-    ApiBackend, CameraIndex, CameraInfo, RequestedFormat, RequestedFormatType, Resolution,
+    ApiBackend, CameraIndex, RequestedFormat, RequestedFormatType, Resolution,
 };
 
 /// A single decoded webcam frame (RGBA).

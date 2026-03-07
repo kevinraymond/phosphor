@@ -167,6 +167,7 @@ mod tests {
             theme: ThemeMode::HighContrast,
             audio_device: None,
             particle_quality: ParticleQuality::default(),
+            webcam_device: None,
         };
         let json = serde_json::to_string(&c).unwrap();
         let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
