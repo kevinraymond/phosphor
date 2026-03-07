@@ -421,6 +421,7 @@ impl PostProcessChain {
 
     /// Render the final composite (or blit) to a secondary capture target.
     /// Reuses existing bloom results and uniform buffers — only runs the final pass.
+    #[allow(dead_code)]
     pub fn render_composite_to(
         &self,
         device: &Device,

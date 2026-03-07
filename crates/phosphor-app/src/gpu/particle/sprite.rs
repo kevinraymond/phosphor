@@ -2,6 +2,7 @@ use std::path::Path;
 
 /// A loaded sprite atlas texture for particle rendering.
 pub struct SpriteAtlas {
+    #[allow(dead_code)]
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,

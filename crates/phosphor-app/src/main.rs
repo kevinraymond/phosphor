@@ -1998,7 +1998,7 @@ impl ApplicationHandler for PhosphorApp {
                                     if let Some(ps) =
                                         effect.pass_executor.particle_system.as_mut()
                                     {
-                                        if let Some(ref mut morph) = ps.morph_state {
+                                        let needs_upload = if let Some(ref mut morph) = ps.morph_state {
                                             if let Some(target) = morph_trigger {
                                                 morph.trigger_morph(target);
                                             }
@@ -2095,17 +2095,16 @@ impl ApplicationHandler for PhosphorApp {
                                                     needs_upload = true;
                                                 }
                                             }
-                                            if needs_upload {
-                                                drop(morph);
-                                                ps.upload_morph_targets(
-                                                    &app.gpu.device,
-                                                    &app.gpu.queue,
-                                                );
-                                            }
-                                            // Clear selection after any slot change
-                                            if needs_upload {
-                                                ctx.data_mut(|d| d.remove_temp::<u32>(egui::Id::new("morph_selected_slot")));
-                                            }
+                                            needs_upload
+                                        } else {
+                                            false
+                                        };
+                                        if needs_upload {
+                                            ps.upload_morph_targets(
+                                                &app.gpu.device,
+                                                &app.gpu.queue,
+                                            );
+                                            ctx.data_mut(|d| d.remove_temp::<u32>(egui::Id::new("morph_selected_slot")));
                                         }
                                         // Snapshot needs &self on ps, so do it outside the morph borrow
                                         if morph_snapshot.is_some() {

@@ -216,6 +216,7 @@ pub fn subsection(
 }
 
 /// Badge label in accent color at small size.
+#[allow(dead_code)]
 pub fn badge(ui: &mut Ui, text: &str, color: Color32) {
     ui.label(RichText::new(text).size(SMALL_SIZE).color(color));
 }

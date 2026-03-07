@@ -292,11 +292,15 @@ pub struct LayerInfo {
     pub enabled: bool,
     pub locked: bool,
     pub pinned: bool,
+    #[allow(dead_code)]
     pub has_particles: bool,
+    #[allow(dead_code)]
     pub shader_error: Option<String>,
     pub is_media: bool,
     pub media_file_name: Option<String>,
+    #[allow(dead_code)]
     pub media_is_animated: bool,
+    #[allow(dead_code)]
     pub media_is_video: bool,
     pub media_is_live: bool,
 }
@@ -385,6 +389,7 @@ impl LayerStack {
     }
 
     /// Number of enabled layers.
+    #[allow(dead_code)]
     pub fn enabled_count(&self) -> usize {
         self.layers.iter().filter(|l| l.enabled).count()
     }

@@ -4,6 +4,7 @@ use egui::Color32;
 /// Stored in egui temp data, read via `theme_colors(ctx)`.
 #[derive(Debug, Clone, Copy)]
 pub struct ThemeColors {
+    #[allow(dead_code)]
     pub canvas: Color32,
     pub panel: Color32,
     pub text_primary: Color32,
@@ -17,6 +18,7 @@ pub struct ThemeColors {
     pub card_border: Color32,
     pub beat_color: Color32,
     pub meter_bg: Color32,
+    #[allow(dead_code)]
     pub separator: Color32,
 }
 

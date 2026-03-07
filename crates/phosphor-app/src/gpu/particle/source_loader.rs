@@ -40,16 +40,6 @@ pub fn builtin_raster_path(display_name: &str) -> PathBuf {
         .join(format!("raster_{display_name}.png"))
 }
 
-/// Request to load a particle source in the background.
-pub enum ParticleSourceRequest {
-    /// Load a static image (PNG/JPEG/WebP).
-    Image(PathBuf),
-    /// Load an animated GIF/WebP — becomes video-like with per-frame updates.
-    AnimatedImage(PathBuf),
-    /// Load a video file (feature-gated).
-    #[cfg(feature = "video")]
-    Video(PathBuf),
-}
 
 /// Result from background particle source loading.
 pub enum ParticleSourceResult {
@@ -115,6 +105,7 @@ impl ParticleSourceLoader {
 
     /// Start loading a video file in the background.
     #[cfg(feature = "video")]
+    #[allow(dead_code)]
     pub fn load_video(&mut self, path: PathBuf) {
         self.generation += 1;
         let load_gen = self.generation;

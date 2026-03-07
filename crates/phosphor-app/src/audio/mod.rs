@@ -27,6 +27,7 @@ use self::smoother::FeatureSmoother;
 /// Holds the capture backend, keeping it alive while the audio processing thread runs.
 /// On Linux, this may be either PulseAudio (preferred) or cpal/ALSA (fallback).
 /// On Windows, this may be WASAPI loopback (preferred) or cpal (fallback).
+#[allow(dead_code)]
 enum CaptureBackend {
     Cpal(AudioCapture),
     #[cfg(target_os = "linux")]
@@ -124,6 +125,7 @@ pub struct AudioSystem {
 }
 
 impl AudioSystem {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::new_with_device(None)
     }

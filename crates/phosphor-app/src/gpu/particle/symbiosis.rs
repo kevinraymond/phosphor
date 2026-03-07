@@ -185,6 +185,7 @@ impl SymbiosisState {
     }
 
     /// Generate a fully random matrix.
+    #[allow(dead_code)]
     pub fn randomize_matrix(&mut self, seed: f32) {
         let n = self.num_species as usize;
         for i in 0..n {

@@ -148,10 +148,12 @@ pub struct AudioCapture {
     pub ring: Arc<RingBuffer>,
     pub sample_rate: u32,
     pub device_name: String,
+    #[allow(dead_code)]
     pub callback_count: Arc<AtomicU64>,
 }
 
 impl AudioCapture {
+    #[allow(dead_code)]
     pub fn new() -> Result<Self> {
         Self::new_with_device(None)
     }
@@ -256,6 +258,7 @@ impl AudioCapture {
         })
     }
 
+    #[allow(dead_code)]
     pub fn callback_count(&self) -> u64 {
         self.callback_count.load(Ordering::Relaxed)
     }

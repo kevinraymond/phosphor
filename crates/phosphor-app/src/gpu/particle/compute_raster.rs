@@ -763,64 +763,6 @@ impl ComputeRasterizer {
         true
     }
 
-    /// Recreate draw bind groups (e.g. when particle buffers change due to upload_aux_data).
-    pub fn recreate_draw_bind_groups(
-        &mut self,
-        device: &Device,
-        pos_life_buffers: &[wgpu::Buffer; 2],
-        vel_size_buffers: &[wgpu::Buffer; 2],
-        color_buffers: &[wgpu::Buffer; 2],
-        alive_index_buffers: &[wgpu::Buffer; 2],
-        counter_buffer: &wgpu::Buffer,
-    ) {
-        self.draw_bind_groups = create_draw_bind_groups(
-            device,
-            &self.draw_bgl,
-            pos_life_buffers,
-            vel_size_buffers,
-            color_buffers,
-            alive_index_buffers,
-            counter_buffer,
-            &self.draw_uniform_buffer,
-            &self.fb_buffers,
-        );
-
-        self.bin_bind_groups = create_bin_bind_groups(
-            device,
-            &self.bin_bgl,
-            pos_life_buffers,
-            vel_size_buffers,
-            alive_index_buffers,
-            counter_buffer,
-            &self.tile_uniform_buffer,
-            &self.tile_counts_buffer,
-        );
-
-        self.scatter_bind_groups = create_scatter_bind_groups(
-            device,
-            &self.scatter_bgl,
-            pos_life_buffers,
-            vel_size_buffers,
-            alive_index_buffers,
-            counter_buffer,
-            &self.tile_uniform_buffer,
-            &self.tile_scatter_offsets_buffer,
-            &self.sorted_particles_buffer,
-        );
-
-        self.tiled_bind_groups = create_tiled_bind_groups(
-            device,
-            &self.tiled_bgl,
-            pos_life_buffers,
-            vel_size_buffers,
-            color_buffers,
-            &self.tile_offsets_buffer,
-            &self.tile_counts_buffer,
-            &self.tile_uniform_buffer,
-            &self.sorted_particles_buffer,
-            &self.fb_buffers,
-        );
-    }
 }
 
 // --- Helper functions ---

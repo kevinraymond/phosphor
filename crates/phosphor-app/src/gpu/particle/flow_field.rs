@@ -6,6 +6,7 @@ const FLOW_RES: u32 = 64;
 /// Pre-baked 3D curl noise texture for particle flow fields.
 /// Stores curl(noise(x,y,z)) as Rgba16Float: xyz = velocity, w = 0.
 pub struct FlowFieldTexture {
+    #[allow(dead_code)]
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,

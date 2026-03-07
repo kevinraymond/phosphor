@@ -67,6 +67,7 @@ pub struct ParticleSystem {
     // Render (alpha blend — for non-glowing sprites)
     render_pipeline_alpha: RenderPipeline,
     render_bind_groups: [BindGroup; 2],
+    #[allow(dead_code)]
     render_bgl: BindGroupLayout,
     // Sprite texture bind group (bind group 1)
     sprite_bind_group: BindGroup,
@@ -119,10 +120,13 @@ pub struct ParticleSystem {
 
     // Reaction-diffusion (R-D compute on own pipeline; particle sampling via group 4)
     rd_textures: Option<[wgpu::Texture; 2]>,
+    #[allow(dead_code)]
     rd_views: Option<[wgpu::TextureView; 2]>,
+    #[allow(dead_code)]
     rd_sampler: Option<wgpu::Sampler>,
     rd_uniform_buffer: Option<wgpu::Buffer>,
     rd_compute_pipeline: Option<ComputePipeline>,
+    #[allow(dead_code)]
     rd_compute_bgl: Option<BindGroupLayout>,
     rd_compute_bgs: Option<[BindGroup; 2]>,
     rd_particle_bgl: Option<BindGroupLayout>,
@@ -133,6 +137,7 @@ pub struct ParticleSystem {
     rd_initialized: std::cell::Cell<bool>,
 
     // Depth sort (bitonic merge sort on alive indices by particle size)
+    #[allow(dead_code)]
     sort_key_buffer: Option<wgpu::Buffer>,
     sort_params_buffer: Option<wgpu::Buffer>,
     sort_keygen_pipeline: Option<ComputePipeline>,
@@ -1744,6 +1749,7 @@ impl ParticleSystem {
     }
 
     /// Update aux data from a webcam frame. Called per-frame from the webcam drain loop.
+    #[allow(dead_code)]
     pub fn update_webcam_frame(&mut self, queue: &Queue, data: &[u8], width: u32, height: u32) {
         let aux = super::image_source::sample_rgba_buffer(
             data,
@@ -1915,6 +1921,7 @@ impl ParticleSystem {
 
     /// Enable or upgrade the flow field texture. If enabling for the first time,
     /// bakes the full 64x64x64 curl noise texture.
+    #[allow(dead_code)]
     pub fn set_flow_field(&mut self, device: &Device, queue: &Queue, enabled: bool) {
         self.def.flow_field = enabled;
         let new_field = if enabled {
@@ -1944,6 +1951,7 @@ impl ParticleSystem {
     }
 
     /// Update obstacle texture from webcam frame data (per-frame).
+    #[allow(dead_code)]
     pub fn update_obstacle_webcam(
         &mut self,
         device: &Device,
@@ -1962,6 +1970,7 @@ impl ParticleSystem {
     /// Set obstacle from pre-decoded video frames.
     /// Video frames have alpha=1.0 everywhere, so we convert luminance to alpha
     /// so bright areas become solid obstacles and dark areas are passable.
+    #[allow(dead_code)]
     pub fn set_obstacle_video(
         &mut self,
         device: &Device,
@@ -2065,6 +2074,7 @@ impl ParticleSystem {
     }
 
     /// Set up spatial hash grid for particle-particle interaction.
+    #[allow(dead_code)]
     pub fn setup_spatial_hash(&mut self, device: &Device) {
         let hash = SpatialHashGrid::new(
             device,
@@ -2082,11 +2092,13 @@ impl ParticleSystem {
     }
 
     /// Get the spatial hash query bind group layout, if interaction is enabled.
+    #[allow(dead_code)]
     pub fn spatial_hash_query_bgl(&self) -> Option<&BindGroupLayout> {
         self.spatial_hash.as_ref().map(|h| &h.query_bgl)
     }
 
     /// Get the spatial hash query bind group, if interaction is enabled.
+    #[allow(dead_code)]
     pub fn spatial_hash_query_bg(&self) -> Option<&BindGroup> {
         self.spatial_hash.as_ref().map(|h| &h.query_bind_group)
     }

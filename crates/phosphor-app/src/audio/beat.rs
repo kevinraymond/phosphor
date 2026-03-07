@@ -329,7 +329,8 @@ impl KalmanBpm {
                     self.snap_count
                 );
                 snapped_bpm = raw_bpm;
-                was_snapped = false;
+                // was_snapped is intentionally not read after this reassignment;
+                // the snap_count reset handles the state change.
                 self.snap_count = 0;
             }
         } else {
@@ -797,27 +798,26 @@ impl BeatScheduler {
         }
 
         // Determine if we should fire a beat
-        let mut is_beat = false;
-
-        if missed > 0 && self.tempo_confidence >= self.min_confidence {
-            is_beat = true;
+        let is_beat = if missed > 0 && self.tempo_confidence >= self.min_confidence {
             self.beat_strength = 0.5;
             self.state = BeatState::Missed;
+            true
         } else if self.tempo_confidence < self.min_confidence || self.period == 0.0 {
             // Low confidence: onset-only mode
-            is_beat = self.onset_only(is_onset, in_refractory);
+            let mut beat = self.onset_only(is_onset, in_refractory);
 
             // Backup prediction
-            if !is_beat && self.stored_period > 0.0 && self.last_fired_time > 0.0 {
+            if !beat && self.stored_period > 0.0 && self.last_fired_time > 0.0 {
                 if time_since_fired >= self.stored_period * 0.9 && !in_refractory {
-                    is_beat = true;
+                    beat = true;
                     self.beat_strength = 0.5;
                 }
             }
+            beat
         } else {
             // High confidence: predictive mode
-            is_beat = self.predictive(is_onset, timestamp, in_refractory);
-        }
+            self.predictive(is_onset, timestamp, in_refractory)
+        };
 
         if is_beat {
             self.last_beat_time = timestamp;

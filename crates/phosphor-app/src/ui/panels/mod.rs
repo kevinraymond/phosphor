@@ -223,7 +223,7 @@ pub fn draw_panels(
                         let dim_label = egui::Color32::from_white_alpha(38); // ~0.15
                         let on_label = egui::Color32::from_white_alpha(90); // ~0.35
                         // Helper: dot + tiny label (right-to-left order)
-                        let mut status_dot = |ui: &mut egui::Ui,
+                        let status_dot = |ui: &mut egui::Ui,
                                               on: bool,
                                               color: egui::Color32,
                                               label: &str| {
