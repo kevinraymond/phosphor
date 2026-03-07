@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use anyhow::Result;
-use cpal::Stream;
+use cpal::{Sample, SampleFormat, Stream};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 /// Suppress noisy ALSA/JACK stderr messages during device enumeration.
@@ -35,7 +35,43 @@ pub fn suppress_audio_library_noise() {
     // Suppress JACK "cannot connect to server" messages
     // Safety: called once at startup before any threads are spawned.
     unsafe { std::env::set_var("JACK_NO_START_SERVER", "1") };
+
+    // Also try to silence JACK callbacks now (may be no-op if libjack not yet loaded)
+    suppress_jack_errors();
 }
+
+/// Silence JACK error/info callbacks by loading libjack and installing no-op handlers.
+/// Must be called *before* cpal device enumeration so ALSA's JACK plugin inherits the handlers.
+/// Safe to call multiple times; no-op if libjack is not installed.
+#[cfg(target_os = "linux")]
+pub fn suppress_jack_errors() {
+    type JackMsgCallback = unsafe extern "C" fn(*const std::ffi::c_char);
+    type JackSetFn = unsafe extern "C" fn(Option<JackMsgCallback>);
+    unsafe extern "C" fn jack_null_handler(_msg: *const std::ffi::c_char) {}
+    unsafe extern "C" {
+        fn dlopen(filename: *const std::ffi::c_char, flags: std::ffi::c_int) -> *mut std::ffi::c_void;
+        fn dlsym(handle: *mut std::ffi::c_void, symbol: *const std::ffi::c_char) -> *mut std::ffi::c_void;
+        fn dlclose(handle: *mut std::ffi::c_void) -> std::ffi::c_int;
+    }
+    const RTLD_NOW: std::ffi::c_int = 2;
+    unsafe {
+        // Proactively load libjack so we can install handlers before ALSA's JACK plugin runs
+        let handle = dlopen(c"libjack.so.0".as_ptr(), RTLD_NOW);
+        if !handle.is_null() {
+            for name in [c"jack_set_error_function", c"jack_set_info_function"] {
+                let sym = dlsym(handle, name.as_ptr());
+                if !sym.is_null() {
+                    let set_fn: JackSetFn = std::mem::transmute(sym);
+                    set_fn(Some(jack_null_handler));
+                }
+            }
+            dlclose(handle);
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn suppress_jack_errors() {}
 
 #[cfg(not(target_os = "linux"))]
 pub fn suppress_audio_library_noise() {}
@@ -160,33 +196,53 @@ impl AudioCapture {
         );
 
         let ring = Arc::new(RingBuffer::new());
-        let ring_clone = ring.clone();
         let callback_count = Arc::new(AtomicU64::new(0));
-        let callback_count_clone = callback_count.clone();
 
-        let stream = device.build_input_stream(
-            &config.into(),
-            move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                let count = callback_count_clone.fetch_add(1, Ordering::Relaxed);
-                if count == 0 {
-                    log::info!("Audio callback fired (first data: {} samples)", data.len());
-                }
-                // Downmix to mono
-                if channels == 1 {
-                    ring_clone.push(data);
-                } else {
-                    let mono: Vec<f32> = data
-                        .chunks(channels)
-                        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-                        .collect();
-                    ring_clone.push(&mono);
-                }
-            },
-            |err| {
-                log::error!("Audio stream error: {err}");
-            },
-            None,
-        )?;
+        let sample_format = config.sample_format();
+        let stream_config: cpal::StreamConfig = config.into();
+
+        let err_callback = |err: cpal::StreamError| {
+            log::error!("Audio stream error: {err}");
+        };
+
+        let stream = match sample_format {
+            SampleFormat::I16 => {
+                let ring_clone = ring.clone();
+                let cb_clone = callback_count.clone();
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        push_samples(&ring_clone, &cb_clone, data, channels);
+                    },
+                    err_callback,
+                    None,
+                )?
+            }
+            SampleFormat::I32 => {
+                let ring_clone = ring.clone();
+                let cb_clone = callback_count.clone();
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[i32], _: &cpal::InputCallbackInfo| {
+                        push_samples(&ring_clone, &cb_clone, data, channels);
+                    },
+                    err_callback,
+                    None,
+                )?
+            }
+            _ => {
+                let ring_clone = ring.clone();
+                let cb_clone = callback_count.clone();
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        push_samples(&ring_clone, &cb_clone, data, channels);
+                    },
+                    err_callback,
+                    None,
+                )?
+            }
+        };
 
         stream.play()?;
         log::info!("Audio capture started");
@@ -206,13 +262,38 @@ impl AudioCapture {
 
     pub fn list_devices() -> Vec<String> {
         let host = cpal::default_host();
+        let mut seen = std::collections::HashSet::new();
         host.input_devices()
             .map(|devices| {
                 devices
                     .filter(|d| d.default_input_config().is_ok())
                     .filter_map(|d| d.description().ok().map(|desc| desc.name().to_string()))
+                    .filter(|name| seen.insert(name.clone()))
                     .collect()
             })
             .unwrap_or_default()
+    }
+}
+
+/// Convert any cpal sample type to f32, downmix to mono, and push to ring buffer.
+fn push_samples<T: Sample>(ring: &RingBuffer, callback_count: &AtomicU64, data: &[T], channels: usize)
+where
+    f32: cpal::FromSample<T>,
+{
+    let count = callback_count.fetch_add(1, Ordering::Relaxed);
+    if count == 0 {
+        log::info!("Audio callback fired (first data: {} samples)", data.len());
+    }
+    if channels == 1 {
+        let mono: Vec<f32> = data.iter().copied().map(|s| cpal::FromSample::from_sample_(s)).collect();
+        ring.push(&mono);
+    } else {
+        let mono: Vec<f32> = data
+            .chunks(channels)
+            .map(|frame| {
+                frame.iter().copied().map(|s| <f32 as cpal::FromSample<T>>::from_sample_(s)).sum::<f32>() / channels as f32
+            })
+            .collect();
+        ring.push(&mono);
     }
 }

@@ -151,25 +151,10 @@ fn mfcc_heat_color(t: f32) -> Color32 {
 
 // ── Device selector (unchanged) ────────────────────────────────────────
 
-fn draw_device_selector(ui: &mut Ui, audio: &AudioSystem) {
+fn draw_device_selector(ui: &mut Ui, audio: &mut AudioSystem) {
     let tc = theme_colors(ui.ctx());
 
-    let list_id = egui::Id::new("audio_device_list");
-    let list_time_id = egui::Id::new("audio_device_list_time");
-
-    let now = ui.input(|i| i.time);
-    let last_scan: f64 = ui.ctx().data(|d| d.get_temp(list_time_id)).unwrap_or(0.0);
-
-    let devices: Vec<String> = if now - last_scan > 2.0 {
-        let devs = audio.list_devices();
-        ui.ctx().data_mut(|d| {
-            d.insert_temp(list_id, devs.clone());
-            d.insert_temp(list_time_id, now);
-        });
-        devs
-    } else {
-        ui.ctx().data(|d| d.get_temp(list_id)).unwrap_or_default()
-    };
+    let devices = audio.list_devices();
 
     let current = &audio.device_name;
     let selected_text = truncate_device_name(current, 24);
@@ -659,7 +644,7 @@ fn draw_footer(ui: &mut Ui) {
 
 // ── Main entry ─────────────────────────────────────────────────────────
 
-pub fn draw_audio_panel(ui: &mut Ui, audio: &AudioSystem, uniforms: &ShaderUniforms) {
+pub fn draw_audio_panel(ui: &mut Ui, audio: &mut AudioSystem, uniforms: &ShaderUniforms) {
     // Header: AUDIO + feature count + BPM ring
     draw_header_row(ui, uniforms);
 

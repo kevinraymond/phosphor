@@ -11,7 +11,7 @@ pub mod wasapi_capture;
 
 pub use features::AudioFeatures;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -46,41 +46,44 @@ struct OpenedBackend {
 }
 
 /// Try native loopback first (PulseAudio on Linux, WASAPI on Windows), then cpal.
+/// When a specific device is requested, skip native loopback and go straight to cpal.
 fn open_backend(device_name: Option<&str>) -> Result<OpenedBackend, String> {
-    #[cfg(target_os = "linux")]
-    {
-        match pulse_capture::PulseCapture::new() {
-            Ok(pulse) => {
-                return Ok(OpenedBackend {
-                    ring: pulse.ring.clone(),
-                    sample_rate: pulse.sample_rate as f32,
-                    device_name: pulse.device_name.clone(),
-                    callback_count: pulse.callback_count.clone(),
-                    backend: CaptureBackend::Pulse(pulse),
-                    using_native_backend: true,
-                });
-            }
-            Err(e) => {
-                log::info!("PulseAudio unavailable ({e}), falling back to ALSA");
+    if device_name.is_none() {
+        #[cfg(target_os = "linux")]
+        {
+            match pulse_capture::PulseCapture::new() {
+                Ok(pulse) => {
+                    return Ok(OpenedBackend {
+                        ring: pulse.ring.clone(),
+                        sample_rate: pulse.sample_rate as f32,
+                        device_name: pulse.device_name.clone(),
+                        callback_count: pulse.callback_count.clone(),
+                        backend: CaptureBackend::Pulse(pulse),
+                        using_native_backend: true,
+                    });
+                }
+                Err(e) => {
+                    log::info!("PulseAudio unavailable ({e}), falling back to ALSA");
+                }
             }
         }
-    }
 
-    #[cfg(target_os = "windows")]
-    {
-        match wasapi_capture::WasapiCapture::new() {
-            Ok(wasapi) => {
-                return Ok(OpenedBackend {
-                    ring: wasapi.ring.clone(),
-                    sample_rate: wasapi.sample_rate as f32,
-                    device_name: wasapi.device_name.clone(),
-                    callback_count: wasapi.callback_count.clone(),
-                    backend: CaptureBackend::Wasapi(wasapi),
-                    using_native_backend: true,
-                });
-            }
-            Err(e) => {
-                log::info!("WASAPI loopback unavailable ({e}), falling back to cpal");
+        #[cfg(target_os = "windows")]
+        {
+            match wasapi_capture::WasapiCapture::new() {
+                Ok(wasapi) => {
+                    return Ok(OpenedBackend {
+                        ring: wasapi.ring.clone(),
+                        sample_rate: wasapi.sample_rate as f32,
+                        device_name: wasapi.device_name.clone(),
+                        callback_count: wasapi.callback_count.clone(),
+                        backend: CaptureBackend::Wasapi(wasapi),
+                        using_native_backend: true,
+                    });
+                }
+                Err(e) => {
+                    log::info!("WASAPI loopback unavailable ({e}), falling back to cpal");
+                }
             }
         }
     }
@@ -110,8 +113,14 @@ pub struct AudioSystem {
     callback_count: Arc<AtomicU64>,
     started_at: Instant,
     _capture: Option<CaptureBackend>,
-    /// True when using a native backend (PulseAudio/WASAPI) — skip cpal device enumeration.
+    /// True when using a native backend (PulseAudio/WASAPI) for the current capture.
     using_native_backend: bool,
+    /// Cached device list, refreshed in background to avoid blocking the UI thread.
+    cached_devices: Arc<Mutex<Vec<String>>>,
+    /// Whether a background scan is already in flight.
+    scan_in_flight: Arc<AtomicBool>,
+    /// When the last device scan completed.
+    last_scan: Instant,
 }
 
 impl AudioSystem {
@@ -150,6 +159,9 @@ impl AudioSystem {
                     started_at: Instant::now(),
                     _capture: Some(opened.backend),
                     using_native_backend: opened.using_native_backend,
+                    cached_devices: Arc::new(Mutex::new(Vec::new())),
+                    scan_in_flight: Arc::new(AtomicBool::new(false)),
+                    last_scan: Instant::now() - Duration::from_secs(60),
                 }
             }
             Err(e) => {
@@ -166,6 +178,9 @@ impl AudioSystem {
                     started_at: Instant::now(),
                     _capture: None,
                     using_native_backend: false,
+                    cached_devices: Arc::new(Mutex::new(Vec::new())),
+                    scan_in_flight: Arc::new(AtomicBool::new(false)),
+                    last_scan: Instant::now() - Duration::from_secs(60),
                 }
             }
         }
@@ -198,16 +213,31 @@ impl AudioSystem {
         self.started_at = new.started_at;
         self._capture = new._capture.take();
         self.using_native_backend = new.using_native_backend;
+        // Keep existing cached_devices/scan_in_flight/last_scan — no need to re-scan on switch
         // `new` is dropped here — its Drop is a no-op since thread_handle is None and shutdown is true
     }
 
-    /// List available input devices.
-    /// Returns empty when native backend is active (PulseAudio/WASAPI auto-detect the right source).
-    pub fn list_devices(&self) -> Vec<String> {
-        if self.using_native_backend {
-            return vec![];
+    /// Return cached input device list. Triggers a background rescan every 5 seconds
+    /// so device enumeration never blocks the UI thread.
+    pub fn list_devices(&mut self) -> Vec<String> {
+        if self.last_scan.elapsed() > Duration::from_secs(5)
+            && !self.scan_in_flight.swap(true, Ordering::AcqRel)
+        {
+            let cache = self.cached_devices.clone();
+            let flag = self.scan_in_flight.clone();
+            thread::Builder::new()
+                .name("phosphor-devscan".into())
+                .spawn(move || {
+                    // Pre-load libjack and install null error handlers before cpal touches ALSA
+                    capture::suppress_jack_errors();
+                    let devs = AudioCapture::list_devices();
+                    *cache.lock().unwrap() = devs;
+                    flag.store(false, Ordering::Release);
+                })
+                .ok();
+            self.last_scan = Instant::now();
         }
-        AudioCapture::list_devices()
+        self.cached_devices.lock().unwrap().clone()
     }
 
     /// Drain the channel and return the most recent features.

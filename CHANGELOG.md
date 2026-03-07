@@ -3,6 +3,16 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## Unreleased
+
+### Fixed
+- Input device enumeration now works when native loopback (PulseAudio/WASAPI) is active — microphones and other input devices appear in the device selector dropdown
+- Selecting a specific input device now correctly switches to cpal capture instead of re-entering the loopback path
+- Deduplicate input device names (ALSA exposes multiple nodes per card with identical descriptions)
+- Handle non-f32 sample formats (i16, i32) when opening input devices — fixes "Sample format 'f32' is not supported by hardware" error
+- Suppress JACK client library stderr spam ("Cannot connect to server") via null error/info handlers on Linux
+- Move device enumeration to background thread — eliminates ~200ms UI freeze from ALSA/JACK probing every scan cycle
+
 ## v1.5.0 — 2026-03-06
 
 ### Docs
