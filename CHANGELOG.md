@@ -3,7 +3,7 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
-## Unreleased
+## v1.6.0 — 2026-03-07
 
 ### Added
 - Acknowledgments section in README — credits for third-party libraries, algorithms, research, and fonts
