@@ -146,6 +146,7 @@ impl SceneStore {
     }
 
     /// Get the name of the currently loaded scene.
+    #[allow(dead_code)]
     pub fn current_name(&self) -> Option<&str> {
         self.current_scene
             .and_then(|i| self.scenes.get(i))

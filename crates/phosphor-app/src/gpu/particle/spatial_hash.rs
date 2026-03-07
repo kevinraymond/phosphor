@@ -26,6 +26,7 @@ pub struct SpatialHashGrid {
     /// Per-cell prefix sum result (num_cells * 4 bytes)
     cell_offsets_buffer: wgpu::Buffer,
     /// Sorted particle indices (max_particles * 4 bytes)
+    #[allow(dead_code)]
     sorted_indices_buffer: wgpu::Buffer,
 
     // Pass 1: Count — each particle hashes position → atomicAdd
@@ -41,8 +42,11 @@ pub struct SpatialHashGrid {
     scatter_bind_groups: [BindGroup; 2],
 
     pub max_particles: u32,
+    #[allow(dead_code)]
     grid_w: u32,
+    #[allow(dead_code)]
     grid_h: u32,
+    #[allow(dead_code)]
     num_cells: u32,
 
     /// Bind group layout for the neighbor query in sim shader (group 3)

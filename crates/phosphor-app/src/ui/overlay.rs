@@ -142,6 +142,7 @@ impl EguiOverlay {
         self.state.egui_ctx().wants_keyboard_input()
     }
 
+    #[allow(dead_code)]
     pub fn wants_mouse(&self) -> bool {
         self.state.egui_ctx().wants_pointer_input()
     }

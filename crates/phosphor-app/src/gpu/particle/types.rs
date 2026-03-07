@@ -209,11 +209,13 @@ pub enum ParticleImageSource {
     },
     /// Live webcam feed — frames arrive externally.
     #[cfg(feature = "webcam")]
+    #[allow(dead_code)]
     Webcam { width: u32, height: u32 },
 }
 
 impl ParticleImageSource {
     /// Advance playback by dt seconds. Returns true if the current frame changed.
+    #[allow(unused_variables)]
     pub fn advance(&mut self, dt_secs: f64) -> bool {
         match self {
             #[cfg(feature = "video")]
@@ -266,6 +268,7 @@ impl ParticleImageSource {
         }
     }
 
+    #[allow(dead_code)]
     pub fn frame_count(&self) -> usize {
         match self {
             #[cfg(feature = "video")]
@@ -333,6 +336,7 @@ impl ParticleImageSource {
     }
 
     /// Seek to a specific time position (video only).
+    #[allow(dead_code, unused_variables)]
     pub fn seek_to_secs(&mut self, target_secs: f64) {
         #[cfg(feature = "video")]
         if let ParticleImageSource::Video {
@@ -392,6 +396,7 @@ impl SourceTransition {
         result
     }
 
+    #[allow(dead_code)]
     pub fn is_complete(&self) -> bool {
         self.progress >= 1.0
     }

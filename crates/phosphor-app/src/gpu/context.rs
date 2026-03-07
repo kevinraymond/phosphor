@@ -13,7 +13,9 @@ fn pipeline_cache_path() -> Option<std::path::PathBuf> {
 }
 
 pub struct GpuContext {
+    #[allow(dead_code)]
     pub instance: Instance,
+    #[allow(dead_code)]
     pub adapter: Adapter,
     pub device: Device,
     pub queue: Queue,

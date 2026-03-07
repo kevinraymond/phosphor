@@ -2,6 +2,7 @@ use wgpu::{Device, Queue, Sampler, Texture, TextureFormat, TextureView};
 
 /// An off-screen render target with texture, view, and sampler.
 pub struct RenderTarget {
+    #[allow(dead_code)]
     pub texture: Texture,
     pub view: TextureView,
     pub sampler: Sampler,
@@ -141,6 +142,7 @@ impl PingPongTarget {
     }
 
     /// The target containing the previous frame's output.
+    #[allow(dead_code)]
     pub fn read_target(&self) -> &RenderTarget {
         &self.targets[1 - self.current]
     }

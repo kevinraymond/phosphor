@@ -14,8 +14,10 @@ pub struct ParticleInfo {
     pub lifetime: f32,
     pub initial_speed: f32,
     pub initial_size: f32,
+    #[allow(dead_code)]
     pub size_end: f32,
     pub drag: f32,
+    #[allow(dead_code)]
     pub attraction_strength: f32,
     pub blend_mode: String,
     pub has_flow_field: bool,
@@ -29,12 +31,14 @@ pub struct ParticleInfo {
     /// "static", "video", or "webcam"
     pub source_type: String,
     /// Source filename or device name
+    #[allow(dead_code)]
     pub source_name: String,
     pub video_playing: bool,
     pub video_looping: bool,
     pub video_speed: f32,
     pub video_position_secs: f64,
     pub video_duration_secs: f64,
+    #[allow(dead_code)]
     pub is_transitioning: bool,
     pub source_loading: bool,
     pub source_loading_name: String,

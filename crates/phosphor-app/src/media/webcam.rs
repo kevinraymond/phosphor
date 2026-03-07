@@ -183,6 +183,7 @@ pub fn list_devices() -> Result<Vec<(u32, String)>, String> {
 }
 
 /// Check if any webcam is available. Cached via OnceLock.
+#[allow(dead_code)]
 pub fn webcam_available() -> bool {
     use std::sync::OnceLock;
     static AVAILABLE: OnceLock<bool> = OnceLock::new();

@@ -6,7 +6,7 @@
 //! - RAM cost: ~3.7MB per frame at 1280x720. A 30s@30fps clip = ~3.3GB.
 
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 

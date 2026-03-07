@@ -116,21 +116,25 @@ impl MidiClock {
     }
 
     /// Total beats counted since Start.
+    #[allow(dead_code)]
     pub fn beat_count(&self) -> u32 {
         self.beat_count
     }
 
     /// Derived BPM from clock ticks (0 if not enough data).
+    #[allow(dead_code)]
     pub fn bpm(&self) -> f64 {
         self.bpm
     }
 
     /// Phase within current beat (0.0 at beat start, ~1.0 just before next).
+    #[allow(dead_code)]
     pub fn beat_phase(&self) -> f32 {
         self.phase
     }
 
     /// Whether we've received enough ticks to report BPM.
+    #[allow(dead_code)]
     pub fn has_bpm(&self) -> bool {
         self.tick_intervals.len() >= 4
     }

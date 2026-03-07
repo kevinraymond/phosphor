@@ -33,6 +33,7 @@ pub enum TriggerAction {
 }
 
 impl TriggerAction {
+    #[allow(dead_code)]
     pub const ALL: &[TriggerAction] = &[
         TriggerAction::NextEffect,
         TriggerAction::PrevEffect,

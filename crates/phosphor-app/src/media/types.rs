@@ -21,6 +21,7 @@ pub struct TransportState {
     pub speed: f32,
     pub direction: PlayDirection,
     /// Current position in seconds (for video) or frame index (for GIF).
+    #[allow(dead_code)]
     pub position: f64,
     /// Total duration in seconds (for video) or total frames (for GIF as f64).
     pub duration: f64,

@@ -13,6 +13,7 @@ pub struct NdiInfo {
     pub ndi_available: bool,
     pub source_name: String,
     pub resolution: OutputResolution,
+    #[allow(dead_code)]
     pub frames_sent: u64,
     pub output_width: u32,
     pub output_height: u32,

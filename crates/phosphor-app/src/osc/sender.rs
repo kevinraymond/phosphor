@@ -35,6 +35,7 @@ impl OscSender {
     }
 
     /// Disable the sender.
+    #[allow(dead_code)]
     pub fn disable(&mut self) {
         self.socket = None;
     }

@@ -13,6 +13,10 @@
 - Preset save/restore resolves webcam by device name, with fallback to default
 - Inline "Camera not available" indicator in webcam panel when capture is dead
 
+### Changed
+- Clean build: eliminated all 62 compiler warnings in phosphor-app (unused vars, dead code suppressions, borrow scope fix, removed dead `ParticleSourceRequest` enum and `recreate_draw_bind_groups` method)
+- Suppressed 2 `unexpected_cfgs` warnings in vendored midir patch
+
 ### Fixed
 - Webcam mirror checkbox now actually flips the image (was setting flag but shader never read it)
 - Webcam device switch failure no longer kills the active capture — restores previous device on error

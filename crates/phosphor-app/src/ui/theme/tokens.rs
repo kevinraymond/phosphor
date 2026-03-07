@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use egui::Color32;
 
 // Dark theme colors (WCAG 2.2 AA verified)

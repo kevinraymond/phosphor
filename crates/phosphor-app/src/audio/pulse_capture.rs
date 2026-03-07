@@ -37,6 +37,7 @@ struct pa_buffer_attr {
 }
 
 /// Opaque handle returned by pa_simple_new.
+#[allow(non_camel_case_types)]
 enum pa_simple {}
 
 // --- Runtime-loaded function table ---
@@ -132,6 +133,7 @@ impl PulseLib {
 }
 
 /// Check if PulseAudio libraries are available at runtime. Cached.
+#[allow(dead_code)]
 pub fn pulse_available() -> bool {
     static AVAILABLE: OnceLock<bool> = OnceLock::new();
     *AVAILABLE.get_or_init(|| unsafe {
