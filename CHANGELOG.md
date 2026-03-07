@@ -10,6 +10,7 @@
 - Updated README feature table — compute rasterizer, 23 effects, MFCC/chroma audio, webcam/depth layers, scene cues
 - Webcam device selector — enumerate and switch between multiple cameras in webcam layer panel, obstacle panel, and layer add button
 - Persist selected webcam device in settings (remembered across restarts)
+- FFmpeg webcam capture backend — opt-in setting for virtual cameras (Irium, DroidCam, etc.) that only expose DirectShow on Windows; uses `ffmpeg` subprocess instead of nokhwa, no new crate dependencies
 - Preset save/restore resolves webcam by device name, with fallback to default
 - Inline "Camera not available" indicator in webcam panel when capture is dead
 

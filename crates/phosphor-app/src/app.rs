@@ -17,6 +17,8 @@ use crate::gpu::postprocess::PostProcessChain;
 use crate::gpu::render_target::PingPongTarget;
 use crate::gpu::{GpuContext, ShaderPipeline, ShaderUniforms, UniformBuffer};
 use crate::media::MediaLayer;
+#[cfg(feature = "webcam")]
+use crate::media::WebcamBackend;
 use crate::midi::MidiSystem;
 use crate::midi::clock::MidiClock;
 use crate::midi::types::TriggerAction;
@@ -95,11 +97,13 @@ pub struct App {
     pub status_error: Option<(String, Instant)>,
     // Webcam capture (feature-gated)
     #[cfg(feature = "webcam")]
-    pub webcam_capture: Option<crate::media::webcam::WebcamCapture>,
+    pub webcam_capture: Option<WebcamBackend>,
     #[cfg(feature = "webcam")]
     pub webcam_devices: Vec<(u32, String)>,
     #[cfg(feature = "webcam")]
     pub webcam_device_index: u32,
+    #[cfg(feature = "webcam")]
+    pub use_ffmpeg_webcam: bool,
     // Particle source loader (background image/video decode)
     pub particle_source_loader: crate::gpu::particle::ParticleSourceLoader,
     // Depth estimation (feature-gated)
@@ -320,6 +324,8 @@ impl App {
         let settings = SettingsConfig::load();
         #[cfg(feature = "webcam")]
         let webcam_device_from_settings = settings.webcam_device.unwrap_or(0);
+        #[cfg(feature = "webcam")]
+        let use_ffmpeg_webcam = settings.use_ffmpeg_webcam;
         let audio = AudioSystem::new_with_device(settings.audio_device.as_deref());
         let midi = MidiSystem::new();
         let osc = OscSystem::new();
@@ -385,9 +391,15 @@ impl App {
             #[cfg(feature = "webcam")]
             webcam_capture: None,
             #[cfg(feature = "webcam")]
-            webcam_devices: crate::media::webcam::list_devices().unwrap_or_default(),
+            webcam_devices: if use_ffmpeg_webcam {
+                crate::media::webcam_ffmpeg::list_devices().unwrap_or_default()
+            } else {
+                crate::media::webcam::list_devices().unwrap_or_default()
+            },
             #[cfg(feature = "webcam")]
             webcam_device_index: webcam_device_from_settings,
+            #[cfg(feature = "webcam")]
+            use_ffmpeg_webcam,
             particle_source_loader: crate::gpu::particle::ParticleSourceLoader::new(),
             #[cfg(feature = "depth")]
             depth_thread: None,
@@ -1775,7 +1787,7 @@ impl App {
 
         // Start capture if not already running
         if self.webcam_capture.is_none() {
-            match crate::media::webcam::WebcamCapture::start(device_index, Some((1280, 720))) {
+            match self.start_webcam(device_index, Some((1280, 720))) {
                 Ok(capture) => {
                     self.webcam_capture = Some(capture);
                 }
@@ -1788,8 +1800,8 @@ impl App {
         }
 
         let capture = self.webcam_capture.as_ref().unwrap();
-        let (w, h) = capture.resolution;
-        let device_name = capture.device_name.clone();
+        let (w, h) = capture.resolution();
+        let device_name = capture.device_name().to_string();
 
         let source = crate::media::decoder::MediaSource::Live {
             width: w,
@@ -1835,6 +1847,33 @@ impl App {
             }
             self.webcam_capture = None;
         }
+    }
+
+    /// Start webcam capture using the active backend (native or ffmpeg).
+    #[cfg(feature = "webcam")]
+    pub fn start_webcam(&self, device_index: u32, resolution: Option<(u32, u32)>) -> Result<WebcamBackend, String> {
+        if self.use_ffmpeg_webcam {
+            // For ffmpeg, resolve device index to device name
+            let device_name = self
+                .webcam_devices
+                .iter()
+                .find(|(idx, _)| *idx == device_index)
+                .map(|(_, name)| name.clone())
+                .unwrap_or_else(|| format!("Camera {device_index}"));
+            WebcamBackend::start_ffmpeg(&device_name, resolution)
+        } else {
+            WebcamBackend::start_native(device_index, resolution)
+        }
+    }
+
+    /// Refresh the webcam device list using the active backend.
+    #[cfg(feature = "webcam")]
+    pub fn refresh_webcam_devices(&mut self) {
+        self.webcam_devices = if self.use_ffmpeg_webcam {
+            crate::media::webcam_ffmpeg::list_devices().unwrap_or_default()
+        } else {
+            crate::media::webcam::list_devices().unwrap_or_default()
+        };
     }
 
     /// Replace active layer content with media from a file path.
@@ -2076,7 +2115,7 @@ impl App {
                     .unwrap_or(self.webcam_device_index);
                 // Start webcam capture if not already running
                 if self.webcam_capture.is_none() {
-                    match crate::media::webcam::WebcamCapture::start(device_idx, Some((1280, 720))) {
+                    match self.start_webcam(device_idx, Some((1280, 720))) {
                         Ok(capture) => {
                             self.webcam_capture = Some(capture);
                         }
@@ -2088,7 +2127,7 @@ impl App {
                     }
                 }
                 if let Some(ref capture) = self.webcam_capture {
-                    let (w, h) = capture.resolution;
+                    let (w, h) = capture.resolution();
                     let source = crate::media::decoder::MediaSource::Live {
                         width: w,
                         height: h,
@@ -2101,7 +2140,7 @@ impl App {
                         self.gpu.surface_config.width,
                         self.gpu.surface_config.height,
                         source,
-                        std::path::PathBuf::from(&capture.device_name),
+                        std::path::PathBuf::from(capture.device_name()),
                     );
                     let layer = &mut self.layer_stack.layers[i];
                     layer.content = LayerContent::Media(media_layer);
@@ -2242,7 +2281,7 @@ impl App {
             if lp.particle_webcam == Some(true) {
                 // Start webcam capture if not already running
                 if self.webcam_capture.is_none() {
-                    match crate::media::webcam::WebcamCapture::start(self.webcam_device_index, Some((1280, 720))) {
+                    match self.start_webcam(self.webcam_device_index, Some((1280, 720))) {
                         Ok(capture) => {
                             self.webcam_capture = Some(capture);
                         }
@@ -2252,7 +2291,7 @@ impl App {
                     }
                 }
                 if let Some(ref capture) = self.webcam_capture {
-                    let (w, h) = capture.resolution;
+                    let (w, h) = capture.resolution();
                     if let Some(layer) = self.layer_stack.layers.get_mut(i) {
                         if let Some(effect) = layer.as_effect_mut() {
                             if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
@@ -2374,7 +2413,7 @@ impl App {
                     // Start webcam if needed
                     #[cfg(feature = "webcam")]
                     if self.webcam_capture.is_none() {
-                        match crate::media::webcam::WebcamCapture::start(self.webcam_device_index, Some((1280, 720))) {
+                        match self.start_webcam(self.webcam_device_index, Some((1280, 720))) {
                             Ok(capture) => {
                                 self.webcam_capture = Some(capture);
                             }
