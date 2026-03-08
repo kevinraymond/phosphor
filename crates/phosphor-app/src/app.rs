@@ -5,6 +5,7 @@ use anyhow::Result;
 use winit::window::Window;
 
 use crate::audio::AudioSystem;
+use crate::bindings::bus::BindingBus;
 use crate::effect::EffectLoader;
 use crate::effect::format::PostProcessDef;
 use crate::effect::loader::assets_dir;
@@ -55,6 +56,8 @@ pub struct App {
     // Web (WebSocket control surface)
     pub web: WebSystem,
     pub pending_web_triggers: Vec<TriggerAction>,
+    // Binding bus
+    pub binding_bus: BindingBus,
     // Presets
     pub preset_store: PresetStore,
     pub preset_loader: PresetLoader,
@@ -324,6 +327,9 @@ impl App {
         let midi = MidiSystem::new();
         let osc = OscSystem::new();
         let web = WebSystem::new();
+        // Migrate legacy MIDI/OSC mappings to binding bus on first launch
+        crate::bindings::migration::migrate_legacy_if_needed();
+        let binding_bus = BindingBus::new();
         let mut preset_store = PresetStore::new();
         preset_store.scan();
         let mut scene_store = SceneStore::new();
@@ -356,6 +362,7 @@ impl App {
             latest_audio: None,
             web,
             pending_web_triggers: Vec::new(),
+            binding_bus,
             preset_store,
             preset_loader: PresetLoader::new(),
             scene_store,
@@ -708,6 +715,18 @@ impl App {
                 self.web.broadcast_json(&state_json);
             }
         }
+
+        // Evaluate binding bus (runs after MIDI/OSC/WS drain — bus overrides direct mappings)
+        self.binding_bus.ws_bind_values = self.web.bind_values.clone();
+        let bind_results = self.binding_bus.evaluate(
+            self.latest_audio.as_ref(),
+            &self.midi,
+            &self.osc,
+        );
+        for (target, value) in bind_results {
+            self.apply_binding_target(&target, value);
+        }
+        self.binding_bus.save_if_dirty();
 
         // Drain async preset decode results
         if let Some(result) = self.preset_loader.try_recv() {
@@ -1874,6 +1893,76 @@ impl App {
         }
     }
 
+    /// Apply a single binding bus result to its target.
+    fn apply_binding_target(&mut self, target: &str, value: f32) {
+        let parts: Vec<&str> = target.split('.').collect();
+        match parts.first().copied() {
+            Some("param") => {
+                // param.{effect_or_wildcard}.{param_name}
+                if parts.len() >= 3 {
+                    let param_name = parts[2];
+                    // Apply to active layer (wildcard or matching effect)
+                    if let Some(layer) = self.layer_stack.active_mut() {
+                        if let Some(def) = layer
+                            .param_store
+                            .defs
+                            .iter()
+                            .find(|d| d.name() == param_name)
+                            .cloned()
+                        {
+                            match def {
+                                crate::params::ParamDef::Float { min, max, .. } => {
+                                    let val = min + (max - min) * value.clamp(0.0, 1.0);
+                                    layer.param_store.set(param_name, ParamValue::Float(val));
+                                }
+                                crate::params::ParamDef::Bool { .. } => {
+                                    layer
+                                        .param_store
+                                        .set(param_name, ParamValue::Bool(value > 0.5));
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+            Some("layer") => {
+                // layer.{n}.opacity or layer.{n}.blend or layer.{n}.enabled
+                if parts.len() >= 3 {
+                    if let Ok(idx) = parts[1].parse::<usize>() {
+                        if let Some(layer) = self.layer_stack.layers.get_mut(idx) {
+                            match parts[2] {
+                                "opacity" => {
+                                    layer.opacity = value.clamp(0.0, 1.0);
+                                }
+                                "blend" => {
+                                    use crate::gpu::layer::BlendMode;
+                                    layer.blend_mode =
+                                        BlendMode::from_u32(value.round() as u32);
+                                }
+                                "enabled" => {
+                                    layer.enabled = value > 0.5;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+            Some("global") => {
+                // global.master_opacity
+                if parts.get(1).copied() == Some("master_opacity") {
+                    // Apply as global opacity multiplier to all layers
+                    let clamped = value.clamp(0.0, 1.0);
+                    for layer in &mut self.layer_stack.layers {
+                        layer.opacity = clamped;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn save_preset(&mut self, name: &str) {
         let layer_presets: Vec<LayerPreset> = self
             .layer_stack
@@ -1973,7 +2062,12 @@ impl App {
             self.layer_stack.active_layer,
             &postprocess,
         ) {
-            Ok(idx) => log::info!("Saved preset '{}' at index {}", name, idx),
+            Ok(idx) => {
+                log::info!("Saved preset '{}' at index {}", name, idx);
+                // Save preset-scoped bindings as sidecar
+                self.binding_bus.save_preset_bindings(name);
+                self.binding_bus.save_global();
+            }
             Err(e) => log::error!("Failed to save preset: {e}"),
         }
     }
@@ -1990,6 +2084,9 @@ impl App {
             .get(index)
             .map(|(n, _)| n.clone())
             .unwrap_or_default();
+
+        // Load preset-scoped bindings
+        self.binding_bus.load_preset_bindings(&preset_name);
 
         // Scan for media layers that need decoding (skip locked, skip missing files)
         let mut media_jobs: Vec<(usize, std::path::PathBuf)> = Vec::new();

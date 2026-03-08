@@ -6,7 +6,7 @@ use crossbeam_channel::{Receiver, Sender};
 use tungstenite::WebSocket;
 use tungstenite::protocol::Message;
 
-use super::types::WsInMessage;
+use super::types::{SourceFieldInfo, WsInMessage};
 use crate::midi::types::TriggerAction;
 
 /// Run the per-client read/write loop.
@@ -165,6 +165,27 @@ fn parse_client_message(text: &str) -> Option<WsInMessage> {
                 .as_bool()
                 .or_else(|| v.get("value")?.as_f64().map(|f| f > 0.5))?;
             Some(WsInMessage::PostProcessEnabled(value))
+        }
+        "data" => {
+            let source = v.get("source")?.as_str()?.to_string();
+            let fields_obj = v.get("fields")?.as_object()?;
+            let fields: Vec<(String, f32)> = fields_obj
+                .iter()
+                .filter_map(|(k, v)| Some((k.clone(), v.as_f64()? as f32)))
+                .collect();
+            Some(WsInMessage::BindData { source, fields })
+        }
+        "schema" => {
+            let source = v.get("source")?.as_str()?.to_string();
+            let fields_obj = v.get("fields")?.as_object()?;
+            let fields: Vec<(String, SourceFieldInfo)> = fields_obj
+                .iter()
+                .filter_map(|(k, v)| {
+                    let info: SourceFieldInfo = serde_json::from_value(v.clone()).ok()?;
+                    Some((k.clone(), info))
+                })
+                .collect();
+            Some(WsInMessage::BindSchema { source, fields })
         }
         _ => {
             log::debug!("Unknown WS message type: {msg_type}");

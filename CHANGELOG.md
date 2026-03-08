@@ -3,6 +3,18 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## Unreleased
+
+### Added
+- **Binding Bus** — universal source→transform→target system replacing per-parameter MIDI/OSC mappings
+  - Any source (audio features, MIDI CC, OSC, WebSocket) can drive any target (effect params, layer opacity/blend/enabled, global opacity)
+  - 10 composable transforms: remap, smooth, invert, quantize, deadzone, curve, gate, scale, offset, clamp
+  - Preset-scoped and global-scoped bindings with JSON persistence (sidecar files for presets)
+  - WebSocket `/bind` protocol: external apps send `{"type":"data","source":"...","fields":{...}}` for real-time control (e.g. MediaPipe hand tracking)
+  - New Bindings panel in left sidebar with source legend, live value bars, inline transform editor, learn mode
+  - One-time migration of legacy MIDI/OSC param mappings to bus bindings on first launch
+  - MIDI and OSC systems now accumulate last-seen values for bus source collection (zero overhead on existing paths)
+
 ## v1.6.0 — 2026-03-07
 
 ### Added

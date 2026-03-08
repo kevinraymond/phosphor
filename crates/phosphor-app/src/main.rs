@@ -1,5 +1,6 @@
 mod app;
 mod audio;
+mod bindings;
 #[cfg(feature = "depth")]
 mod depth;
 mod effect;
@@ -549,6 +550,7 @@ impl ApplicationHandler for PhosphorApp {
                                 &mut app.midi,
                                 &mut app.osc,
                                 &mut app.web,
+                                &mut app.binding_bus,
                                 &app.preset_store,
                                 &layer_infos,
                                 active_layer,
