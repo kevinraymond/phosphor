@@ -1,5 +1,6 @@
 pub mod audio_mappings_panel;
 pub mod audio_panel;
+pub mod bindings_panel;
 pub mod effect_panel;
 pub mod layer_panel;
 pub mod media_panel;
@@ -22,6 +23,7 @@ pub mod webcam_panel;
 use egui::{Context, Frame, Margin, ScrollArea};
 
 use crate::audio::AudioSystem;
+use crate::bindings::bus::BindingBus;
 use crate::effect::EffectLoader;
 use crate::effect::format::PostProcessDef;
 use crate::gpu::ShaderUniforms;
@@ -50,6 +52,7 @@ pub fn draw_panels(
     midi: &mut MidiSystem,
     osc: &mut OscSystem,
     web: &mut WebSystem,
+    binding_bus: &mut BindingBus,
     preset_store: &PresetStore,
     layers: &[LayerInfo],
     active_layer: usize,
@@ -164,6 +167,38 @@ pub fn draw_panels(
                 widgets::section(ui, "sec_audio", "Audio", bpm_badge.as_deref(), true, |ui| {
                     audio_panel::draw_audio_panel(ui, audio, uniforms);
                 });
+
+                // Bindings section
+                let active = binding_bus.active_count();
+                let bind_badge = if active > 0 {
+                    Some(format!("{}", active))
+                } else {
+                    None
+                };
+                let active_info = layers.get(active_layer);
+                let bind_info = bindings_panel::BindingPanelInfo {
+                    effect_name: active_info
+                        .and_then(|l| l.effect_name.clone())
+                        .unwrap_or_default(),
+                    param_names: params
+                        .defs
+                        .iter()
+                        .filter(|d| matches!(d, crate::params::ParamDef::Float { .. } | crate::params::ParamDef::Bool { .. }))
+                        .map(|d| d.name().to_string())
+                        .collect(),
+                    layer_count: layers.len(),
+                    preset_name: preset_store.current_name().unwrap_or("(unsaved)").to_string(),
+                };
+                widgets::section(
+                    ui,
+                    "sec_bindings",
+                    "Bindings",
+                    bind_badge.as_deref(),
+                    false,
+                    |ui| {
+                        bindings_panel::draw_bindings_panel(ui, binding_bus, &bind_info);
+                    },
+                );
 
                 // Effects section
                 let fx_badge = format!("{}", effect_loader.effects.len());

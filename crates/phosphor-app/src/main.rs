@@ -1,5 +1,6 @@
 mod app;
 mod audio;
+mod bindings;
 #[cfg(feature = "depth")]
 mod depth;
 mod effect;
@@ -549,6 +550,7 @@ impl ApplicationHandler for PhosphorApp {
                                 &mut app.midi,
                                 &mut app.osc,
                                 &mut app.web,
+                                &mut app.binding_bus,
                                 &app.preset_store,
                                 &layer_infos,
                                 active_layer,
@@ -1145,6 +1147,26 @@ impl ApplicationHandler for PhosphorApp {
                         app.process_timeline_event(event);
                     }
                 }
+
+                // Drain scene transport triggers from binding bus
+                let pending: Vec<String> = app.binding_bus.pending_triggers.drain(..).collect();
+                for trigger in &pending {
+                    match trigger.as_str() {
+                        "scene.transport.go" => {
+                            let event = app.timeline.go_next();
+                            app.process_timeline_event(event);
+                        }
+                        "scene.transport.prev" => {
+                            let event = app.timeline.go_prev();
+                            app.process_timeline_event(event);
+                        }
+                        "scene.transport.stop" => {
+                            app.timeline.stop();
+                        }
+                        _ => {}
+                    }
+                }
+
                 let add_cue: Option<String> = app
                     .egui_overlay
                     .context()

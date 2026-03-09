@@ -31,6 +31,32 @@ pub enum WsInMessage {
     LoadPreset { index: usize },
     /// Toggle post-processing.
     PostProcessEnabled(bool),
+    /// Binding data: source name + field values.
+    BindData {
+        source: String,
+        fields: Vec<(String, f32)>,
+    },
+    /// Binding schema: source name + field metadata (for auto-discovery).
+    #[allow(dead_code)]
+    BindSchema {
+        source: String,
+        fields: Vec<(String, SourceFieldInfo)>,
+    },
+}
+
+/// Metadata for a WebSocket source field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceFieldInfo {
+    #[serde(default)]
+    pub min: f32,
+    #[serde(default = "default_one")]
+    pub max: f32,
+    #[serde(default)]
+    pub label: String,
+}
+
+fn default_one() -> f32 {
+    1.0
 }
 
 /// Result of WebSystem::update() — mirrors OscFrameResult with extras.
