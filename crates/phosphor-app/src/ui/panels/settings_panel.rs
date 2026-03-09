@@ -9,6 +9,7 @@ pub fn draw_settings_panel(
     ui: &mut Ui,
     current_theme: ThemeMode,
     current_quality: ParticleQuality,
+    use_ffmpeg_webcam: bool,
 ) {
     let tc = theme_colors(ui.ctx());
 
@@ -73,4 +74,26 @@ pub fn draw_settings_panel(
                 }
             });
     });
+
+    // FFmpeg webcam backend (webcam feature only)
+    #[cfg(feature = "webcam")]
+    {
+        let mut ffmpeg = use_ffmpeg_webcam;
+        let resp = ui
+            .checkbox(
+                &mut ffmpeg,
+                RichText::new("FFmpeg webcam").size(SMALL_SIZE),
+            )
+            .on_hover_text(
+                "Use FFmpeg for webcam capture. Enable if your camera isn't detected \
+                 (e.g. virtual cameras like Irium or DroidCam). Requires FFmpeg installed.",
+            );
+        if resp.changed() {
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(egui::Id::new("set_ffmpeg_webcam"), ffmpeg);
+            });
+        }
+    }
+    #[cfg(not(feature = "webcam"))]
+    let _ = use_ffmpeg_webcam;
 }

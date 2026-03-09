@@ -61,6 +61,7 @@ pub fn draw_panels(
     status_error: &Option<(String, std::time::Instant)>,
     current_theme: ThemeMode,
     particle_quality: ParticleQuality,
+    use_ffmpeg_webcam: bool,
 ) {
     if !visible {
         return;
@@ -354,6 +355,7 @@ pub fn draw_panels(
                                     ui,
                                     current_theme,
                                     particle_quality,
+                                    use_ffmpeg_webcam,
                                 );
                             },
                         );

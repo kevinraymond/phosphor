@@ -4,8 +4,72 @@ pub mod types;
 pub mod video;
 #[cfg(feature = "webcam")]
 pub mod webcam;
+#[cfg(feature = "webcam")]
+pub mod webcam_ffmpeg;
 
 use std::path::PathBuf;
+
+/// Unified webcam backend that wraps either nokhwa (native) or ffmpeg capture.
+#[cfg(feature = "webcam")]
+pub enum WebcamBackend {
+    Native(webcam::WebcamCapture),
+    Ffmpeg(webcam_ffmpeg::FfmpegCapture),
+}
+
+#[cfg(feature = "webcam")]
+impl WebcamBackend {
+    pub fn try_recv_frame(&self) -> Option<webcam::WebcamFrame> {
+        match self {
+            Self::Native(c) => c.try_recv_frame(),
+            Self::Ffmpeg(c) => c.try_recv_frame(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn stop(&mut self) {
+        match self {
+            Self::Native(c) => c.stop(),
+            Self::Ffmpeg(c) => c.stop(),
+        }
+    }
+
+    pub fn is_running(&self) -> bool {
+        match self {
+            Self::Native(c) => c.is_running(),
+            Self::Ffmpeg(c) => c.is_running(),
+        }
+    }
+
+    pub fn device_name(&self) -> &str {
+        match self {
+            Self::Native(c) => &c.device_name,
+            Self::Ffmpeg(c) => &c.device_name,
+        }
+    }
+
+    pub fn resolution(&self) -> (u32, u32) {
+        match self {
+            Self::Native(c) => c.resolution,
+            Self::Ffmpeg(c) => c.resolution,
+        }
+    }
+
+    /// Start capture using the native (nokhwa) backend.
+    pub fn start_native(
+        device_index: u32,
+        resolution: Option<(u32, u32)>,
+    ) -> Result<Self, String> {
+        webcam::WebcamCapture::start(device_index, resolution).map(Self::Native)
+    }
+
+    /// Start capture using the ffmpeg backend.
+    pub fn start_ffmpeg(
+        device_name: &str,
+        resolution: Option<(u32, u32)>,
+    ) -> Result<Self, String> {
+        webcam_ffmpeg::FfmpegCapture::start(device_name, resolution).map(Self::Ffmpeg)
+    }
+}
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::{
