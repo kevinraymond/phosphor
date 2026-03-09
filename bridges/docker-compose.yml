@@ -1,0 +1,97 @@
+# Phosphor Bridge Scripts — Docker Compose
+#
+# Usage:
+#   docker compose up                    # start all enabled bridges
+#   docker compose up hands lfo          # start specific bridges
+#   docker compose --profile depth up    # include depth camera bridges
+#   docker compose --profile gpu up      # use GPU-accelerated variants
+
+services:
+
+  # ── Always-available (no hardware) ──────────────────────────────
+
+  lfo:
+    image: phosphor/bridge-smart-lfo
+    environment:
+      PHOSPHOR_HOST: ${PHOSPHOR_HOST:-host.docker.internal}
+      PHOSPHOR_PORT: ${PHOSPHOR_PORT:-9002}
+    restart: unless-stopped
+
+  # ── Webcam bridges ──────────────────────────────────────────────
+
+  hands:
+    image: phosphor/bridge-vision
+    command: hands
+    devices:
+      - "/dev/video0:/dev/video0"
+    environment:
+      PHOSPHOR_HOST: ${PHOSPHOR_HOST:-host.docker.internal}
+      PHOSPHOR_PORT: ${PHOSPHOR_PORT:-9002}
+      PHOSPHOR_FPS: ${PHOSPHOR_FPS:-30}
+    restart: unless-stopped
+
+  pose:
+    image: phosphor/bridge-vision
+    command: pose
+    devices:
+      - "/dev/video0:/dev/video0"
+    environment:
+      PHOSPHOR_HOST: ${PHOSPHOR_HOST:-host.docker.internal}
+      PHOSPHOR_PORT: ${PHOSPHOR_PORT:-9002}
+      PHOSPHOR_FPS: ${PHOSPHOR_FPS:-30}
+    restart: unless-stopped
+
+  face:
+    image: phosphor/bridge-vision
+    command: face
+    devices:
+      - "/dev/video0:/dev/video0"
+    environment:
+      PHOSPHOR_HOST: ${PHOSPHOR_HOST:-host.docker.internal}
+      PHOSPHOR_PORT: ${PHOSPHOR_PORT:-9002}
+      PHOSPHOR_FPS: ${PHOSPHOR_FPS:-30}
+    restart: unless-stopped
+
+  yolo:
+    image: phosphor/bridge-vision
+    command: yolo
+    devices:
+      - "/dev/video0:/dev/video0"
+    environment:
+      PHOSPHOR_HOST: ${PHOSPHOR_HOST:-host.docker.internal}
+      PHOSPHOR_PORT: ${PHOSPHOR_PORT:-9002}
+      PHOSPHOR_FPS: ${PHOSPHOR_FPS:-15}
+    restart: unless-stopped
+
+  # ── Depth cameras (opt-in via --profile depth) ──────────────────
+
+  realsense:
+    image: phosphor/bridge-realsense
+    profiles: ["depth"]
+    privileged: true    # RealSense needs broad USB access
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+    environment:
+      PHOSPHOR_HOST: ${PHOSPHOR_HOST:-host.docker.internal}
+      PHOSPHOR_PORT: ${PHOSPHOR_PORT:-9002}
+    restart: unless-stopped
+
+  # ── GPU-accelerated variants (opt-in via --profile gpu) ─────────
+
+  yolo-gpu:
+    image: phosphor/bridge-vision:gpu
+    profiles: ["gpu"]
+    command: yolo --fps 30
+    devices:
+      - "/dev/video0:/dev/video0"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      PHOSPHOR_HOST: ${PHOSPHOR_HOST:-host.docker.internal}
+      PHOSPHOR_PORT: ${PHOSPHOR_PORT:-9002}
+    restart: unless-stopped

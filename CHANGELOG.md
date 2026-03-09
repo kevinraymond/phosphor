@@ -6,6 +6,13 @@
 ## Unreleased
 
 ### Added
+- **Bridge Scripts** — Python companion scripts in `bridges/` for streaming external data into the binding bus via WebSocket
+  - Base class `PhosphorBridge`: WS connect, schema declaration, data push, reconnect, graceful shutdown, common CLI args
+  - 9 bridge scripts: MediaPipe hands/pose/face, YOLO object detection, RealSense depth, Smart LFO generator, iPhone ARKit (UDP), Leap Motion (placeholder), Azure Kinect (placeholder)
+  - Test echo server for validating bridge output without Phosphor running
+  - Split requirements files: base, vision, depth, lfo
+  - Docker packaging: layered images (base → vision/lfo/realsense/leap), GPU variant, docker-compose with profiles
+  - All bridges use the existing WS `/bind` protocol — no Rust code changes needed
 - **Binding Bus** — universal source→transform→target system replacing per-parameter MIDI/OSC mappings
   - Any source (audio features, MIDI CC, OSC, WebSocket) can drive any target (effect params, layer opacity/blend/enabled, global opacity)
   - 10 composable transforms: remap, smooth, invert, quantize, deadzone, curve, gate, scale, offset, clamp
@@ -20,6 +27,12 @@
   - Raw shader uniform binding targets: override any of 23 uniform fields (audio bands, features, feedback_decay, time) directly from any source
   - One-time migration of legacy MIDI/OSC param mappings to bus bindings on first launch
   - MIDI and OSC systems now accumulate last-seen values for bus source collection (zero overhead on existing paths)
+  - **Binding Matrix modal** — fullscreen three-column flow editor replacing sidebar bindings panel
+    - Sources (left), binding cards (center), targets (right) with collapsible groups
+    - Bezier connection lines between sources → cards → targets with animated flow dots
+    - Expanded card editing: source/target pickers, transform pills, Raw/Norm/Out preview, learn mode
+    - Effect/Global scope tabs, templates dropdown, keyboard shortcut `B` to toggle
+    - Sidebar bindings section now shows compact stub with active count + "Matrix" button
 
 ## v1.6.0 — 2026-03-07
 
