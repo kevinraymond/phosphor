@@ -560,6 +560,7 @@ impl ApplicationHandler for PhosphorApp {
                                 &app.status_error,
                                 app.settings.theme,
                                 app.settings.particle_quality,
+                                app.settings.use_ffmpeg_webcam,
                             );
                         }
                         // Sync global postprocess enabled from layer
@@ -847,6 +848,42 @@ impl ApplicationHandler for PhosphorApp {
                     if let Some(layer) = app.layer_stack.layers.get(active) {
                         if let Some(effect_idx) = layer.effect_index() {
                             app.load_effect_on_layer(active, effect_idx);
+                        }
+                    }
+                }
+
+                // Handle FFmpeg webcam toggle from settings panel
+                #[cfg(feature = "webcam")]
+                {
+                    let set_ffmpeg: Option<bool> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("set_ffmpeg_webcam")));
+                    if let Some(use_ffmpeg) = set_ffmpeg {
+                        if use_ffmpeg && !crate::media::webcam_ffmpeg::ffmpeg_available() {
+                            app.status_error = Some((
+                                "FFmpeg not found in PATH. Install FFmpeg to use this feature.".into(),
+                                std::time::Instant::now(),
+                            ));
+                        } else {
+                            // Stop any active capture
+                            app.webcam_capture = None;
+                            app.use_ffmpeg_webcam = use_ffmpeg;
+                            app.settings.use_ffmpeg_webcam = use_ffmpeg;
+                            app.settings.save();
+                            // Refresh device list with new backend
+                            app.refresh_webcam_devices();
+                            let backend = if use_ffmpeg { "FFmpeg" } else { "native" };
+                            let device_count = app.webcam_devices.len();
+                            log::info!(
+                                "Webcam backend switched to {backend}, {device_count} device(s) found"
+                            );
+                            app.status_error = Some((
+                                format!(
+                                    "Webcam: {backend} backend, {device_count} device(s) found"
+                                ),
+                                std::time::Instant::now(),
+                            ));
                         }
                     }
                 }
@@ -1239,6 +1276,10 @@ impl ApplicationHandler for PhosphorApp {
                 // Handle obstacle panel signals
                 {
                     use crate::ui::panels::obstacle_panel::ObstacleCommand;
+                    #[cfg(feature = "webcam")]
+                    let mut obstacle_start_webcam = false;
+                    #[cfg(feature = "depth")]
+                    let mut obstacle_start_depth = false;
                     let obstacle_cmd: Option<ObstacleCommand> = app
                         .egui_overlay
                         .context()
@@ -1308,21 +1349,7 @@ impl ApplicationHandler for PhosphorApp {
                                             // Start webcam capture if not already running
                                             #[cfg(feature = "webcam")]
                                             {
-                                                if app.webcam_capture.is_none() {
-                                                    match crate::media::webcam::WebcamCapture::start(
-                                                        app.webcam_device_index,
-                                                        Some((1280, 720)),
-                                                    ) {
-                                                        Ok(capture) => {
-                                                            app.webcam_capture = Some(capture);
-                                                        }
-                                                        Err(e) => {
-                                                            log::error!(
-                                                                "Failed to start webcam for obstacle: {e}"
-                                                            );
-                                                        }
-                                                    }
-                                                }
+                                                obstacle_start_webcam = app.webcam_capture.is_none();
                                                 ps.obstacle_enabled = true;
                                                 ps.obstacle_source = "webcam".to_string();
                                                 ps.obstacle_image_path = None;
@@ -1331,38 +1358,12 @@ impl ApplicationHandler for PhosphorApp {
                                         ObstacleCommand::UseDepth => {
                                             #[cfg(feature = "depth")]
                                             {
-                                                // Ensure ONNX Runtime is loaded (init_from our bundled dylib)
                                                 if !crate::depth::model::ort_available() {
                                                     log::error!(
                                                         "ONNX Runtime not available for depth estimation"
                                                     );
                                                 } else {
-                                                    // Start webcam capture if not already running
-                                                    #[cfg(feature = "webcam")]
-                                                    if app.webcam_capture.is_none() {
-                                                        match crate::media::webcam::WebcamCapture::start(app.webcam_device_index, Some((1280, 720))) {
-                                                            Ok(capture) => {
-                                                                app.webcam_capture = Some(capture);
-                                                            }
-                                                            Err(e) => {
-                                                                log::error!("Failed to start webcam for depth obstacle: {e}");
-                                                            }
-                                                        }
-                                                    }
-                                                    // Start depth thread if not running
-                                                    if app.depth_thread.is_none() {
-                                                        let model_path =
-                                                            crate::depth::model::model_path();
-                                                        match crate::depth::thread::DepthThread::start(model_path) {
-                                                            Ok(dt) => {
-                                                                app.depth_thread = Some(dt);
-                                                                log::info!("Depth estimation thread started");
-                                                            }
-                                                            Err(e) => {
-                                                                log::error!("Failed to start depth thread: {e}");
-                                                            }
-                                                        }
-                                                    }
+                                                    obstacle_start_depth = true;
                                                     ps.obstacle_enabled = true;
                                                     ps.obstacle_source = "depth".to_string();
                                                     ps.obstacle_image_path = None;
@@ -1400,6 +1401,46 @@ impl ApplicationHandler for PhosphorApp {
                             }
                         }
                     }
+                    // Deferred webcam/depth starts (outside mutable layer_stack borrow)
+                    #[cfg(feature = "webcam")]
+                    if obstacle_start_webcam {
+                        if app.webcam_capture.is_none() {
+                            match app.start_webcam(app.webcam_device_index, Some((1280, 720))) {
+                                Ok(capture) => {
+                                    app.webcam_capture = Some(capture);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to start webcam for obstacle: {e}");
+                                }
+                            }
+                        }
+                    }
+                    #[cfg(feature = "depth")]
+                    if obstacle_start_depth {
+                        #[cfg(feature = "webcam")]
+                        if app.webcam_capture.is_none() {
+                            match app.start_webcam(app.webcam_device_index, Some((1280, 720))) {
+                                Ok(capture) => {
+                                    app.webcam_capture = Some(capture);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to start webcam for depth obstacle: {e}");
+                                }
+                            }
+                        }
+                        if app.depth_thread.is_none() {
+                            let model_path = crate::depth::model::model_path();
+                            match crate::depth::thread::DepthThread::start(model_path) {
+                                Ok(dt) => {
+                                    app.depth_thread = Some(dt);
+                                    log::info!("Depth estimation thread started");
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to start depth thread: {e}");
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Handle obstacle webcam device switch
@@ -1412,10 +1453,7 @@ impl ApplicationHandler for PhosphorApp {
                     if let Some(new_idx) = switch_obs_device {
                         let old_idx = app.webcam_device_index;
                         app.webcam_capture = None;
-                        match crate::media::webcam::WebcamCapture::start(
-                            new_idx,
-                            Some((1280, 720)),
-                        ) {
+                        match app.start_webcam(new_idx, Some((1280, 720))) {
                             Ok(capture) => {
                                 app.webcam_capture = Some(capture);
                                 app.webcam_device_index = new_idx;
@@ -1427,10 +1465,7 @@ impl ApplicationHandler for PhosphorApp {
                                 app.status_error =
                                     Some((format!("Camera failed: {e}"), std::time::Instant::now()));
                                 // Restore previous capture
-                                match crate::media::webcam::WebcamCapture::start(
-                                    old_idx,
-                                    Some((1280, 720)),
-                                ) {
+                                match app.start_webcam(old_idx, Some((1280, 720))) {
                                     Ok(capture) => {
                                         app.webcam_capture = Some(capture);
                                     }
@@ -1626,13 +1661,10 @@ impl ApplicationHandler for PhosphorApp {
                         let old_idx = app.webcam_device_index;
                         // Stop old capture first (release device)
                         app.webcam_capture = None;
-                        match crate::media::webcam::WebcamCapture::start(
-                            new_idx,
-                            Some((1280, 720)),
-                        ) {
+                        match app.start_webcam(new_idx, Some((1280, 720))) {
                             Ok(capture) => {
-                                let (w, h) = capture.resolution;
-                                let device_name = capture.device_name.clone();
+                                let (w, h) = capture.resolution();
+                                let device_name = capture.device_name().to_string();
                                 app.webcam_capture = Some(capture);
                                 app.webcam_device_index = new_idx;
                                 app.settings.webcam_device = Some(new_idx);
@@ -1653,10 +1685,7 @@ impl ApplicationHandler for PhosphorApp {
                                 app.status_error =
                                     Some((format!("Camera failed: {e}"), std::time::Instant::now()));
                                 // Restore previous capture
-                                match crate::media::webcam::WebcamCapture::start(
-                                    old_idx,
-                                    Some((1280, 720)),
-                                ) {
+                                match app.start_webcam(old_idx, Some((1280, 720))) {
                                     Ok(capture) => {
                                         app.webcam_capture = Some(capture);
                                     }
@@ -1873,10 +1902,7 @@ impl ApplicationHandler for PhosphorApp {
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_webcam")));
                         if use_webcam.is_some() {
                             if app.webcam_capture.is_none() {
-                                match crate::media::webcam::WebcamCapture::start(
-                                    app.webcam_device_index,
-                                    Some((1280, 720)),
-                                ) {
+                                match app.start_webcam(app.webcam_device_index, Some((1280, 720))) {
                                     Ok(capture) => {
                                         app.webcam_capture = Some(capture);
                                     }
@@ -1886,7 +1912,7 @@ impl ApplicationHandler for PhosphorApp {
                                 }
                             }
                             if let Some(ref capture) = app.webcam_capture {
-                                let (w, h) = capture.resolution;
+                                let (w, h) = capture.resolution();
                                 if let Some(layer) = app.layer_stack.active_mut() {
                                     if let Some(effect) = layer.as_effect_mut() {
                                         if let Some(ps) =

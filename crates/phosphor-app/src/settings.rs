@@ -57,6 +57,8 @@ pub struct SettingsConfig {
     pub particle_quality: ParticleQuality,
     #[serde(default)]
     pub webcam_device: Option<u32>,
+    #[serde(default)]
+    pub use_ffmpeg_webcam: bool,
 }
 
 impl Default for SettingsConfig {
@@ -67,6 +69,7 @@ impl Default for SettingsConfig {
             audio_device: None,
             particle_quality: ParticleQuality::default(),
             webcam_device: None,
+            use_ffmpeg_webcam: false,
         }
     }
 }
@@ -153,6 +156,7 @@ mod tests {
                 audio_device: None,
                 particle_quality: ParticleQuality::default(),
                 webcam_device: None,
+                use_ffmpeg_webcam: false,
             };
             let json = serde_json::to_string(&c).unwrap();
             let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
@@ -168,6 +172,7 @@ mod tests {
             audio_device: None,
             particle_quality: ParticleQuality::default(),
             webcam_device: None,
+            use_ffmpeg_webcam: false,
         };
         let json = serde_json::to_string(&c).unwrap();
         let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
