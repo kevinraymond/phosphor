@@ -12,6 +12,12 @@
   - Preset-scoped and global-scoped bindings with JSON persistence (sidecar files for presets)
   - WebSocket `/bind` protocol: external apps send `{"type":"data","source":"...","fields":{...}}` for real-time control (e.g. MediaPipe hand tracking)
   - New Bindings panel in left sidebar with source legend, live value bars, inline transform editor, learn mode
+  - Bindings panel UI overhaul: collapsible Preset/Global sections, two-line collapsed rows with accent bars and source badges, custom-painted source picker with live bars and WGSL uniform references, inline transform parameter editing with DragValues, Raw/Norm/Out preview area
+  - Source picker shows friendly names for all 46 audio sources (e.g. "Sub Bass" instead of "band.0"), sub-grouped by type (Bands, Features, Beat, MFCC, Chroma)
+  - Binding templates: 4 built-in presets (Audio Reactive, Beat Sync, Spectral Bands, MIDI Faders) with one-click apply
+  - PostFX binding targets: bloom threshold/intensity, vignette, chromatic aberration, film grain
+  - Scene transport binding targets: next cue, previous cue, stop
+  - Raw shader uniform binding targets: override any of 23 uniform fields (audio bands, features, feedback_decay, time) directly from any source
   - One-time migration of legacy MIDI/OSC param mappings to bus bindings on first launch
   - MIDI and OSC systems now accumulate last-seen values for bus source collection (zero overhead on existing paths)
 

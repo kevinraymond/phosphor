@@ -186,6 +186,7 @@ pub fn draw_panels(
                         .map(|d| d.name().to_string())
                         .collect(),
                     layer_count: layers.len(),
+                    preset_name: preset_store.current_name().unwrap_or("(unsaved)").to_string(),
                 };
                 widgets::section(
                     ui,

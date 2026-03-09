@@ -13,14 +13,18 @@ use super::types::*;
 /// Central binding bus: owns bindings, runtime state, and evaluates each frame.
 pub struct BindingBus {
     pub bindings: Vec<Binding>,
-    runtimes: HashMap<BindingId, BindingRuntime>,
+    pub(crate) runtimes: HashMap<BindingId, BindingRuntime>,
     /// WebSocket binding data values (accumulated from WS data frames).
     pub ws_bind_values: HashMap<String, f32>,
-    next_id_counter: u64,
-    dirty: bool,
+    pub(crate) next_id_counter: u64,
+    pub(crate) dirty: bool,
     /// Debounce: when the dirty flag was first set (save after 1s of no changes).
-    dirty_since: Option<Instant>,
+    pub(crate) dirty_since: Option<Instant>,
     pub learn_target: Option<LearnState>,
+    /// Last frame's source snapshot (for UI diagnostics / templates).
+    pub last_snapshot: SourceSnapshot,
+    /// Scene transport triggers pending drain by the main loop.
+    pub pending_triggers: Vec<String>,
 }
 
 impl BindingBus {
@@ -45,6 +49,8 @@ impl BindingBus {
             dirty: false,
             dirty_since: None,
             learn_target: None,
+            last_snapshot: HashMap::new(),
+            pending_triggers: Vec::new(),
         }
     }
 
@@ -192,6 +198,8 @@ impl BindingBus {
             results.push((binding.target.clone(), output));
         }
 
+        self.last_snapshot = snapshot.clone();
+
         results
     }
 
@@ -276,6 +284,8 @@ mod tests {
             dirty: false,
             dirty_since: None,
             learn_target: None,
+            last_snapshot: HashMap::new(),
+            pending_triggers: Vec::new(),
         };
 
         let id = bus.add_binding(
@@ -301,6 +311,8 @@ mod tests {
             dirty: false,
             dirty_since: None,
             learn_target: None,
+            last_snapshot: HashMap::new(),
+            pending_triggers: Vec::new(),
         };
 
         bus.add_binding(
@@ -336,6 +348,8 @@ mod tests {
             dirty: false,
             dirty_since: None,
             learn_target: None,
+            last_snapshot: HashMap::new(),
+            pending_triggers: Vec::new(),
         };
 
         bus.add_binding("audio.kick".into(), "param.P.w".into(), BindingScope::Global);

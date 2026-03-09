@@ -1959,6 +1959,70 @@ impl App {
                     }
                 }
             }
+            Some("scene") => {
+                // scene.transport.go / scene.transport.prev / scene.transport.stop
+                if parts.len() >= 3 && parts[1] == "transport" && value > 0.5 {
+                    let trigger = format!("scene.transport.{}", parts[2]);
+                    self.binding_bus.pending_triggers.push(trigger);
+                }
+            }
+            Some("postfx") => {
+                // postfx.bloom_threshold, postfx.bloom_intensity, etc.
+                if parts.len() >= 2 {
+                    if let Some(layer) = self.layer_stack.active_mut() {
+                        match parts[1] {
+                            "bloom_threshold" => {
+                                layer.postprocess.bloom_threshold = value * 1.5;
+                            }
+                            "bloom_intensity" => {
+                                layer.postprocess.bloom_intensity = value.clamp(0.0, 1.0);
+                            }
+                            "vignette" => {
+                                layer.postprocess.vignette = value.clamp(0.0, 1.0);
+                            }
+                            "ca_intensity" => {
+                                layer.postprocess.ca_intensity = value.clamp(0.0, 1.0);
+                            }
+                            "grain_intensity" => {
+                                layer.postprocess.grain_intensity = value.clamp(0.0, 1.0);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Some("uniform") => {
+                // Direct shader uniform override: uniform.{field_name}
+                if parts.len() >= 2 {
+                    let v = value.clamp(0.0, 1.0);
+                    match parts[1] {
+                        "sub_bass" => self.uniforms.sub_bass = v,
+                        "bass" => self.uniforms.bass = v,
+                        "low_mid" => self.uniforms.low_mid = v,
+                        "mid" => self.uniforms.mid = v,
+                        "upper_mid" => self.uniforms.upper_mid = v,
+                        "presence" => self.uniforms.presence = v,
+                        "brilliance" => self.uniforms.brilliance = v,
+                        "rms" => self.uniforms.rms = v,
+                        "kick" => self.uniforms.kick = v,
+                        "centroid" => self.uniforms.centroid = v,
+                        "flux" => self.uniforms.flux = v,
+                        "flatness" => self.uniforms.flatness = v,
+                        "rolloff" => self.uniforms.rolloff = v,
+                        "bandwidth" => self.uniforms.bandwidth = v,
+                        "zcr" => self.uniforms.zcr = v,
+                        "onset" => self.uniforms.onset = v,
+                        "beat" => self.uniforms.beat = v,
+                        "beat_phase" => self.uniforms.beat_phase = v,
+                        "bpm" => self.uniforms.bpm = v,
+                        "beat_strength" => self.uniforms.beat_strength = v,
+                        "dominant_chroma" => self.uniforms.dominant_chroma = v,
+                        "feedback_decay" => self.uniforms.feedback_decay = v,
+                        "time" => self.uniforms.time = value, // time not clamped
+                        _ => {}
+                    }
+                }
+            }
             _ => {}
         }
     }
