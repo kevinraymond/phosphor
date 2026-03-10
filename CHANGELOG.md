@@ -11,6 +11,7 @@
 - **Binding Matrix collapse/expand all** — added ▶/▼ buttons in Sources and Targets column headers to collapse or expand all groups at once
 
 ### Changed
+- **Configurable video device** — bridge docker-compose accepts `VIDEO_DEVICE` env var (e.g. `VIDEO_DEVICE=/dev/video4 docker compose up pose`) for multi-camera setups; host device is always mapped to `/dev/video0` inside the container so OpenCV finds it at index 0
 - **YOLO bridge dynamic class detection** — no longer hardcodes 4 COCO classes; discovers all 80 classes at runtime and only sends fields for classes currently detected. Schema is re-sent when a new class first appears.
 - **Per-field WS expiry** — binding bus now expires individual WS fields after 5s of no updates (was per-source). Unbound fields are removed from the picker; bound fields stay alive at 0.0 so bindings survive when a dynamic source temporarily disappears.
 - **PhosphorBridge `send_schema()`** — new method to re-send schema mid-session for dynamic field discovery
