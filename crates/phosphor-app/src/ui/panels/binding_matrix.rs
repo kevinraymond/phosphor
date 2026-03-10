@@ -33,6 +33,8 @@ pub struct BindingMatrixState {
     pub target_positions: HashMap<String, Pos2>,
     pub card_positions: HashMap<String, (Pos2, Pos2)>,
     pub flow_phase: f32,
+    /// Cached texture handles for WS bridge preview thumbnails.
+    pub preview_textures: HashMap<String, egui::TextureHandle>,
 }
 
 impl BindingMatrixState {
@@ -47,6 +49,7 @@ impl BindingMatrixState {
             target_positions: HashMap::new(),
             card_positions: HashMap::new(),
             flow_phase: 0.0,
+            preview_textures: HashMap::new(),
         }
     }
 }
@@ -83,7 +86,7 @@ pub fn draw_binding_matrix(
     // Backdrop — paint a dimming rectangle over the whole screen
     let backdrop_layer = egui::LayerId::new(Order::Middle, Id::new("matrix_backdrop"));
     let painter = ctx.layer_painter(backdrop_layer);
-    painter.rect_filled(screen, 0.0, Color32::from_black_alpha(180));
+    painter.rect_filled(screen, 0.0, tc.backdrop);
 
     // Escape closes
     let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
@@ -106,7 +109,7 @@ pub fn draw_binding_matrix(
             let frame = egui::Frame::new()
                 .fill(tc.panel)
                 .corner_radius(8.0)
-                .stroke(Stroke::new(1.0, Color32::from_white_alpha(20)))
+                .stroke(Stroke::new(1.0, tc.card_border))
                 .inner_margin(egui::Margin::same(12));
 
             frame.show(ui, |ui| {
@@ -114,8 +117,8 @@ pub fn draw_binding_matrix(
                 ui.set_max_size(content_rect.size());
 
                 // Ensure all popup/select list backgrounds are fully opaque
-                ui.visuals_mut().window_fill = Color32::from_rgb(0x22, 0x22, 0x22);
-                ui.visuals_mut().extreme_bg_color = Color32::from_rgb(0x1a, 0x1a, 0x1a);
+                ui.visuals_mut().window_fill = tc.card_bg;
+                ui.visuals_mut().extreme_bg_color = tc.meter_bg;
 
                 // Header
                 draw_header(ui, state, bus, info);
@@ -127,7 +130,7 @@ pub fn draw_binding_matrix(
                 let col_target_w = 240.0;
                 let col_center_w = (avail.x - col_source_w - col_target_w - 24.0).max(200.0);
 
-                let side_bg = Color32::from_rgb(0x18, 0x18, 0x18); // fully opaque
+                let side_bg = tc.card_bg;
                 let side_pad = 6.0;
 
                 ui.horizontal(|ui| {
@@ -240,7 +243,7 @@ fn draw_header(
         let tab_btn = |ui: &mut egui::Ui, label: &str, active: bool| -> bool {
             let color = if active { tc.text_primary } else { tc.text_secondary };
             let fill = if active {
-                Color32::from_white_alpha(15)
+                tc.hover_fill
             } else {
                 Color32::TRANSPARENT
             };
@@ -302,12 +305,40 @@ fn draw_source_column(
 ) {
     let tc = theme_colors(ui.ctx());
 
-    ui.label(
-        RichText::new("SOURCES")
-            .size(8.0)
-            .strong()
-            .color(tc.text_secondary),
-    );
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("SOURCES")
+                .size(8.0)
+                .strong()
+                .color(tc.text_secondary),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.add(egui::Button::new(RichText::new("\u{25b6}").size(7.0).color(tc.text_dim))
+                .frame(false).min_size(egui::vec2(14.0, 14.0)))
+                .on_hover_text("Collapse all")
+                .clicked()
+            {
+                for id in ["audio_bands", "audio_features", "audio_beat", "audio_mfcc", "audio_chroma", "midi", "osc"] {
+                    state.collapsed_source_groups.insert(id.to_string());
+                }
+                // Also collapse any ws.* groups from bus snapshot
+                for key in bus.last_snapshot.keys() {
+                    if let Some(rest) = key.strip_prefix("ws.") {
+                        if let Some(name) = rest.split('.').next() {
+                            state.collapsed_source_groups.insert(format!("ws.{name}"));
+                        }
+                    }
+                }
+            }
+            if ui.add(egui::Button::new(RichText::new("\u{25bc}").size(7.0).color(tc.text_dim))
+                .frame(false).min_size(egui::vec2(14.0, 14.0)))
+                .on_hover_text("Expand all")
+                .clicked()
+            {
+                state.collapsed_source_groups.clear();
+            }
+        });
+    });
     ui.add_space(4.0);
 
     ScrollArea::vertical()
@@ -530,6 +561,9 @@ fn draw_source_column(
                     }
                 }
 
+                let active_sources: HashSet<String> = ws_groups.iter()
+                    .map(|(name, _)| name.clone()).collect();
+
                 for (source_name, keys) in &ws_groups {
                     let refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
                     let mapped = refs
@@ -550,6 +584,9 @@ fn draw_source_column(
                         &bound_sources,
                     );
                 }
+
+                // Clean up preview textures for expired sources
+                state.preview_textures.retain(|k, _| active_sources.contains(k));
             }
         });
 }
@@ -576,15 +613,15 @@ fn draw_source_group(
 
     // Dark background + subtle border
     let bg = if hovered {
-        Color32::from_white_alpha(10)
+        tc.hover_fill
     } else {
-        Color32::from_white_alpha(4)
+        Color32::TRANSPARENT
     };
     ui.painter().rect(
         header_rect,
         3.0,
         bg,
-        Stroke::new(1.0, Color32::from_white_alpha(if hovered { 18 } else { 8 })),
+        Stroke::new(1.0, if hovered { tc.card_border } else { tc.hover_border }),
         StrokeKind::Inside,
     );
 
@@ -648,6 +685,13 @@ fn draw_source_group(
             state.source_positions.insert(key.to_string(), anchor);
         }
     } else {
+        // Preview thumbnail for WS bridge sources
+        if let Some(source_name) = group_id.strip_prefix("ws.") {
+            if let Some(jpeg_data) = bus.ws_preview_images.get(source_name) {
+                draw_ws_preview(ui, state, source_name, jpeg_data);
+            }
+        }
+
         // Draw individual source rows
         for &key in keys {
             let is_bound = bound_sources.contains(key);
@@ -672,7 +716,7 @@ fn draw_source_group(
                 let dot_color = if is_bound {
                     source_color(key)
                 } else {
-                    Color32::from_rgb(0x33, 0x33, 0x33)
+                    tc.text_dim
                 };
                 let (dot_rect, _) =
                     ui.allocate_exact_size(egui::vec2(6.0, 6.0), Sense::hover());
@@ -695,7 +739,7 @@ fn draw_source_group(
                 ui.painter().rect_filled(
                     bar_rect,
                     1.0,
-                    Color32::from_rgb(0x2a, 0x2a, 0x2a),
+                    tc.meter_bg,
                 );
                 let fill_w = 32.0 * val.clamp(0.0, 1.0);
                 if fill_w > 0.5 {
@@ -712,7 +756,7 @@ fn draw_source_group(
                 ui.label(
                     RichText::new(format!("{val:.2}"))
                         .size(7.0)
-                        .color(Color32::from_white_alpha(50)),
+                        .color(tc.text_dim),
                 );
 
                 // Right anchor dot for bezier lines
@@ -722,7 +766,7 @@ fn draw_source_group(
                     let anchor_color = if is_bound {
                         source_color(key).linear_multiply(0.7)
                     } else {
-                        Color32::from_white_alpha(15)
+                        tc.hover_border
                     };
                     ui.painter()
                         .circle_filled(anchor_rect.center(), 3.0, anchor_color);
@@ -738,6 +782,45 @@ fn draw_source_group(
     ui.add_space(2.0);
 }
 
+/// Render a WS bridge preview thumbnail inline in the source column.
+fn draw_ws_preview(
+    ui: &mut egui::Ui,
+    state: &mut BindingMatrixState,
+    source_name: &str,
+    jpeg_data: &[u8],
+) {
+    // Decode JPEG → egui ColorImage, then create/update texture
+    let color_image = match image::load_from_memory(jpeg_data) {
+        Ok(img) => {
+            let rgba = img.to_rgba8();
+            let size = [rgba.width() as usize, rgba.height() as usize];
+            egui::ColorImage::from_rgba_unmultiplied(size, &rgba)
+        }
+        Err(_) => return,
+    };
+
+    let tex_id = format!("ws_preview_{source_name}");
+    let handle = state.preview_textures.entry(source_name.to_string()).or_insert_with(|| {
+        ui.ctx().load_texture(&tex_id, color_image.clone(), egui::TextureOptions::LINEAR)
+    });
+    handle.set(color_image, egui::TextureOptions::LINEAR);
+
+    // Size to fit panel width, maintaining aspect ratio
+    let avail_w = ui.available_width() - 12.0; // match indent
+    let aspect = 160.0 / 120.0;
+    let img_w = avail_w.min(160.0);
+    let img_h = img_w / aspect;
+
+    ui.horizontal(|ui| {
+        ui.add_space(12.0);
+        let img = egui::Image::new(handle as &egui::TextureHandle)
+            .fit_to_exact_size(egui::vec2(img_w, img_h))
+            .corner_radius(3.0);
+        ui.add(img);
+    });
+    ui.add_space(2.0);
+}
+
 // ---------------------------------------------------------------------------
 // Target column (right)
 // ---------------------------------------------------------------------------
@@ -750,12 +833,32 @@ fn draw_target_column(
 ) {
     let tc = theme_colors(ui.ctx());
 
-    ui.label(
-        RichText::new("TARGETS")
-            .size(8.0)
-            .strong()
-            .color(tc.text_secondary),
-    );
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("TARGETS")
+                .size(8.0)
+                .strong()
+                .color(tc.text_secondary),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.add(egui::Button::new(RichText::new("\u{25b6}").size(7.0).color(tc.text_dim))
+                .frame(false).min_size(egui::vec2(14.0, 14.0)))
+                .on_hover_text("Collapse all")
+                .clicked()
+            {
+                for id in ["Params", "Layers", "PostFX", "Uniforms", "Scene", "Global"] {
+                    state.collapsed_target_groups.insert(id.to_string());
+                }
+            }
+            if ui.add(egui::Button::new(RichText::new("\u{25bc}").size(7.0).color(tc.text_dim))
+                .frame(false).min_size(egui::vec2(14.0, 14.0)))
+                .on_hover_text("Expand all")
+                .clicked()
+            {
+                state.collapsed_target_groups.clear();
+            }
+        });
+    });
     ui.add_space(4.0);
 
     ScrollArea::vertical()
@@ -792,15 +895,15 @@ fn draw_target_column(
                     let hovered = hdr_resp.hovered();
 
                     let bg = if hovered {
-                        Color32::from_white_alpha(10)
+                        tc.hover_fill
                     } else {
-                        Color32::from_white_alpha(4)
+                        Color32::TRANSPARENT
                     };
                     ui.painter().rect(
                         hdr_rect,
                         3.0,
                         bg,
-                        Stroke::new(1.0, Color32::from_white_alpha(if hovered { 18 } else { 8 })),
+                        Stroke::new(1.0, if hovered { tc.card_border } else { tc.hover_border }),
                         StrokeKind::Inside,
                     );
 
@@ -878,7 +981,7 @@ fn draw_target_column(
                         ui.painter().circle_filled(
                             dot_rect.center(),
                             2.0,
-                            Color32::from_rgb(0x33, 0x33, 0x33),
+                            tc.text_dim,
                         );
                     }
 
@@ -906,7 +1009,7 @@ fn draw_target_column(
                         ui.painter().rect_filled(
                             bar_rect,
                             1.0,
-                            Color32::from_rgb(0x2a, 0x2a, 0x2a),
+                            tc.meter_bg,
                         );
                         let fill_w = 28.0 * output_val.clamp(0.0, 1.0);
                         if fill_w > 0.5 {
@@ -915,7 +1018,7 @@ fn draw_target_column(
                             ui.painter().rect_filled(
                                 fill_rect,
                                 1.0,
-                                Color32::from_white_alpha(80),
+                                tc.text_secondary,
                             );
                         }
                     }
@@ -1014,7 +1117,7 @@ fn draw_center_column(
             );
             let btn_resp = ui.allocate_rect(btn_rect, Sense::click());
             let btn_fill = if btn_resp.hovered() {
-                Color32::from_white_alpha(6)
+                tc.hover_fill
             } else {
                 Color32::TRANSPARENT
             };
@@ -1025,9 +1128,9 @@ fn draw_center_column(
                 Stroke::new(
                     1.0,
                     if btn_resp.hovered() {
-                        Color32::from_white_alpha(20)
+                        tc.card_border
                     } else {
-                        Color32::from_white_alpha(10)
+                        tc.hover_border
                     },
                 ),
                 StrokeKind::Outside,
@@ -1038,9 +1141,9 @@ fn draw_center_column(
                 "+ New Binding",
                 egui::FontId::proportional(10.0),
                 if btn_resp.hovered() {
-                    Color32::from_white_alpha(100)
+                    tc.text_primary
                 } else {
-                    Color32::from_white_alpha(50)
+                    tc.text_secondary
                 },
             );
             if btn_resp.clicked() {
@@ -1204,7 +1307,7 @@ fn draw_binding_card(
                 ui.painter().circle_stroke(
                     dot_rect.center(),
                     3.5,
-                    Stroke::new(1.0, Color32::from_white_alpha(25)),
+                    Stroke::new(1.0, tc.text_dim),
                 );
             }
             if dot_resp.clicked() {
@@ -1219,7 +1322,7 @@ fn draw_binding_card(
                 ui.label(
                     RichText::new("passthrough")
                         .size(8.0)
-                        .color(Color32::from_white_alpha(50)),
+                        .color(tc.text_dim),
                 );
             } else {
                 for t in &binding_transforms {
@@ -1259,7 +1362,7 @@ fn draw_binding_card(
                     ui.painter().rect_filled(
                         bar_rect,
                         2.0,
-                        Color32::from_white_alpha(15),
+                        tc.meter_bg,
                     );
                     let fill_w = 28.0 * last_output.clamp(0.0, 1.0);
                     if fill_w > 0.5 {
@@ -1276,7 +1379,7 @@ fn draw_binding_card(
                     ui.label(
                         RichText::new(format!("{:.2}", last_input))
                             .size(8.0)
-                            .color(Color32::from_white_alpha(60)),
+                            .color(tc.text_dim),
                     );
 
                     let (bar_rect, _) =
@@ -1284,13 +1387,13 @@ fn draw_binding_card(
                     ui.painter().rect_filled(
                         bar_rect,
                         2.0,
-                        Color32::from_white_alpha(10),
+                        tc.hover_border,
                     );
                     let fill_w = 20.0 * last_input.clamp(0.0, 1.0);
                     if fill_w > 0.5 {
                         let fill_rect =
                             egui::Rect::from_min_size(bar_rect.min, egui::vec2(fill_w, 3.0));
-                        ui.painter().rect_filled(fill_rect, 2.0, Color32::from_white_alpha(45));
+                        ui.painter().rect_filled(fill_rect, 2.0, tc.text_dim);
                     }
                 }
             });
@@ -1439,26 +1542,26 @@ fn draw_expanded_content(
 
             // Source preview (dark inset)
             let preview = egui::Frame::new()
-                .fill(Color32::from_black_alpha(55))
+                .fill(tc.meter_bg)
                 .corner_radius(3.0)
                 .inner_margin(egui::Margin::symmetric(6, 4));
             preview.show(ui, |ui| {
                 if let Some(runtime) = bus.runtime(id) {
                     if let Some(ref raw) = runtime.last_raw {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("Raw").size(7.0).color(Color32::from_white_alpha(45)));
-                            ui.label(RichText::new(&raw.display).size(8.0).color(Color32::from_white_alpha(100)));
+                            ui.label(RichText::new("Raw").size(7.0).color(tc.text_dim));
+                            ui.label(RichText::new(&raw.display).size(8.0).color(tc.text_secondary));
                         });
                     }
                     if let Some(input) = runtime.last_input {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("Norm").size(7.0).color(Color32::from_white_alpha(45)));
-                            draw_inline_bar(ui, input, 40.0, 3.0, Color32::from_white_alpha(55));
-                            ui.label(RichText::new(format!("{:.3}", input)).size(8.0).color(Color32::from_white_alpha(70)));
+                            ui.label(RichText::new("Norm").size(7.0).color(tc.text_dim));
+                            draw_inline_bar(ui, input, 40.0, 3.0, tc.text_dim, tc.meter_bg);
+                            ui.label(RichText::new(format!("{:.3}", input)).size(8.0).color(tc.text_secondary));
                         });
                     }
                 } else {
-                    ui.label(RichText::new("--").size(8.0).color(Color32::from_white_alpha(30)));
+                    ui.label(RichText::new("--").size(8.0).color(tc.text_dim));
                 }
             });
         });
@@ -1476,9 +1579,9 @@ fn draw_expanded_content(
                     egui::Button::new(
                         RichText::new("+ Add")
                             .size(7.0)
-                            .color(Color32::from_white_alpha(60)),
+                            .color(tc.text_secondary),
                     )
-                    .fill(Color32::from_white_alpha(8))
+                    .fill(tc.hover_fill)
                     .corner_radius(3.0)
                     .min_size(egui::vec2(0.0, 16.0)),
                 );
@@ -1506,7 +1609,7 @@ fn draw_expanded_content(
                     for (label, default) in items {
                         if ui
                             .add(
-                                egui::Button::new(RichText::new(label).size(9.0).color(Color32::from_white_alpha(130)))
+                                egui::Button::new(RichText::new(label).size(9.0).color(tc.text_primary))
                                     .frame(false)
                                     .min_size(egui::vec2(100.0, 22.0)),
                             )
@@ -1524,13 +1627,13 @@ fn draw_expanded_content(
 
             // Transform list with editable params
             let xform_frame = egui::Frame::new()
-                .fill(Color32::from_black_alpha(55))
+                .fill(tc.meter_bg)
                 .corner_radius(3.0)
                 .inner_margin(egui::Margin::symmetric(6, 4));
             let label_w = 60.0; // fixed width for icon+label column
             xform_frame.show(ui, |ui| {
                 if transforms.is_empty() {
-                    ui.label(RichText::new("passthrough").size(8.0).color(Color32::from_white_alpha(40)));
+                    ui.label(RichText::new("passthrough").size(8.0).color(tc.text_dim));
                 } else {
                     let mut to_remove: Option<usize> = None;
                     for (i, t) in transforms.iter().enumerate() {
@@ -1550,7 +1653,7 @@ fn draw_expanded_content(
                                 egui::Align2::LEFT_CENTER,
                                 format!("{icon} {label}"),
                                 egui::FontId::proportional(8.0),
-                                Color32::from_white_alpha(120),
+                                tc.text_secondary,
                             );
                             label_resp.on_hover_text(tooltip);
 
@@ -1564,7 +1667,7 @@ fn draw_expanded_content(
                                         egui::Button::new(
                                             RichText::new("\u{00d7}")
                                                 .size(9.0)
-                                                .color(Color32::from_white_alpha(50)),
+                                                .color(tc.text_dim),
                                         )
                                         .frame(false)
                                         .min_size(egui::vec2(12.0, 12.0)),
@@ -1627,20 +1730,20 @@ fn draw_expanded_content(
 
             // Output preview (dark inset)
             let preview = egui::Frame::new()
-                .fill(Color32::from_black_alpha(55))
+                .fill(tc.meter_bg)
                 .corner_radius(3.0)
                 .inner_margin(egui::Margin::symmetric(6, 4));
             preview.show(ui, |ui| {
                 if let Some(runtime) = bus.runtime(id) {
                     if let Some(output) = runtime.last_output {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("Out").size(7.0).color(Color32::from_white_alpha(45)));
-                            draw_inline_bar(ui, output, 40.0, 3.0, src_color);
+                            ui.label(RichText::new("Out").size(7.0).color(tc.text_dim));
+                            draw_inline_bar(ui, output, 40.0, 3.0, src_color, tc.meter_bg);
                             ui.label(RichText::new(format!("{:.3}", output)).size(8.0).color(src_color));
                         });
                     }
                 } else {
-                    ui.label(RichText::new("--").size(8.0).color(Color32::from_white_alpha(30)));
+                    ui.label(RichText::new("--").size(8.0).color(tc.text_dim));
                 }
             });
         });
@@ -2064,6 +2167,7 @@ fn draw_matrix_source_picker(
 // ---------------------------------------------------------------------------
 
 fn draw_connections(ctx: &Context, state: &BindingMatrixState, bus: &BindingBus) {
+    let tc = theme_colors(ctx);
     let line_layer = egui::LayerId::new(Order::Foreground, Id::new("matrix_lines"));
     let painter = ctx.layer_painter(line_layer);
 
@@ -2087,7 +2191,12 @@ fn draw_connections(ctx: &Context, state: &BindingMatrixState, bus: &BindingBus)
                 (alpha * 255.0) as u8,
             )
         } else {
-            Color32::from_white_alpha((alpha * 255.0) as u8)
+            Color32::from_rgba_unmultiplied(
+                tc.text_dim.r(),
+                tc.text_dim.g(),
+                tc.text_dim.b(),
+                (alpha * 255.0) as u8,
+            )
         };
         let stroke = Stroke::new(stroke_width, stroke_color);
 

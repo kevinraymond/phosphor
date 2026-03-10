@@ -1,6 +1,7 @@
 use egui::{Color32, Pos2, RichText, Ui};
 
 use crate::bindings::types::*;
+use crate::ui::theme::colors::theme_colors;
 
 // JSX-aligned source colors
 pub const AUDIO_COLOR: Color32 = Color32::from_rgb(0x50, 0xC0, 0x70); // green
@@ -381,12 +382,12 @@ pub fn draw_source_badge(ui: &mut Ui, source: &str) {
 // Inline bar helper
 // ---------------------------------------------------------------------------
 
-pub fn draw_inline_bar(ui: &mut Ui, value: f32, width: f32, height: f32, fill_color: Color32) {
+pub fn draw_inline_bar(ui: &mut Ui, value: f32, width: f32, height: f32, fill_color: Color32, bg_color: Color32) {
     let (bar_rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     ui.painter().rect_filled(
         bar_rect,
         1.0,
-        Color32::from_rgb(0x22, 0x22, 0x22),
+        bg_color,
     );
     let filled = egui::Rect::from_min_size(
         bar_rect.min,
@@ -584,7 +585,8 @@ pub fn draw_source_row(
     } else {
         ui.visuals().text_color()
     };
-    let dim_color = Color32::from_white_alpha(60);
+    let tc = theme_colors(ui.ctx());
+    let dim_color = tc.text_dim;
 
     let left = rect.left() + 6.0;
     let cy = rect.center().y;
@@ -609,7 +611,7 @@ pub fn draw_source_row(
         Pos2::new(bar_left, cy - 2.0),
         egui::vec2(bar_width, 4.0),
     );
-    painter.rect_filled(bar_rect, 1.0, Color32::from_rgb(0x2a, 0x2a, 0x2a));
+    painter.rect_filled(bar_rect, 1.0, tc.meter_bg);
     let fill_w = bar_width * val.clamp(0.0, 1.0);
     if fill_w > 0.5 {
         let fill_rect = egui::Rect::from_min_size(bar_rect.min, egui::vec2(fill_w, 4.0));
@@ -632,7 +634,7 @@ pub fn draw_source_row(
             egui::Align2::RIGHT_CENTER,
             uniform_ref,
             egui::FontId::proportional(7.0),
-            Color32::from_white_alpha(35),
+            tc.text_dim,
         );
     }
 
