@@ -58,6 +58,9 @@ class PhosphorBridge:
         self._frame_count = 0
         self._start_time = None
         self._last_push_time = 0
+        self._last_preview_time = 0
+        self._preview_interval = 1.0 / 8  # default 8fps
+        self._preview_enabled = True
 
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -210,6 +213,38 @@ class PhosphorBridge:
                 BrokenPipeError, ConnectionResetError, OSError):
             return self._reconnect()
 
+    def push_preview(self, frame):
+        """
+        Send an annotated camera frame as a thumbnail preview.
+
+        Args:
+            frame: OpenCV BGR image (numpy array).
+        """
+        if not self._preview_enabled or not self._connected:
+            return False
+
+        now = time.time()
+        if now - self._last_preview_time < self._preview_interval:
+            return False
+
+        try:
+            import cv2
+            # Resize to 160x120 thumbnail
+            thumb = cv2.resize(frame, (160, 120), interpolation=cv2.INTER_AREA)
+            # JPEG encode at quality 50
+            ok, jpeg = cv2.imencode('.jpg', thumb, [cv2.IMWRITE_JPEG_QUALITY, 50])
+            if not ok:
+                return False
+
+            # Binary format: source_name_utf8 + 0x00 + jpeg_bytes
+            data = self.source_name.encode('utf-8') + b'\x00' + jpeg.tobytes()
+            self.ws.send(data, opcode=websocket.ABNF.OPCODE_BINARY)
+            self._last_preview_time = now
+            return True
+        except (websocket.WebSocketConnectionClosedException,
+                BrokenPipeError, ConnectionResetError, OSError):
+            return False
+
     # ── Stats ─────────────────────────────────────────────────────────
 
     def stats(self):
@@ -278,4 +313,16 @@ class PhosphorBridge:
         parser.add_argument(
             "--fps", type=int, default=30,
             help="Target push frame rate")
+        parser.add_argument(
+            "--no-preview", action="store_true",
+            help="Disable thumbnail preview in Phosphor binding matrix")
+        parser.add_argument(
+            "--preview-fps", type=int, default=8,
+            help="Preview thumbnail frame rate")
         return parser
+
+    def configure_preview(self, args):
+        """Configure preview from parsed CLI args."""
+        self._preview_enabled = not getattr(args, 'no_preview', False)
+        fps = getattr(args, 'preview_fps', 8)
+        self._preview_interval = 1.0 / max(1, fps)

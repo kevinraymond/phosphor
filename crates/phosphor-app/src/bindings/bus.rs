@@ -16,6 +16,8 @@ pub struct BindingBus {
     pub(crate) runtimes: HashMap<BindingId, BindingRuntime>,
     /// WebSocket binding data values (accumulated from WS data frames).
     pub ws_bind_values: HashMap<String, f32>,
+    /// Preview thumbnail JPEG data from WS bridge sources.
+    pub ws_preview_images: HashMap<String, Vec<u8>>,
     /// Last time each WS field was updated (for per-field expiry).
     pub(crate) ws_field_last_seen: HashMap<String, Instant>,
     pub(crate) next_id_counter: u64,
@@ -47,6 +49,7 @@ impl BindingBus {
             bindings: global,
             runtimes,
             ws_bind_values: HashMap::new(),
+            ws_preview_images: HashMap::new(),
             ws_field_last_seen: HashMap::new(),
             next_id_counter: max_id + 1,
             dirty: false,
@@ -159,6 +162,12 @@ impl BindingBus {
                 self.ws_bind_values.remove(key);
             }
         }
+
+        // Clean up preview images for sources with no remaining fields
+        self.ws_preview_images.retain(|source, _| {
+            let prefix = format!("{source}.");
+            self.ws_bind_values.keys().any(|k| k.starts_with(&prefix))
+        });
     }
 
     /// Count of enabled bindings.
@@ -321,6 +330,7 @@ mod tests {
             bindings: Vec::new(),
             runtimes: HashMap::new(),
             ws_bind_values: HashMap::new(),
+            ws_preview_images: HashMap::new(),
             ws_field_last_seen: HashMap::new(),
             next_id_counter: 1,
             dirty: false,
@@ -349,6 +359,7 @@ mod tests {
             bindings: Vec::new(),
             runtimes: HashMap::new(),
             ws_bind_values: HashMap::new(),
+            ws_preview_images: HashMap::new(),
             ws_field_last_seen: HashMap::new(),
             next_id_counter: 1,
             dirty: false,
@@ -387,6 +398,7 @@ mod tests {
             bindings: Vec::new(),
             runtimes: HashMap::new(),
             ws_bind_values: HashMap::new(),
+            ws_preview_images: HashMap::new(),
             ws_field_last_seen: HashMap::new(),
             next_id_counter: 1,
             dirty: false,

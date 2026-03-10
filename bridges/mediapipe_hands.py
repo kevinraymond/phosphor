@@ -149,7 +149,7 @@ def main():
         min_detection_confidence=0.6,
         min_tracking_confidence=0.5,
     )
-    mp_draw = mp.solutions.drawing_utils if args.show else None
+    mp_draw = mp.solutions.drawing_utils
 
     # Camera
     cap = cv2.VideoCapture(args.device)
@@ -168,6 +168,7 @@ def main():
     if not bridge.connect():
         return
 
+    bridge.configure_preview(args)
     dt = 1.0 / args.fps
     prev_wrists = [None, None]
 
@@ -186,6 +187,10 @@ def main():
             result = hands.process(rgb)
 
             data = {}
+
+            # Prepare annotated frame for preview
+            need_annotate = bridge._preview_enabled or args.show
+            annotated = frame.copy() if need_annotate else None
 
             for i, prefix in enumerate(HANDS):
                 has_hand = (result.multi_hand_landmarks and
@@ -220,18 +225,21 @@ def main():
                         data[f"{prefix}_velocity"] = 0.0
                     prev_wrists[i] = wrist
 
-                    # Draw if preview
-                    if args.show and mp_draw:
+                    # Draw landmarks on annotated frame
+                    if need_annotate:
                         mp_draw.draw_landmarks(
-                            frame, hand, mp_hands.HAND_CONNECTIONS)
+                            annotated, hand, mp_hands.HAND_CONNECTIONS)
                 else:
                     data[f"{prefix}_detected"] = 0.0
                     prev_wrists[i] = None
 
             bridge.push(data)
 
+            if annotated is not None:
+                bridge.push_preview(annotated)
+
             if args.show:
-                cv2.imshow("Phosphor — MediaPipe Hands", frame)
+                cv2.imshow("Phosphor — MediaPipe Hands", annotated)
                 if cv2.waitKey(1) & 0xFF == 27:
                     break
 

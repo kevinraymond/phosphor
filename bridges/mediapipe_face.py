@@ -244,8 +244,8 @@ def main():
         min_detection_confidence=0.6,
         min_tracking_confidence=0.5,
     )
-    mp_draw = mp.solutions.drawing_utils if args.show else None
-    mp_draw_styles = mp.solutions.drawing_styles if args.show else None
+    mp_draw = mp.solutions.drawing_utils
+    mp_draw_styles = mp.solutions.drawing_styles
 
     # Camera
     cap = cv2.VideoCapture(args.device)
@@ -264,6 +264,7 @@ def main():
     if not bridge.connect():
         return
 
+    bridge.configure_preview(args)
     dt = 1.0 / args.fps
     print(f"[mediapipe-face] Streaming at {args.fps} Hz. Ctrl+C to stop.")
 
@@ -281,6 +282,9 @@ def main():
 
             data = {}
 
+            need_annotate = bridge._preview_enabled or args.show
+            annotated = frame.copy() if need_annotate else None
+
             if result.multi_face_landmarks:
                 face = result.multi_face_landmarks[0]
                 data["detected"] = 1.0
@@ -289,10 +293,9 @@ def main():
                 expressions = compute_expressions(face.landmark)
                 data.update(expressions)
 
-                # Draw if preview
-                if args.show and mp_draw:
+                if need_annotate:
                     mp_draw.draw_landmarks(
-                        frame, face,
+                        annotated, face,
                         mp_face.FACEMESH_CONTOURS,
                         landmark_drawing_spec=None,
                         connection_drawing_spec=mp_draw_styles
@@ -302,8 +305,11 @@ def main():
 
             bridge.push(data)
 
+            if annotated is not None:
+                bridge.push_preview(annotated)
+
             if args.show:
-                cv2.imshow("Phosphor — MediaPipe Face", frame)
+                cv2.imshow("Phosphor — MediaPipe Face", annotated)
                 if cv2.waitKey(1) & 0xFF == 27:
                     break
 

@@ -30,6 +30,8 @@ pub struct WebSystem {
     last_state_broadcast: Instant,
     /// Accumulated binding data values from WebSocket clients.
     pub bind_values: std::collections::HashMap<String, f32>,
+    /// Preview thumbnail JPEG data from bridge sources.
+    pub preview_images: std::collections::HashMap<String, Vec<u8>>,
 }
 
 impl WebSystem {
@@ -50,6 +52,7 @@ impl WebSystem {
             last_audio_broadcast: Instant::now(),
             last_state_broadcast: Instant::now(),
             bind_values: std::collections::HashMap::new(),
+            preview_images: std::collections::HashMap::new(),
         };
 
         if sys.config.enabled {
@@ -192,6 +195,9 @@ impl WebSystem {
                 WsInMessage::BindSchema { .. } => {
                     // Schema is informational only — could be stored for UI auto-discovery
                 }
+                WsInMessage::BindPreview { source, jpeg_data } => {
+                    self.preview_images.insert(source, jpeg_data);
+                }
             }
         }
 
@@ -243,6 +249,9 @@ impl WebSystem {
                 }
                 WsInMessage::LoadPreset { index } => {
                     result.preset_loads.push(index);
+                }
+                WsInMessage::BindPreview { source, jpeg_data } => {
+                    self.preview_images.insert(source, jpeg_data);
                 }
                 _ => {} // Skip active-layer param application
             }

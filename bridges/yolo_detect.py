@@ -122,6 +122,7 @@ def main():
     if not bridge.connect():
         return
 
+    bridge.configure_preview(args)
     seen_classes = set()
     dt = 1.0 / args.fps
     print(f"[yolo-detect] Streaming at {args.fps} Hz. Ctrl+C to stop.")
@@ -188,9 +189,13 @@ def main():
 
             bridge.push(data)
 
-            if args.show:
+            if bridge._preview_enabled:
                 annotated = results.plot()
-                cv2.imshow("Phosphor — YOLO Detect", annotated)
+                bridge.push_preview(annotated)
+
+            if args.show:
+                show_frame = annotated if bridge._preview_enabled else results.plot()
+                cv2.imshow("Phosphor — YOLO Detect", show_frame)
                 if cv2.waitKey(1) & 0xFF == 27:
                     break
 
