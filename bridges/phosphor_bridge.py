@@ -121,14 +121,7 @@ class PhosphorBridge:
                 print(f"[{self.source_name}] Connected to {self.url}")
 
                 if self.fields:
-                    schema = {
-                        "type": "schema",
-                        "source": self.source_name,
-                        "fields": self.fields,
-                    }
-                    self.ws.send(json.dumps(schema))
-                    print(f"[{self.source_name}] Schema sent: "
-                          f"{len(self.fields)} fields")
+                    self.send_schema()
 
                 self._start_time = time.time()
                 self._frame_count = 0
@@ -146,6 +139,24 @@ class PhosphorBridge:
                 time.sleep(retry_interval)
 
         return False
+
+    def send_schema(self):
+        """Send (or re-send) the current schema to Phosphor.
+
+        Called automatically by connect(). Can also be called after
+        declare_fields() to update the schema mid-session (e.g. when
+        new dynamic fields are discovered).
+        """
+        if not self._connected or not self.ws:
+            return
+        schema = {
+            "type": "schema",
+            "source": self.source_name,
+            "fields": self.fields,
+        }
+        self.ws.send(json.dumps(schema))
+        print(f"[{self.source_name}] Schema sent: "
+              f"{len(self.fields)} fields")
 
     def _reconnect(self):
         """Attempt to reconnect after a dropped connection."""

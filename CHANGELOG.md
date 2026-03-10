@@ -5,6 +5,16 @@
 
 ## Unreleased
 
+### Fixed
+- **Binding Matrix light theme readability** — replaced all hardcoded dark-mode colors (`from_white_alpha`, `from_black_alpha`, `from_rgb(0x22,...)`) with `ThemeColors` semantic equivalents so the UI is readable across all 6 themes (Dark, Light, Midnight, Ember, Neon, High Contrast)
+- Added `text_dim`, `hover_fill`, `hover_border`, and `backdrop` fields to `ThemeColors` for fine-grained UI element theming
+- **Binding Matrix collapse/expand all** — added ▶/▼ buttons in Sources and Targets column headers to collapse or expand all groups at once
+
+### Changed
+- **YOLO bridge dynamic class detection** — no longer hardcodes 4 COCO classes; discovers all 80 classes at runtime and only sends fields for classes currently detected. Schema is re-sent when a new class first appears.
+- **Per-field WS expiry** — binding bus now expires individual WS fields after 5s of no updates (was per-source). Unbound fields are removed from the picker; bound fields stay alive at 0.0 so bindings survive when a dynamic source temporarily disappears.
+- **PhosphorBridge `send_schema()`** — new method to re-send schema mid-session for dynamic field discovery
+
 ### Added
 - **Bridge Scripts** — Python companion scripts in `bridges/` for streaming external data into the binding bus via WebSocket
   - Base class `PhosphorBridge`: WS connect, schema declaration, data push, reconnect, graceful shutdown, common CLI args
