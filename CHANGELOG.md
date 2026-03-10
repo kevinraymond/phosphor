@@ -5,6 +5,13 @@
 
 ## Unreleased
 
+### Added
+- **Xbox Controller bridge** — `xbox_controller.py` streams gamepad inputs (analog sticks, triggers, d-pad, 11 buttons → 23 fields) into Phosphor's binding bus via `evdev`. Radial deadzone (configurable `--deadzone`), Y-axis inversion, auto-detect by name matching, hot-plug reconnection, 60 FPS default. Docker support with `privileged` + `/dev/input` mount.
+- **Bridge source preview thumbnails** — vision bridges (MediaPipe hands/pose/face, YOLO) send annotated camera frame thumbnails (160x120 JPEG, ~8fps) over binary WebSocket. Phosphor decodes and renders inline previews in the binding matrix above each WS source group's fields, giving immediate visual feedback about camera position, detection quality, and model output.
+  - `PhosphorBridge.push_preview(frame)` — rate-limited JPEG thumbnail sender with `--no-preview` and `--preview-fps` CLI flags
+  - Binary WS wire format: `[source_name_utf8] [0x00] [jpeg_bytes]` — zero impact on numeric data path
+  - Thumbnails auto-clean when source fields expire; hidden when group is collapsed (no decode overhead)
+
 ### Fixed
 - **Binding Matrix light theme readability** — replaced all hardcoded dark-mode colors (`from_white_alpha`, `from_black_alpha`, `from_rgb(0x22,...)`) with `ThemeColors` semantic equivalents so the UI is readable across all 6 themes (Dark, Light, Midnight, Ember, Neon, High Contrast)
 - Added `text_dim`, `hover_fill`, `hover_border`, and `backdrop` fields to `ThemeColors` for fine-grained UI element theming

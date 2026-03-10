@@ -31,6 +31,7 @@ docker run phosphor/bridge-smart-lfo
 | `mediapipe_pose.py` | Body pose (33 landmarks) | Webcam | `pip install -r requirements-vision.txt` |
 | `mediapipe_face.py` | Face expressions (16 floats) | Webcam | `pip install -r requirements-vision.txt` |
 | `yolo_detect.py` | Object detection + tracking | Webcam | `pip install -r requirements-vision.txt` |
+| `xbox_controller.py` | Gamepad sticks, triggers, buttons | Xbox controller | `pip install -r requirements-gamepad.txt` |
 | `realsense_depth.py` | Depth zones + motion + presence | Intel RealSense | `pip install -r requirements-depth.txt` |
 | `iphone_arkit.py` | 52 ARKit face blend shapes | iPhone (UDP) | `pip install -r requirements-lfo.txt` |
 | `leap_motion.py` | Finger positions + gestures | Leap Motion | Leap SDK (placeholder) |
@@ -80,6 +81,9 @@ This is useful for offloading ML inference to a dedicated GPU machine.
 # Zero-hardware generative source
 docker run phosphor/bridge-smart-lfo
 
+# Xbox controller (needs /dev/input access)
+docker run --privileged -v /dev/input:/dev/input:ro phosphor/bridge-gamepad
+
 # Webcam hand tracking
 docker run --device /dev/video0 phosphor/bridge-vision hands
 
@@ -112,6 +116,7 @@ PHOSPHOR_HOST=192.168.1.100 docker compose -f bridges/docker-compose.yml up hand
 docker build -t phosphor/bridge-base -f bridges/docker/Dockerfile.base .
 docker build -t phosphor/bridge-smart-lfo -f bridges/docker/Dockerfile.smart-lfo .
 docker build -t phosphor/bridge-vision -f bridges/docker/Dockerfile.vision .
+docker build -t phosphor/bridge-gamepad -f bridges/docker/Dockerfile.gamepad .
 docker build -t phosphor/bridge-realsense -f bridges/docker/Dockerfile.realsense .
 ```
 

@@ -21,6 +21,20 @@ services:
       PHOSPHOR_PORT: ${PHOSPHOR_PORT:-9002}
     restart: unless-stopped
 
+  gamepad:
+    image: phosphor/bridge-gamepad
+    build:
+      context: ..
+      dockerfile: bridges/docker/Dockerfile.gamepad
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    privileged: true    # Needs access to /dev/input
+    volumes:
+      - /dev/input:/dev/input:ro
+    environment:
+      PHOSPHOR_HOST: ${PHOSPHOR_HOST:-host.docker.internal}
+      PHOSPHOR_PORT: ${PHOSPHOR_PORT:-9002}
+    restart: unless-stopped
+
   # ── Webcam bridges ──────────────────────────────────────────────
 
   hands:
