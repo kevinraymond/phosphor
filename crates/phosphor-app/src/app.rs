@@ -734,6 +734,10 @@ impl App {
         // Evaluate binding bus (runs after MIDI/OSC/WS drain — bus overrides direct mappings)
         self.binding_bus.ingest_ws_values(&self.web.bind_values);
         self.web.bind_values.clear();
+        // Transfer preview images from WebSystem to binding bus
+        for (source, jpeg) in self.web.preview_images.drain() {
+            self.binding_bus.ws_preview_images.insert(source, jpeg);
+        }
         let bind_results = self.binding_bus.evaluate(
             self.latest_audio.as_ref(),
             &self.midi,
@@ -1943,8 +1947,22 @@ impl App {
             Some("param") => {
                 // param.{effect_or_wildcard}.{param_name}
                 if parts.len() >= 3 {
+                    let effect_part = parts[1];
                     let param_name = parts[2];
-                    // Apply to active layer (wildcard or matching effect)
+                    // Check effect name matches active layer (wildcard `*` always matches)
+                    if effect_part != "*" {
+                        let matches = self
+                            .layer_stack
+                            .active()
+                            .and_then(|l| l.effect_index())
+                            .and_then(|idx| self.effect_loader.effects.get(idx))
+                            .map(|eff| eff.name == effect_part)
+                            .unwrap_or(false);
+                        if !matches {
+                            return;
+                        }
+                    }
+                    // Apply to active layer
                     if let Some(layer) = self.layer_stack.active_mut() {
                         if let Some(def) = layer
                             .param_store
