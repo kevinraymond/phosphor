@@ -16,6 +16,8 @@ pub struct BindingBus {
     pub(crate) runtimes: HashMap<BindingId, BindingRuntime>,
     /// WebSocket binding data values (accumulated from WS data frames).
     pub ws_bind_values: HashMap<String, f32>,
+    /// Last time each WS source sent data (for expiry of disconnected sources).
+    ws_source_last_seen: HashMap<String, Instant>,
     pub(crate) next_id_counter: u64,
     pub(crate) dirty: bool,
     /// Debounce: when the dirty flag was first set (save after 1s of no changes).
@@ -45,6 +47,7 @@ impl BindingBus {
             bindings: global,
             runtimes,
             ws_bind_values: HashMap::new(),
+            ws_source_last_seen: HashMap::new(),
             next_id_counter: max_id + 1,
             dirty: false,
             dirty_since: None,
@@ -120,6 +123,38 @@ impl BindingBus {
         self.runtimes.get(id)
     }
 
+    /// Ingest WS bind values, tracking per-source timestamps and expiring
+    /// sources that haven't sent data in `timeout` seconds.
+    pub fn ingest_ws_values(&mut self, incoming: &HashMap<String, f32>) {
+        const WS_SOURCE_TIMEOUT_SECS: f64 = 5.0;
+        let now = Instant::now();
+
+        // Update values and per-source timestamps
+        for (key, &value) in incoming {
+            self.ws_bind_values.insert(key.clone(), value);
+            // Extract source name: "{source}.{field}" → "{source}"
+            if let Some(dot) = key.find('.') {
+                let source = &key[..dot];
+                self.ws_source_last_seen
+                    .insert(source.to_string(), now);
+            }
+        }
+
+        // Prune expired sources
+        let expired: Vec<String> = self
+            .ws_source_last_seen
+            .iter()
+            .filter(|(_, last)| now.duration_since(**last).as_secs_f64() > WS_SOURCE_TIMEOUT_SECS)
+            .map(|(k, _)| k.clone())
+            .collect();
+
+        for source in &expired {
+            self.ws_source_last_seen.remove(source);
+            let prefix = format!("{source}.");
+            self.ws_bind_values.retain(|k, _| !k.starts_with(&prefix));
+        }
+    }
+
     /// Count of enabled bindings.
     pub fn active_count(&self) -> usize {
         self.bindings.iter().filter(|b| b.enabled).count()
@@ -133,11 +168,7 @@ impl BindingBus {
         midi: &MidiSystem,
         osc: &OscSystem,
     ) -> Vec<(String, f32)> {
-        if self.bindings.is_empty() {
-            return Vec::new();
-        }
-
-        // Collect source snapshots
+        // Collect source snapshots (always, even with no bindings — needed for matrix meters)
         let mut snapshot = SourceSnapshot::new();
 
         if let Some(features) = audio {
@@ -146,6 +177,12 @@ impl BindingBus {
         snapshot.extend(sources::collect_midi(midi));
         snapshot.extend(sources::collect_osc(osc));
         snapshot.extend(sources::collect_websocket(&self.ws_bind_values));
+
+        self.last_snapshot = snapshot.clone();
+
+        if self.bindings.is_empty() {
+            return Vec::new();
+        }
 
         // Check learn mode: if waiting for source, grab first new value
         if let Some(ref learn) = self.learn_target {
@@ -197,8 +234,6 @@ impl BindingBus {
 
             results.push((binding.target.clone(), output));
         }
-
-        self.last_snapshot = snapshot.clone();
 
         results
     }
@@ -280,6 +315,7 @@ mod tests {
             bindings: Vec::new(),
             runtimes: HashMap::new(),
             ws_bind_values: HashMap::new(),
+            ws_source_last_seen: HashMap::new(),
             next_id_counter: 1,
             dirty: false,
             dirty_since: None,
@@ -307,6 +343,7 @@ mod tests {
             bindings: Vec::new(),
             runtimes: HashMap::new(),
             ws_bind_values: HashMap::new(),
+            ws_source_last_seen: HashMap::new(),
             next_id_counter: 1,
             dirty: false,
             dirty_since: None,
@@ -344,6 +381,7 @@ mod tests {
             bindings: Vec::new(),
             runtimes: HashMap::new(),
             ws_bind_values: HashMap::new(),
+            ws_source_last_seen: HashMap::new(),
             next_id_counter: 1,
             dirty: false,
             dirty_since: None,

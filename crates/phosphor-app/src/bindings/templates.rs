@@ -236,6 +236,7 @@ mod tests {
             bindings: Vec::new(),
             runtimes: HashMap::new(),
             ws_bind_values: HashMap::new(),
+            ws_source_last_seen: HashMap::new(),
             next_id_counter: 1,
             dirty: false,
             dirty_since: None,

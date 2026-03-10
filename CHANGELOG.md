@@ -34,6 +34,11 @@
     - Effect/Global scope tabs, templates dropdown, keyboard shortcut `B` to toggle
     - Sidebar bindings section now shows compact stub with active count + "Matrix" button
 
+### Fixed
+- Bridge containers on Linux (native Docker Engine): added `extra_hosts: host.docker.internal:host-gateway` to all services so `host.docker.internal` resolves correctly (no-op on Docker Desktop)
+- WebSocket binding sources now expire after 5 s of silence — `web.bind_values` was never cleared after ingestion, so stale keys kept refreshing `last_seen` and sources persisted forever
+- Source picker dropdown overlap: moved `max_height` from inner `set_max_height()` (which capped content area) to `ComboBox::height()` (which caps scroll viewport), fixing row pile-up when content exceeded 350 px
+
 ## v1.6.0 — 2026-03-07
 
 ### Added

@@ -1,5 +1,7 @@
 pub mod audio_mappings_panel;
 pub mod audio_panel;
+pub mod binding_helpers;
+pub mod binding_matrix;
 pub mod bindings_panel;
 pub mod effect_panel;
 pub mod layer_panel;
@@ -168,26 +170,12 @@ pub fn draw_panels(
                     audio_panel::draw_audio_panel(ui, audio, uniforms);
                 });
 
-                // Bindings section
+                // Bindings section (stub — opens matrix modal)
                 let active = binding_bus.active_count();
                 let bind_badge = if active > 0 {
                     Some(format!("{}", active))
                 } else {
                     None
-                };
-                let active_info = layers.get(active_layer);
-                let bind_info = bindings_panel::BindingPanelInfo {
-                    effect_name: active_info
-                        .and_then(|l| l.effect_name.clone())
-                        .unwrap_or_default(),
-                    param_names: params
-                        .defs
-                        .iter()
-                        .filter(|d| matches!(d, crate::params::ParamDef::Float { .. } | crate::params::ParamDef::Bool { .. }))
-                        .map(|d| d.name().to_string())
-                        .collect(),
-                    layer_count: layers.len(),
-                    preset_name: preset_store.current_name().unwrap_or("(unsaved)").to_string(),
                 };
                 widgets::section(
                     ui,
@@ -196,7 +184,29 @@ pub fn draw_panels(
                     bind_badge.as_deref(),
                     false,
                     |ui| {
-                        bindings_panel::draw_bindings_panel(ui, binding_bus, &bind_info);
+                        ui.horizontal(|ui| {
+                            if active > 0 {
+                                ui.label(
+                                    egui::RichText::new(format!("{active} active"))
+                                        .size(9.0)
+                                        .color(egui::Color32::from_white_alpha(120)),
+                                );
+                            }
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Matrix").size(9.0),
+                                    )
+                                    .min_size(egui::vec2(60.0, 18.0)),
+                                )
+                                .on_hover_text("Open Binding Matrix (B)")
+                                .clicked()
+                            {
+                                ui.ctx().data_mut(|d| {
+                                    d.insert_temp(egui::Id::new("open_binding_matrix"), true);
+                                });
+                            }
+                        });
                     },
                 );
 

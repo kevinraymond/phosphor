@@ -94,6 +94,8 @@ pub struct App {
     pub morph_to_opacities: Option<Vec<f32>>,
     // Shader editor
     pub shader_editor: ShaderEditorState,
+    // Binding matrix modal
+    pub binding_matrix: crate::ui::panels::binding_matrix::BindingMatrixState,
     // Quit confirmation
     pub quit_requested: bool,
     // Transient status error (displayed in status bar, auto-clears)
@@ -393,6 +395,7 @@ impl App {
             #[cfg(feature = "ndi")]
             ndi,
             shader_editor: ShaderEditorState::default(),
+            binding_matrix: crate::ui::panels::binding_matrix::BindingMatrixState::new(),
             quit_requested: false,
             status_error: None,
             #[cfg(feature = "webcam")]
@@ -729,7 +732,8 @@ impl App {
         }
 
         // Evaluate binding bus (runs after MIDI/OSC/WS drain — bus overrides direct mappings)
-        self.binding_bus.ws_bind_values = self.web.bind_values.clone();
+        self.binding_bus.ingest_ws_values(&self.web.bind_values);
+        self.web.bind_values.clear();
         let bind_results = self.binding_bus.evaluate(
             self.latest_audio.as_ref(),
             &self.midi,
