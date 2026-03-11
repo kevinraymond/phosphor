@@ -14,6 +14,7 @@ pub mod osc_panel;
 pub mod param_panel;
 pub mod particle_panel;
 pub mod preset_panel;
+pub mod recording_panel;
 pub mod scene_panel;
 pub mod settings_panel;
 pub mod shader_editor;
@@ -253,11 +254,17 @@ pub fn draw_panels(
                 #[cfg(feature = "ndi")]
                 let ndi_on = ndi_info.as_ref().map_or(false, |i| i.running);
 
+                let rec_info: Option<recording_panel::RecordingInfo> = ui
+                    .ctx()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("recording_info")));
+                let rec_on = rec_info.as_ref().map_or(false, |i| i.recording);
+
                 let dot_active_midi = egui::Color32::from_rgb(0x60, 0xA0, 0xE0);
                 let dot_active_osc = egui::Color32::from_rgb(0x50, 0xC0, 0x70);
                 let dot_active_web = egui::Color32::from_rgb(0x50, 0x90, 0xE0);
                 #[cfg(feature = "ndi")]
                 let dot_active_ndi = egui::Color32::from_rgb(0x40, 0xC0, 0x40);
+                let dot_active_rec = egui::Color32::from_rgb(0xE0, 0x40, 0x40);
                 let dot_off = egui::Color32::from_rgb(0x33, 0x33, 0x33);
 
                 widgets::section_with_header(
@@ -289,6 +296,7 @@ pub fn draw_panels(
                             });
                         };
                         // Drawn right-to-left, so reverse visual order
+                        status_dot(ui, rec_on, dot_active_rec, "REC");
                         #[cfg(feature = "ndi")]
                         status_dot(ui, ndi_on, dot_active_ndi, "NDI");
                         status_dot(ui, web_on, dot_active_web, "WEB");
@@ -364,27 +372,52 @@ pub fn draw_panels(
                             },
                         );
 
-                        // NDI Outputs subsection (feature-gated)
-                        #[cfg(feature = "ndi")]
+                        // Outputs subsection (Recording + NDI)
                         {
-                            if let Some(ref info) = ndi_info {
-                                let (ndi_badge, ndi_color) = if info.running {
-                                    ("ON", dot_active_ndi)
-                                } else {
-                                    ("OFF", dim)
-                                };
-                                widgets::subsection(
-                                    ui,
-                                    "sub_ndi",
-                                    "Outputs",
-                                    Some(ndi_badge),
-                                    ndi_color,
-                                    true,
-                                    |ui| {
+                            let outputs_on = rec_on || {
+                                #[cfg(feature = "ndi")]
+                                { ndi_on }
+                                #[cfg(not(feature = "ndi"))]
+                                { false }
+                            };
+                            let (out_badge, out_color) = if rec_on {
+                                ("REC", dot_active_rec)
+                            } else if outputs_on {
+                                ("ON", egui::Color32::from_rgb(0x40, 0xC0, 0x40))
+                            } else {
+                                ("OFF", dim)
+                            };
+                            widgets::subsection(
+                                ui,
+                                "sub_outputs",
+                                "Outputs",
+                                Some(out_badge),
+                                out_color,
+                                true,
+                                |ui| {
+                                    // Recording
+                                    if let Some(ref info) = rec_info {
+                                        ui.label(
+                                            egui::RichText::new("Recording")
+                                                .size(10.0)
+                                                .strong(),
+                                        );
+                                        recording_panel::draw_recording_panel(ui, info);
+                                    }
+
+                                    // NDI (feature-gated)
+                                    #[cfg(feature = "ndi")]
+                                    if let Some(ref info) = ndi_info {
+                                        ui.add_space(6.0);
+                                        ui.label(
+                                            egui::RichText::new("NDI®")
+                                                .size(10.0)
+                                                .strong(),
+                                        );
                                         ndi_panel::draw_ndi_panel(ui, info);
-                                    },
-                                );
-                            }
+                                    }
+                                },
+                            );
                         }
 
                         // Global subsection

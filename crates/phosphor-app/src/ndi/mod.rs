@@ -19,7 +19,7 @@ use crate::gpu::render_target::RenderTarget;
 /// Central NDI output system: owns capture target, sender thread, config.
 pub struct NdiSystem {
     pub config: NdiConfig,
-    pub capture: Option<NdiCapture>,
+    capture: Option<NdiCapture>,
     frame_tx: Option<Sender<NdiFrame>>,
     shutdown: Option<Arc<AtomicBool>>,
     sender_handle: Option<JoinHandle<()>>,
@@ -149,6 +149,14 @@ impl NdiSystem {
         }
     }
 
+    /// Capture output dimensions (for UI display).
+    pub fn capture_dimensions(&self) -> (u32, u32) {
+        self.capture
+            .as_ref()
+            .map(|c| (c.width(), c.height()))
+            .unwrap_or((0, 0))
+    }
+
     /// Run the NDI capture pipeline:
     /// 1. Read previously-mapped staging data (non-blocking).
     /// 2. Render the post-process composite to the capture texture.
@@ -177,7 +185,7 @@ impl NdiSystem {
         }
 
         // 2. Render composite to capture texture.
-        post_process.render_composite_to(device, encoder, source, &capture.view);
+        post_process.render_composite_to(device, encoder, source, capture.view());
 
         // 3. Copy to staging.
         capture.copy_to_staging(encoder);
@@ -188,8 +196,8 @@ impl NdiSystem {
         if let (Some(data), Some(tx)) = (prev_data, &self.frame_tx) {
             let frame = NdiFrame {
                 data,
-                width: capture.width,
-                height: capture.height,
+                width: capture.width(),
+                height: capture.height(),
             };
             // try_send: drop frame if NDI thread is behind (VJ performance > NDI latency).
             let _ = tx.try_send(frame);
