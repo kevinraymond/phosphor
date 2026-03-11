@@ -76,6 +76,8 @@ pub struct App {
     // NDI output (feature-gated)
     #[cfg(feature = "ndi")]
     pub ndi: crate::ndi::NdiSystem,
+    // Video recording (always available — ffmpeg is a subprocess)
+    pub recording: crate::recording::RecordingSystem,
     // Scenes
     pub scene_store: SceneStore,
     pub timeline: Timeline,
@@ -350,6 +352,7 @@ impl App {
             gpu.surface_config.width,
             gpu.surface_config.height,
         );
+        let recording = crate::recording::RecordingSystem::new();
 
         #[cfg(feature = "profiling")]
         let gpu_profiler = crate::gpu::profiler::Profiler::new(&gpu.device);
@@ -394,6 +397,7 @@ impl App {
             placeholder,
             #[cfg(feature = "ndi")]
             ndi,
+            recording,
             shader_editor: ShaderEditorState::default(),
             binding_matrix: crate::ui::panels::binding_matrix::BindingMatrixState::new(),
             quit_requested: false,
@@ -3208,6 +3212,12 @@ impl App {
                     .capture_frame(&self.gpu.device, &mut encoder, &self.post_process, source);
             }
 
+            // Recording capture
+            if self.recording.is_recording() {
+                self.recording
+                    .capture_frame(&self.gpu.device, &mut encoder, &self.post_process, source);
+            }
+
             // Flip ping-pong for all layers
             for layer in &mut self.layer_stack.layers {
                 layer.flip();
@@ -3242,6 +3252,10 @@ impl App {
             #[cfg(feature = "ndi")]
             if self.ndi.is_running() {
                 self.ndi.post_submit();
+            }
+
+            if self.recording.is_recording() {
+                self.recording.post_submit();
             }
 
             output.present();
@@ -3306,6 +3320,12 @@ impl App {
                 .capture_frame(&self.gpu.device, &mut encoder, &self.post_process, source);
         }
 
+        // Recording capture
+        if self.recording.is_recording() {
+            self.recording
+                .capture_frame(&self.gpu.device, &mut encoder, &self.post_process, source);
+        }
+
         // Flip ping-pong for all layers
         for layer in &mut self.layer_stack.layers {
             layer.flip();
@@ -3343,6 +3363,10 @@ impl App {
         #[cfg(feature = "ndi")]
         if self.ndi.is_running() {
             self.ndi.post_submit();
+        }
+
+        if self.recording.is_recording() {
+            self.recording.post_submit();
         }
 
         output.present();

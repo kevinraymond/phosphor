@@ -122,6 +122,10 @@ pub struct AudioSystem {
     scan_in_flight: Arc<AtomicBool>,
     /// When the last device scan completed.
     last_scan: Instant,
+    /// Ring buffer mirroring audio samples for recording (written by audio thread).
+    pub recording_ring: Arc<RingBuffer>,
+    /// Audio sample rate in Hz.
+    pub sample_rate: u32,
 }
 
 impl AudioSystem {
@@ -135,17 +139,19 @@ impl AudioSystem {
             crossbeam_channel::bounded(4);
 
         let shutdown = Arc::new(AtomicBool::new(false));
+        let recording_ring = Arc::new(RingBuffer::new());
 
         match open_backend(device_name) {
             Ok(opened) => {
                 let shutdown_flag = shutdown.clone();
                 let ring = opened.ring.clone();
                 let sample_rate = opened.sample_rate;
+                let rec_ring = recording_ring.clone();
 
                 let thread_handle = thread::Builder::new()
                     .name("phosphor-audio".into())
                     .spawn(move || {
-                        audio_thread(ring, sample_rate, tx, shutdown_flag);
+                        audio_thread(ring, sample_rate, tx, shutdown_flag, rec_ring);
                     })
                     .expect("Failed to spawn audio thread");
 
@@ -164,6 +170,8 @@ impl AudioSystem {
                     cached_devices: Arc::new(Mutex::new(Vec::new())),
                     scan_in_flight: Arc::new(AtomicBool::new(false)),
                     last_scan: Instant::now() - Duration::from_secs(60),
+                    recording_ring,
+                    sample_rate: sample_rate as u32,
                 }
             }
             Err(e) => {
@@ -183,6 +191,8 @@ impl AudioSystem {
                     cached_devices: Arc::new(Mutex::new(Vec::new())),
                     scan_in_flight: Arc::new(AtomicBool::new(false)),
                     last_scan: Instant::now() - Duration::from_secs(60),
+                    recording_ring,
+                    sample_rate: 44100,
                 }
             }
         }
@@ -215,6 +225,8 @@ impl AudioSystem {
         self.started_at = new.started_at;
         self._capture = new._capture.take();
         self.using_native_backend = new.using_native_backend;
+        self.recording_ring = std::mem::replace(&mut new.recording_ring, Arc::new(RingBuffer::new()));
+        self.sample_rate = new.sample_rate;
         // Keep existing cached_devices/scan_in_flight/last_scan — no need to re-scan on switch
         // `new` is dropped here — its Drop is a no-op since thread_handle is None and shutdown is true
     }
@@ -278,6 +290,7 @@ fn audio_thread(
     sample_rate: f32,
     tx: Sender<AudioFeatures>,
     shutdown: Arc<AtomicBool>,
+    recording_ring: Arc<RingBuffer>,
 ) {
     let mut analyzer = FftAnalyzer::new(sample_rate);
     let mut normalizer = AdaptiveNormalizer::new();
@@ -301,6 +314,11 @@ fn audio_thread(
 
         let to_read = available.min(read_buf.len());
         let read = ring.read(&mut read_buf[..to_read]);
+
+        // Mirror samples to recording ring (lock-free, no overhead if nobody reads)
+        if read > 0 {
+            recording_ring.push(&read_buf[..read]);
+        }
         if read == 0 {
             continue;
         }

@@ -12,6 +12,7 @@ mod ndi;
 mod osc;
 mod params;
 mod preset;
+mod recording;
 mod scene;
 mod settings;
 mod shader;
@@ -511,13 +512,41 @@ impl ApplicationHandler for PhosphorApp {
                             source_name: app.ndi.config.source_name.clone(),
                             resolution: app.ndi.config.resolution,
                             frames_sent: app.ndi.frames_sent(),
-                            output_width: app.ndi.capture.as_ref().map_or(0, |c| c.width),
-                            output_height: app.ndi.capture.as_ref().map_or(0, |c| c.height),
+                            output_width: app.ndi.capture_dimensions().0,
+                            output_height: app.ndi.capture_dimensions().1,
                             alpha_from_luma: app.ndi.config.alpha_from_luma,
                         };
                         ctx.data_mut(|d| {
                             d.insert_temp(egui::Id::new("ndi_info"), ndi_info);
                             d.insert_temp(egui::Id::new("ndi_running"), app.ndi.is_running());
+                        });
+                    }
+
+                    // Store recording state in egui temp data for UI panels
+                    {
+                        let rec_info = crate::ui::panels::recording_panel::RecordingInfo {
+                            recording: app.recording.is_recording(),
+                            has_audio: app.recording.has_audio(),
+                            ffmpeg_found: app.recording.encoder_info.ffmpeg_found,
+                            encoder_info: app.recording.encoder_info.clone(),
+                            config: app.recording.config.clone(),
+                            duration_secs: app.recording.duration().map_or(0.0, |d| d.as_secs_f64()),
+                            frames_encoded: app.recording.frames_encoded(),
+                            bytes_written: app.recording.total_bytes_written(),
+                            output_width: app.recording.capture_dimensions().0,
+                            output_height: app.recording.capture_dimensions().1,
+                            encoder_name: match &app.recording.state {
+                                crate::recording::RecordingState::Recording { encoder_name, .. } => encoder_name.clone(),
+                                _ => String::new(),
+                            },
+                            error: match &app.recording.state {
+                                crate::recording::RecordingState::Error(e) => Some(e.clone()),
+                                _ => None,
+                            },
+                            audio_active: app.audio.active,
+                        };
+                        ctx.data_mut(|d| {
+                            d.insert_temp(egui::Id::new("recording_info"), rec_info);
                         });
                     }
 
@@ -999,13 +1028,10 @@ impl ApplicationHandler for PhosphorApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("ndi_resolution_change")));
                     if let Some(res_u8) = ndi_res {
-                        let res = match res_u8 {
-                            0 => crate::ndi::types::OutputResolution::Match,
-                            1 => crate::ndi::types::OutputResolution::Res720p,
-                            2 => crate::ndi::types::OutputResolution::Res1080p,
-                            3 => crate::ndi::types::OutputResolution::Res4K,
-                            _ => crate::ndi::types::OutputResolution::Match,
-                        };
+                        let res = crate::ndi::types::OutputResolution::ALL
+                            .get(res_u8 as usize)
+                            .copied()
+                            .unwrap_or(crate::ndi::types::OutputResolution::Match);
                         app.ndi.config.resolution = res;
                         app.ndi.config.save();
                         app.ndi.restart(
@@ -1036,6 +1062,106 @@ impl ApplicationHandler for PhosphorApp {
                             app.gpu.surface_config.width,
                             app.gpu.surface_config.height,
                         );
+                    }
+                }
+
+                // Handle recording signals from UI
+                {
+                    let rec_toggle: Option<bool> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("recording_toggle")));
+                    if rec_toggle.is_some() {
+                        if app.recording.is_recording() {
+                            app.recording.stop();
+                        } else {
+                            let audio_source = if app.audio.active {
+                                Some(crate::recording::encoder::AudioSource {
+                                    ring: app.audio.recording_ring.clone(),
+                                    sample_rate: app.audio.sample_rate,
+                                })
+                            } else {
+                                None
+                            };
+                            if let Err(e) = app.recording.start(
+                                &app.gpu.device,
+                                app.gpu.format,
+                                app.gpu.surface_config.width,
+                                app.gpu.surface_config.height,
+                                audio_source,
+                            ) {
+                                log::error!("Failed to start recording: {e}");
+                            }
+                        }
+                    }
+
+                    let rec_codec: Option<u8> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("rec_codec_change")));
+                    if let Some(idx) = rec_codec {
+                        if let Some(&codec) = crate::recording::types::VideoCodec::ALL.get(idx as usize) {
+                            app.recording.config.codec = codec;
+                            app.recording.config.save();
+                        }
+                    }
+
+                    let rec_res: Option<u8> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("rec_resolution_change")));
+                    if let Some(idx) = rec_res {
+                        if let Some(&res) = crate::gpu::types::OutputResolution::ALL.get(idx as usize) {
+                            app.recording.config.resolution = res;
+                            app.recording.config.save();
+                        }
+                    }
+
+                    let rec_fps: Option<u32> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("rec_fps_change")));
+                    if let Some(fps) = rec_fps {
+                        app.recording.config.fps = fps;
+                        app.recording.config.save();
+                    }
+
+                    let rec_quality: Option<u32> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("rec_quality_change")));
+                    if let Some(q) = rec_quality {
+                        app.recording.config.quality = q;
+                        app.recording.config.save();
+                    }
+
+                    let rec_container: Option<u8> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("rec_container_change")));
+                    if let Some(idx) = rec_container {
+                        if let Some(&cont) = crate::recording::types::Container::ALL.get(idx as usize) {
+                            app.recording.config.container = cont;
+                            app.recording.config.save();
+                        }
+                    }
+
+                    let rec_hw: Option<bool> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("rec_hw_toggle")));
+                    if let Some(hw) = rec_hw {
+                        app.recording.config.use_hw_encoder = hw;
+                        app.recording.config.save();
+                    }
+
+                    let rec_audio: Option<bool> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("rec_audio_toggle")));
+                    if let Some(val) = rec_audio {
+                        app.recording.config.record_audio = val;
+                        app.recording.config.save();
                     }
                 }
 

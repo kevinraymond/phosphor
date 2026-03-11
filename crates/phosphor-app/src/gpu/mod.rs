@@ -1,5 +1,6 @@
 pub mod compositor;
 pub mod context;
+pub mod frame_capture;
 pub mod fullscreen_quad;
 pub mod layer;
 pub mod particle;
@@ -8,6 +9,7 @@ pub mod pipeline;
 pub mod placeholder;
 pub mod postprocess;
 pub mod render_target;
+pub mod types;
 pub mod uniforms;
 #[cfg(feature = "profiling")]
 pub mod profiler;
