@@ -3,6 +3,11 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## Unreleased
+
+### Fixed
+- **Accretion drift** -- N-body simulation no longer drifts off-screen over time. Nonlinear centering force (gentle at origin, strong near edges), center-biased seed spawning, and tighter boundary kill prevent compounding center-of-mass shift
+
 ## v1.7.0 — 2026-03-11
 
 ### Added
