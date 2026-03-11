@@ -3,7 +3,7 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
-## Unreleased
+## v1.7.0 — 2026-03-11
 
 ### Added
 - **Particle binding targets** — particle system settings (emit rate, burst on beat, lifetime, speed, size, drag, turbulence, gravity X/Y, vortex strength) exposed as `particle.*` targets in the binding bus. Applies to all layers' particle systems. New "Particles" group in Binding Matrix target picker.
