@@ -13,6 +13,9 @@
   - Binary WS wire format: `[source_name_utf8] [0x00] [jpeg_bytes]` — zero impact on numeric data path
   - Thumbnails auto-clean when source fields expire; hidden when group is collapsed (no decode overhead)
 
+### Docs
+- **Bridges README quick start** — added "What's a Bridge?" explainer and beginner-friendly quick start with three paths (no hardware, webcam, gamepad)
+
 ### Fixed
 - **Binding Matrix light theme readability** — replaced all hardcoded dark-mode colors (`from_white_alpha`, `from_black_alpha`, `from_rgb(0x22,...)`) with `ThemeColors` semantic equivalents so the UI is readable across all 6 themes (Dark, Light, Midnight, Ember, Neon, High Contrast)
 - Added `text_dim`, `hover_fill`, `hover_border`, and `backdrop` fields to `ThemeColors` for fine-grained UI element theming
