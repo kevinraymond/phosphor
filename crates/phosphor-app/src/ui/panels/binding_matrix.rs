@@ -313,29 +313,28 @@ fn draw_source_column(
                 .color(tc.text_secondary),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add(egui::Button::new(RichText::new("\u{25b6}").size(7.0).color(tc.text_dim))
+            let all_collapsed = !state.collapsed_source_groups.is_empty();
+            let icon = if all_collapsed { "\u{25bc}" } else { "\u{25b6}" };
+            let hint = if all_collapsed { "Expand all" } else { "Collapse all" };
+            if ui.add(egui::Button::new(RichText::new(icon).size(7.0).color(tc.text_dim))
                 .frame(false).min_size(egui::vec2(14.0, 14.0)))
-                .on_hover_text("Collapse all")
+                .on_hover_text(hint)
                 .clicked()
             {
-                for id in ["audio_bands", "audio_features", "audio_beat", "audio_mfcc", "audio_chroma", "midi", "osc"] {
-                    state.collapsed_source_groups.insert(id.to_string());
-                }
-                // Also collapse any ws.* groups from bus snapshot
-                for key in bus.last_snapshot.keys() {
-                    if let Some(rest) = key.strip_prefix("ws.") {
-                        if let Some(name) = rest.split('.').next() {
-                            state.collapsed_source_groups.insert(format!("ws.{name}"));
+                if all_collapsed {
+                    state.collapsed_source_groups.clear();
+                } else {
+                    for id in ["audio_bands", "audio_features", "audio_beat", "audio_mfcc", "audio_chroma", "midi", "osc"] {
+                        state.collapsed_source_groups.insert(id.to_string());
+                    }
+                    for key in bus.last_snapshot.keys() {
+                        if let Some(rest) = key.strip_prefix("ws.") {
+                            if let Some(name) = rest.split('.').next() {
+                                state.collapsed_source_groups.insert(format!("ws.{name}"));
+                            }
                         }
                     }
                 }
-            }
-            if ui.add(egui::Button::new(RichText::new("\u{25bc}").size(7.0).color(tc.text_dim))
-                .frame(false).min_size(egui::vec2(14.0, 14.0)))
-                .on_hover_text("Expand all")
-                .clicked()
-            {
-                state.collapsed_source_groups.clear();
             }
         });
     });
@@ -841,21 +840,21 @@ fn draw_target_column(
                 .color(tc.text_secondary),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add(egui::Button::new(RichText::new("\u{25b6}").size(7.0).color(tc.text_dim))
+            let all_collapsed = !state.collapsed_target_groups.is_empty();
+            let icon = if all_collapsed { "\u{25bc}" } else { "\u{25b6}" };
+            let hint = if all_collapsed { "Expand all" } else { "Collapse all" };
+            if ui.add(egui::Button::new(RichText::new(icon).size(7.0).color(tc.text_dim))
                 .frame(false).min_size(egui::vec2(14.0, 14.0)))
-                .on_hover_text("Collapse all")
+                .on_hover_text(hint)
                 .clicked()
             {
-                for id in ["Params", "Layers", "PostFX", "Uniforms", "Scene", "Global"] {
-                    state.collapsed_target_groups.insert(id.to_string());
+                if all_collapsed {
+                    state.collapsed_target_groups.clear();
+                } else {
+                    for id in ["Params", "Layers", "PostFX", "Particles", "Uniforms", "Scene", "Global"] {
+                        state.collapsed_target_groups.insert(id.to_string());
+                    }
                 }
-            }
-            if ui.add(egui::Button::new(RichText::new("\u{25bc}").size(7.0).color(tc.text_dim))
-                .frame(false).min_size(egui::vec2(14.0, 14.0)))
-                .on_hover_text("Expand all")
-                .clicked()
-            {
-                state.collapsed_target_groups.clear();
             }
         });
     });

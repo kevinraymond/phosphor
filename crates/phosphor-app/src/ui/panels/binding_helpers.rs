@@ -72,6 +72,26 @@ pub fn build_target_options(info: &BindingPanelInfo) -> Vec<TargetOption> {
         });
     }
 
+    // Particle targets
+    for (id, label) in [
+        ("particle.emit_rate", "Emit rate"),
+        ("particle.burst_on_beat", "Burst on beat"),
+        ("particle.lifetime", "Lifetime"),
+        ("particle.speed", "Speed"),
+        ("particle.size", "Size"),
+        ("particle.drag", "Drag"),
+        ("particle.turbulence", "Turbulence"),
+        ("particle.gravity_x", "Gravity X"),
+        ("particle.gravity_y", "Gravity Y"),
+        ("particle.vortex_strength", "Vortex strength"),
+    ] {
+        targets.push(TargetOption {
+            id: id.into(),
+            label: label.into(),
+            group: "Particles",
+        });
+    }
+
     // Uniform targets (direct shader uniform override)
     for (field, label) in UNIFORM_TARGETS {
         targets.push(TargetOption {
@@ -526,6 +546,10 @@ pub fn friendly_target(target: &str) -> String {
             field.replace('_', " ")
         }
         Some("postfx") => {
+            let field = parts.get(1).unwrap_or(&"?");
+            field.replace('_', " ")
+        }
+        Some("particle") => {
             let field = parts.get(1).unwrap_or(&"?");
             field.replace('_', " ")
         }

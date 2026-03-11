@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### Added
+- **Particle binding targets** — particle system settings (emit rate, burst on beat, lifetime, speed, size, drag, turbulence, gravity X/Y, vortex strength) exposed as `particle.*` targets in the binding bus. Applies to all layers' particle systems. New "Particles" group in Binding Matrix target picker.
 - **Xbox Controller bridge** — `xbox_controller.py` streams gamepad inputs (analog sticks, triggers, d-pad, 11 buttons → 23 fields) into Phosphor's binding bus via `evdev`. Radial deadzone (configurable `--deadzone`), Y-axis inversion, auto-detect by name matching, hot-plug reconnection, 60 FPS default. Docker support with `privileged` + `/dev/input` mount.
 - **Bridge source preview thumbnails** — vision bridges (MediaPipe hands/pose/face, YOLO) send annotated camera frame thumbnails (160x120 JPEG, ~8fps) over binary WebSocket. Phosphor decodes and renders inline previews in the binding matrix above each WS source group's fields, giving immediate visual feedback about camera position, detection quality, and model output.
   - `PhosphorBridge.push_preview(frame)` — rate-limited JPEG thumbnail sender with `--no-preview` and `--preview-fps` CLI flags
@@ -15,7 +16,7 @@
 ### Fixed
 - **Binding Matrix light theme readability** — replaced all hardcoded dark-mode colors (`from_white_alpha`, `from_black_alpha`, `from_rgb(0x22,...)`) with `ThemeColors` semantic equivalents so the UI is readable across all 6 themes (Dark, Light, Midnight, Ember, Neon, High Contrast)
 - Added `text_dim`, `hover_fill`, `hover_border`, and `backdrop` fields to `ThemeColors` for fine-grained UI element theming
-- **Binding Matrix collapse/expand all** — added ▶/▼ buttons in Sources and Targets column headers to collapse or expand all groups at once
+- **Binding Matrix collapse/expand all** — single toggle button in Sources and Targets column headers to collapse or expand all groups at once
 
 ### Changed
 - **Configurable video device** — bridge docker-compose accepts `VIDEO_DEVICE` env var (e.g. `VIDEO_DEVICE=/dev/video4 docker compose up pose`) for multi-camera setups; host device is always mapped to `/dev/video0` inside the container so OpenCV finds it at index 0

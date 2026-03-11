@@ -2052,6 +2052,49 @@ impl App {
                     }
                 }
             }
+            Some("particle") => {
+                // particle.{setting_name} — applies to all layers' particle systems
+                if parts.len() >= 2 {
+                    let v = value.clamp(0.0, 1.0);
+                    for layer in &mut self.layer_stack.layers {
+                        if let Some(effect) = layer.as_effect_mut() {
+                            if let Some(ps) =
+                                effect.pass_executor.particle_system.as_mut()
+                            {
+                                match parts[1] {
+                                    "emit_rate" => {
+                                        let r = v * 10000.0;
+                                        ps.emit_rate = r;
+                                        ps.def.emit_rate = r;
+                                    }
+                                    "burst_on_beat" => {
+                                        let r = (v * 2000.0).round() as u32;
+                                        ps.burst_on_beat = r;
+                                        ps.def.burst_on_beat = r;
+                                    }
+                                    "lifetime" => ps.def.lifetime = 0.5 + v * 29.5,
+                                    "speed" => ps.def.initial_speed = v * 2.0,
+                                    "size" => {
+                                        ps.def.initial_size = 0.001 + v * 0.099;
+                                    }
+                                    "drag" => ps.def.drag = 0.8 + v * 0.2,
+                                    "turbulence" => ps.def.turbulence = v * 2.0,
+                                    "gravity_x" => {
+                                        ps.def.gravity[0] = -2.0 + v * 4.0;
+                                    }
+                                    "gravity_y" => {
+                                        ps.def.gravity[1] = -2.0 + v * 4.0;
+                                    }
+                                    "vortex_strength" => {
+                                        ps.def.vortex_strength = -5.0 + v * 10.0;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Some("uniform") => {
                 // Direct shader uniform override: uniform.{field_name}
                 if parts.len() >= 2 {
