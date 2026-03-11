@@ -301,15 +301,20 @@ fn cs_main(
     if is_seed < 0.5 && u.onset > 0.5 {
         let seed_chance = hash(f32(idx) * 3.17 + u.time * 100.0);
         if seed_chance < 0.0001 {
-            // Become a seed — stay in place, keep orbital velocity
-            let sm = get_seed_mass() * (0.5 + u.mid);
-            mass = sm;
-            p.flags.z = 1.0;
-            p.flags.w = sm;
-            p.flags.x = 0.0;  // reset age for seed lifetime
-            p.flags.y = get_seed_lifetime();
-            // Slow down slightly but keep orbiting
-            vel *= 0.7;
+            // Bias seed spawning toward center — prevents drift from fringe seeds
+            let spawn_bias = 1.0 - smoothstep(0.3, 0.8, length(pos));
+            let biased_chance = hash(f32(idx) * 7.13 + u.time * 77.0);
+            if biased_chance < spawn_bias {
+                // Become a seed — stay in place, keep orbital velocity
+                let sm = get_seed_mass() * (0.5 + u.mid);
+                mass = sm;
+                p.flags.z = 1.0;
+                p.flags.w = sm;
+                p.flags.x = 0.0;  // reset age for seed lifetime
+                p.flags.y = get_seed_lifetime();
+                // Slow down slightly but keep orbiting
+                vel *= 0.7;
+            }
         }
     }
 
@@ -343,9 +348,10 @@ fn cs_main(
         vel *= pow(damping, dt * 60.0);
     }
 
-    // --- Gentle centering (prevents disc from drifting off-screen) ---
-    // Very weak harmonic potential; negligible vs gravity but keeps COM near origin.
-    vel -= pos * 0.03 * dt;
+    // --- Nonlinear centering (prevents disc from drifting off-screen) ---
+    // Gentle near origin (preserves orbital dynamics), strong near edges.
+    let center_strength = 0.03 + smoothstep(0.3, 1.0, r_center) * 0.25;
+    vel -= pos * center_strength * dt;
 
     // --- Flux perturbation ---
     if u.flux > 0.1 {
@@ -369,7 +375,7 @@ fn cs_main(
     vel = coll.zw;
 
     // --- Boundary kill (large for slingshot arcs) ---
-    if length(pos) > 3.0 {
+    if length(pos) > 2.0 {
         p.pos_life.w = 0.0;
         write_particle(idx, p);
         return;
