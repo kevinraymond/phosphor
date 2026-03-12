@@ -89,9 +89,11 @@ pub fn build_target_options(info: &BindingPanelInfo) -> Vec<TargetOption> {
 
     // Layer targets
     for i in 0..info.layer_count {
-        for (suffix, label_suffix) in
-            [("opacity", "opacity"), ("blend", "blend"), ("enabled", "enabled")]
-        {
+        for (suffix, label_suffix) in [
+            ("opacity", "opacity"),
+            ("blend", "blend"),
+            ("enabled", "enabled"),
+        ] {
             targets.push(TargetOption {
                 id: format!("layer.{i}.{suffix}"),
                 label: format!("Layer {i} {label_suffix}"),
@@ -139,7 +141,7 @@ pub fn build_target_options(info: &BindingPanelInfo) -> Vec<TargetOption> {
     for (field, label) in UNIFORM_TARGETS {
         targets.push(TargetOption {
             id: format!("uniform.{field}"),
-            label: label.to_string(),
+            label: (*label).to_string(),
             group: "Uniforms",
         });
     }
@@ -445,19 +447,19 @@ pub fn draw_source_badge(ui: &mut Ui, source: &str) {
 // Inline bar helper
 // ---------------------------------------------------------------------------
 
-pub fn draw_inline_bar(ui: &mut Ui, value: f32, width: f32, height: f32, fill_color: Color32, bg_color: Color32) {
+pub fn draw_inline_bar(
+    ui: &mut Ui,
+    value: f32,
+    width: f32,
+    height: f32,
+    fill_color: Color32,
+    bg_color: Color32,
+) {
     let (bar_rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    ui.painter().rect_filled(
-        bar_rect,
-        1.0,
-        bg_color,
-    );
+    ui.painter().rect_filled(bar_rect, 1.0, bg_color);
     let filled = egui::Rect::from_min_size(
         bar_rect.min,
-        egui::vec2(
-            bar_rect.width() * value.clamp(0.0, 1.0),
-            bar_rect.height(),
-        ),
+        egui::vec2(bar_rect.width() * value.clamp(0.0, 1.0), bar_rect.height()),
     );
     ui.painter().rect_filled(filled, 1.0, fill_color);
 }
@@ -517,19 +519,13 @@ pub fn friendly_source(source: &str) -> String {
             return match msg_type {
                 "cc" => format!("CC {cc}"),
                 "note" => format!("Note {cc}"),
-                _ => parts.last().unwrap_or(&"?").to_string(),
+                _ => (*parts.last().unwrap_or(&"?")).to_string(),
             };
         }
-        return source
-            .strip_prefix("midi.")
-            .unwrap_or(source)
-            .to_string();
+        return source.strip_prefix("midi.").unwrap_or(source).to_string();
     }
     if source.starts_with("audio.") {
-        return source
-            .strip_prefix("audio.")
-            .unwrap_or(source)
-            .to_string();
+        return source.strip_prefix("audio.").unwrap_or(source).to_string();
     }
     if source.starts_with("osc.") {
         let addr = source.strip_prefix("osc.").unwrap_or(source);
@@ -586,7 +582,7 @@ pub fn friendly_target(target: &str) -> String {
                 let name = parts[3];
                 format!("L{idx} {name}")
             } else {
-                parts.get(2).unwrap_or(&"?").to_string()
+                (*parts.get(2).unwrap_or(&"?")).to_string()
             }
         }
         Some("layer") => {
@@ -684,10 +680,8 @@ pub fn draw_source_row(
     );
 
     // Mini bar
-    let bar_rect = egui::Rect::from_min_size(
-        Pos2::new(bar_left, cy - 2.0),
-        egui::vec2(bar_width, 4.0),
-    );
+    let bar_rect =
+        egui::Rect::from_min_size(Pos2::new(bar_left, cy - 2.0), egui::vec2(bar_width, 4.0));
     painter.rect_filled(bar_rect, 1.0, tc.meter_bg);
     let fill_w = bar_width * val.clamp(0.0, 1.0);
     if fill_w > 0.5 {
@@ -699,7 +693,7 @@ pub fn draw_source_row(
     painter.text(
         Pos2::new(val_right, cy),
         egui::Align2::LEFT_CENTER,
-        &format!("{val:.2}"),
+        format!("{val:.2}"),
         egui::FontId::proportional(8.0),
         dim_color,
     );

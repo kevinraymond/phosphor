@@ -16,6 +16,7 @@ struct DepthRequest {
 }
 
 /// Result of depth estimation.
+#[derive(Debug)]
 pub struct DepthFrame {
     pub data: Vec<u8>, // 256×256 grayscale
     pub width: u32,
@@ -72,7 +73,7 @@ impl DepthThread {
                                 }
                             }
                         }
-                        Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                        Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
                         Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                     }
                 }

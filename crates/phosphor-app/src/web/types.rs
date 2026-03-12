@@ -43,10 +43,7 @@ pub enum WsInMessage {
         fields: Vec<(String, SourceFieldInfo)>,
     },
     /// Preview thumbnail image (JPEG) from a bridge source.
-    BindPreview {
-        source: String,
-        jpeg_data: Vec<u8>,
-    },
+    BindPreview { source: String, jpeg_data: Vec<u8> },
 }
 
 /// Metadata for a WebSocket source field.

@@ -244,7 +244,9 @@ fn download_file(
 
 /// Download and extract ONNX Runtime shared library from official release archive.
 fn download_ort_runtime(dir: &std::path::Path, progress: &DownloadProgress) -> Result<()> {
-    let is_zip = ORT_LIB_URL.ends_with(".zip");
+    let is_zip = std::path::Path::new(ORT_LIB_URL)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"));
     let ext = if is_zip { "zip" } else { "tgz" };
     let archive_path = dir.join(format!("ort_runtime.{ext}"));
 

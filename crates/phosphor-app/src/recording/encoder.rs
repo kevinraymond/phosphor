@@ -44,7 +44,7 @@ impl EncoderInfo {
     pub fn has_hw(&self, codec: VideoCodec) -> bool {
         match codec {
             VideoCodec::H264 => self.hw_h264,
-            VideoCodec::HEVC => self.hw_hevc,
+            VideoCodec::Hevc => self.hw_hevc,
             VideoCodec::AV1 => self.hw_av1,
         }
     }
@@ -53,7 +53,7 @@ impl EncoderInfo {
     pub fn has_any(&self, codec: VideoCodec) -> bool {
         match codec {
             VideoCodec::H264 => self.hw_h264 || self.sw_h264,
-            VideoCodec::HEVC => self.hw_hevc || self.sw_hevc,
+            VideoCodec::Hevc => self.hw_hevc || self.sw_hevc,
             VideoCodec::AV1 => self.hw_av1 || self.sw_av1,
         }
     }
@@ -66,7 +66,7 @@ impl EncoderInfo {
             // Fallback to software
             let has_sw = match codec {
                 VideoCodec::H264 => self.sw_h264,
-                VideoCodec::HEVC => self.sw_hevc,
+                VideoCodec::Hevc => self.sw_hevc,
                 VideoCodec::AV1 => self.sw_av1,
             };
             if has_sw {
@@ -87,14 +87,10 @@ impl EncoderInfo {
         } else {
             let has_sw = match codec {
                 VideoCodec::H264 => self.sw_h264,
-                VideoCodec::HEVC => self.sw_hevc,
+                VideoCodec::Hevc => self.sw_hevc,
                 VideoCodec::AV1 => self.sw_av1,
             };
-            if has_sw {
-                "SW"
-            } else {
-                "N/A"
-            }
+            if has_sw { "SW" } else { "N/A" }
         }
     }
 }
@@ -330,7 +326,13 @@ pub fn spawn_encoder_thread(
     std::thread::Builder::new()
         .name("recording-encoder".into())
         .spawn(move || {
-            let result = encoder_loop(&mut child, &frame_rx, &shutdown, &frame_counter, &bytes_written);
+            let result = encoder_loop(
+                &mut child,
+                &frame_rx,
+                &shutdown,
+                &frame_counter,
+                &bytes_written,
+            );
 
             // Close stdin to signal ffmpeg to finalize
             drop(child.stdin.take());
@@ -344,7 +346,10 @@ pub fn spawn_encoder_thread(
                             use std::io::Read;
                             let _ = stderr.read_to_string(&mut buf);
                             if !buf.is_empty() {
-                                log::error!("ffmpeg stderr: {}", buf.chars().take(500).collect::<String>());
+                                log::error!(
+                                    "ffmpeg stderr: {}",
+                                    buf.chars().take(500).collect::<String>()
+                                );
                             }
                         }
                         log::error!("ffmpeg exited with status: {status}");
@@ -363,7 +368,7 @@ pub fn spawn_encoder_thread(
             std::thread::Builder::new()
                 .name("recording-encoder-noop".into())
                 .spawn(move || Some(msg))
-                .unwrap()
+                .expect("failed to spawn noop thread")
         })
 }
 
@@ -422,7 +427,7 @@ pub fn spawn_audio_writer_thread(
             std::thread::Builder::new()
                 .name("recording-audio-noop".into())
                 .spawn(|| {})
-                .unwrap()
+                .expect("failed to spawn noop thread")
         })
 }
 
@@ -448,7 +453,7 @@ fn encoder_loop(
                 frame_counter.fetch_add(1, Ordering::Relaxed);
                 bytes_written.fetch_add(size, Ordering::Relaxed);
             }
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
         }
     }

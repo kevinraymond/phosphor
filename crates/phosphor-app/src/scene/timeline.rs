@@ -2,7 +2,7 @@ use super::types::{AdvanceMode, SceneCue, TransitionType};
 
 /// Runtime playback state of the timeline.
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum PlaybackState {
     /// No playback — waiting for user action.
     Idle,
@@ -209,7 +209,7 @@ impl Timeline {
             return TimelineEvent::None;
         }
 
-        match self.state.clone() {
+        match self.state {
             PlaybackState::Idle => TimelineEvent::None,
             PlaybackState::Holding { cue_index, elapsed } => {
                 let new_elapsed = elapsed + dt;

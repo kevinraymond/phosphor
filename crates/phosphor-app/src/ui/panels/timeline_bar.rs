@@ -51,8 +51,6 @@ pub fn draw_timeline_bar(ui: &mut Ui, timeline: &TimelineInfo, cue_names: &[Stri
                 tc.accent.linear_multiply(0.25)
             } else if is_to {
                 tc.accent.linear_multiply(0.10)
-            } else if is_from {
-                tc.card_bg
             } else {
                 tc.card_bg
             };
@@ -79,19 +77,30 @@ pub fn draw_timeline_bar(ui: &mut Ui, timeline: &TimelineInfo, cue_names: &[Stri
             } else {
                 egui::Stroke::new(1.0, tc.card_border)
             };
-            painter.rect_stroke(rect, CornerRadius::same(2), border_color, StrokeKind::Outside);
+            painter.rect_stroke(
+                rect,
+                CornerRadius::same(2),
+                border_color,
+                StrokeKind::Outside,
+            );
 
             // From-cue during transition: striped overlay
             if is_from {
                 if let Some((_, _, _, transition_type)) = &transition_state {
                     let stripe_color = match transition_type {
                         TransitionType::Cut => Color32::TRANSPARENT,
-                        TransitionType::Dissolve => {
-                            Color32::from_rgba_unmultiplied(tc.accent.r(), tc.accent.g(), tc.accent.b(), 25)
-                        }
-                        TransitionType::ParamMorph => {
-                            Color32::from_rgba_unmultiplied(tc.success.r(), tc.success.g(), tc.success.b(), 25)
-                        }
+                        TransitionType::Dissolve => Color32::from_rgba_unmultiplied(
+                            tc.accent.r(),
+                            tc.accent.g(),
+                            tc.accent.b(),
+                            25,
+                        ),
+                        TransitionType::ParamMorph => Color32::from_rgba_unmultiplied(
+                            tc.success.r(),
+                            tc.success.g(),
+                            tc.success.b(),
+                            25,
+                        ),
                     };
                     widgets::draw_diagonal_stripes(painter, rect, stripe_color, 6.0);
                 }
@@ -147,11 +156,7 @@ pub fn draw_timeline_bar(ui: &mut Ui, timeline: &TimelineInfo, cue_names: &[Stri
                     let top_y = rect.center().y - total_h * 0.5;
                     let name_x = rect.center().x - name_galley.size().x * 0.5;
                     let trans_x = rect.center().x - trans_galley.size().x * 0.5;
-                    painter.galley(
-                        egui::pos2(name_x, top_y),
-                        name_galley,
-                        tc.text_primary,
-                    );
+                    painter.galley(egui::pos2(name_x, top_y), name_galley, tc.text_primary);
                     painter.galley(
                         egui::pos2(trans_x, top_y + total_h - trans_galley.size().y),
                         trans_galley,
@@ -162,8 +167,6 @@ pub fn draw_timeline_bar(ui: &mut Ui, timeline: &TimelineInfo, cue_names: &[Stri
                 // Single-line cue name
                 let label_color = if is_current && transition_state.is_none() {
                     tc.accent
-                } else if is_from {
-                    tc.text_secondary
                 } else {
                     tc.text_secondary
                 };

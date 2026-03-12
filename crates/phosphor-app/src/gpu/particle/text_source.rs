@@ -96,5 +96,11 @@ pub fn render_text_to_particles(
     };
 
     let _ = particle_size; // density handled by image sampler
-    image_source::sample_rgba_buffer(&rgba, bitmap_width, bitmap_height, &sample_def, max_particles)
+    image_source::sample_rgba_buffer(
+        &rgba,
+        bitmap_width,
+        bitmap_height,
+        &sample_def,
+        max_particles,
+    )
 }

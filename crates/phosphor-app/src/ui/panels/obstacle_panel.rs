@@ -66,7 +66,7 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
             d.insert_temp(
                 egui::Id::new("obstacle_cmd"),
                 ObstacleCommand::SetEnabled(enabled),
-            )
+            );
         });
     }
 
@@ -143,10 +143,7 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
                             && !selected
                         {
                             ui.ctx().data_mut(|d| {
-                                d.insert_temp(
-                                    egui::Id::new("switch_obstacle_webcam_device"),
-                                    *idx,
-                                );
+                                d.insert_temp(egui::Id::new("switch_obstacle_webcam_device"), *idx);
                             });
                         }
                     }
@@ -161,20 +158,24 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
 
         let tc = &tc;
         let tab_btn = |ui: &mut Ui, label: &str, is_active: bool| -> egui::Response {
-            let btn = egui::Button::new(
-                RichText::new(label).size(9.0)
-                    .color(if is_active { egui::Color32::WHITE } else { tc.text_secondary })
-            )
+            let btn = egui::Button::new(RichText::new(label).size(9.0).color(if is_active {
+                egui::Color32::WHITE
+            } else {
+                tc.text_secondary
+            }))
             .fill(if is_active {
                 egui::Color32::from_rgba_unmultiplied(0x3b, 0x82, 0xf6, 50)
             } else {
                 tc.widget_bg
             })
-            .stroke(egui::Stroke::new(1.0, if is_active {
-                egui::Color32::from_rgba_unmultiplied(0x3b, 0x82, 0xf6, 100)
-            } else {
-                tc.card_border
-            }))
+            .stroke(egui::Stroke::new(
+                1.0,
+                if is_active {
+                    egui::Color32::from_rgba_unmultiplied(0x3b, 0x82, 0xf6, 100)
+                } else {
+                    tc.card_border
+                },
+            ))
             .corner_radius(3.0)
             .min_size(egui::vec2(0.0, 22.0));
             ui.add(btn)
@@ -185,7 +186,7 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
             .clicked()
         {
             ui.ctx().data_mut(|d| {
-                d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::LoadImage)
+                d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::LoadImage);
             });
         }
         if info.video_available {
@@ -194,7 +195,7 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
                 .clicked()
             {
                 ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::LoadVideo)
+                    d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::LoadVideo);
                 });
             }
         }
@@ -204,7 +205,7 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
                 .clicked()
             {
                 ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::UseWebcam)
+                    d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::UseWebcam);
                 });
             }
         }
@@ -215,14 +216,16 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
                     .clicked()
                 {
                     ui.ctx().data_mut(|d| {
-                        d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::UseDepth)
+                        d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::UseDepth);
                     });
                 }
             } else if info.depth_downloading.is_some() {
                 let pct = info.depth_downloading.unwrap_or(0);
-                ui.add_enabled(false, egui::Button::new(
-                    RichText::new(format!("Depth {pct}%")).size(9.0),
-                ).min_size(egui::vec2(0.0, 22.0)));
+                ui.add_enabled(
+                    false,
+                    egui::Button::new(RichText::new(format!("Depth {pct}%")).size(9.0))
+                        .min_size(egui::vec2(0.0, 22.0)),
+                );
             } else {
                 if tab_btn(ui, "Depth", false)
                     .on_hover_text("Requires one-time download (~80 MB)")
@@ -239,7 +242,7 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
                 .clicked()
             {
                 ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::Clear)
+                    d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::Clear);
                 });
             }
         }
@@ -279,7 +282,7 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
                             d.insert_temp(
                                 egui::Id::new("obstacle_cmd"),
                                 ObstacleCommand::SetMode(mode),
-                            )
+                            );
                         });
                     }
                 }
@@ -305,14 +308,18 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
             );
             ui.spacing_mut().slider_width = ui.available_width();
             if ui
-                .add(egui::Slider::new(&mut threshold, 0.0..=1.0).step_by(0.01).show_value(false))
+                .add(
+                    egui::Slider::new(&mut threshold, 0.0..=1.0)
+                        .step_by(0.01)
+                        .show_value(false),
+                )
                 .changed()
             {
                 ui.ctx().data_mut(|d| {
                     d.insert_temp(
                         egui::Id::new("obstacle_cmd"),
                         ObstacleCommand::SetThreshold(threshold),
-                    )
+                    );
                 });
             }
         });
@@ -337,14 +344,18 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
             );
             ui.spacing_mut().slider_width = ui.available_width();
             if ui
-                .add(egui::Slider::new(&mut elasticity, 0.0..=1.0).step_by(0.01).show_value(false))
+                .add(
+                    egui::Slider::new(&mut elasticity, 0.0..=1.0)
+                        .step_by(0.01)
+                        .show_value(false),
+                )
                 .changed()
             {
                 ui.ctx().data_mut(|d| {
                     d.insert_temp(
                         egui::Id::new("obstacle_cmd"),
                         ObstacleCommand::SetElasticity(elasticity),
-                    )
+                    );
                 });
             }
         });

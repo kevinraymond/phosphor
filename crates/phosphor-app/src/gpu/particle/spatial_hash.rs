@@ -10,7 +10,11 @@ const WORKGROUP_SIZE: u32 = 256;
 /// Target: ~16 particles per cell. Clamped to [40, 256].
 /// `grid_max_override`: if > 0, caps the upper bound (for effects with large interaction radii).
 pub fn grid_dims(max_particles: u32, grid_max_override: u32) -> (u32, u32) {
-    let upper = if grid_max_override > 0 { grid_max_override } else { 256 };
+    let upper = if grid_max_override > 0 {
+        grid_max_override
+    } else {
+        256
+    };
     let lower = upper.min(40);
     let dim = ((max_particles as f64 / 16.0).sqrt() as u32).clamp(lower, upper);
     (dim, dim)

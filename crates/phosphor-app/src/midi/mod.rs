@@ -11,7 +11,7 @@ use crossbeam_channel::Receiver;
 use self::input::MidiPort;
 use self::mapping::{MidiConfig, MidiMapping};
 use self::types::{LearnTarget, MidiMessage, MidiMsgType, TriggerAction};
-use crate::params::{ParamDef, ParamStore, ParamValue};
+use crate::params::{ParamDef, ParamValue};
 
 /// Result of a single MidiSystem::update() call.
 pub struct MidiFrameResult {
@@ -156,9 +156,11 @@ impl MidiSystem {
     }
 
     /// Main per-frame update. Call from App::update().
+    /// Accepts split-borrowed ParamStore fields to avoid cloning defs.
     pub fn update(
         &mut self,
-        param_store: &mut ParamStore,
+        param_values: &mut std::collections::HashMap<String, ParamValue>,
+        param_changed: &mut bool,
         param_defs: &[ParamDef],
     ) -> MidiFrameResult {
         let mut result = MidiFrameResult {
@@ -259,10 +261,12 @@ impl MidiSystem {
                     match def {
                         ParamDef::Float { min, max, .. } => {
                             let val = min + (max - min) * scaled;
-                            param_store.set(&param_name, ParamValue::Float(val));
+                            param_values.insert(param_name.clone(), ParamValue::Float(val));
+                            *param_changed = true;
                         }
                         ParamDef::Bool { .. } => {
-                            param_store.set(&param_name, ParamValue::Bool(scaled > 0.5));
+                            param_values.insert(param_name.clone(), ParamValue::Bool(scaled > 0.5));
+                            *param_changed = true;
                         }
                         _ => {} // Color/Point2D not mappable via single CC
                     }

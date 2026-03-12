@@ -44,11 +44,15 @@ pub fn draw_midi_panel(ui: &mut Ui, midi: &mut MidiSystem) {
             {
                 midi.disconnect();
             }
-            for port in &midi.available_ports.clone() {
+            let mut connect_port = None;
+            for port in &midi.available_ports {
                 let is_selected = midi.connected_port() == Some(port.as_str());
                 if ui.selectable_label(is_selected, port).clicked() && !is_selected {
-                    midi.connect(port);
+                    connect_port = Some(port.clone());
                 }
+            }
+            if let Some(port) = connect_port {
+                midi.connect(&port);
             }
             if midi.available_ports.is_empty() {
                 ui.label(
@@ -75,11 +79,7 @@ pub fn draw_midi_panel(ui: &mut Ui, midi: &mut MidiSystem) {
 
     // Triggers
     ui.add_space(4.0);
-    ui.label(
-        RichText::new("TRIGGERS")
-            .size(8.0)
-            .color(tc.text_secondary),
-    );
+    ui.label(RichText::new("TRIGGERS").size(8.0).color(tc.text_secondary));
     ui.add_space(2.0);
 
     let half = ui.available_width() / 2.0;

@@ -4,9 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crossbeam_channel::{Receiver, Sender};
 use nokhwa::Camera;
 use nokhwa::pixel_format::RgbAFormat;
-use nokhwa::utils::{
-    ApiBackend, CameraIndex, RequestedFormat, RequestedFormatType, Resolution,
-};
+use nokhwa::utils::{ApiBackend, CameraIndex, RequestedFormat, RequestedFormatType, Resolution};
 
 /// A single decoded webcam frame (RGBA).
 pub struct WebcamFrame {
@@ -101,7 +99,7 @@ impl WebcamCapture {
                     Ok(()) => {}
                     Err(e) => {
                         let msg = if let Some(s) = e.downcast_ref::<&str>() {
-                            s.to_string()
+                            (*s).to_string()
                         } else if let Some(s) = e.downcast_ref::<String>() {
                             s.clone()
                         } else {

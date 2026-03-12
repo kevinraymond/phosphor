@@ -9,7 +9,7 @@ use crate::media::types::DecodedFrame;
 /// Discover built-in raster_*.png images in the assets/images/ directory.
 /// Returns display names (e.g. "skull", "phoenix") sorted alphabetically.
 /// Cached after first call.
-pub fn builtin_raster_images() -> &'static Vec<String> {
+pub fn builtin_raster_images() -> &'static [String] {
     static IMAGES: OnceLock<Vec<String>> = OnceLock::new();
     IMAGES.get_or_init(|| {
         let images_dir = crate::effect::loader::assets_dir().join("images");
@@ -17,7 +17,11 @@ pub fn builtin_raster_images() -> &'static Vec<String> {
         if let Ok(entries) = std::fs::read_dir(&images_dir) {
             for entry in entries.flatten() {
                 let file_name = entry.file_name().to_string_lossy().to_string();
-                if file_name.starts_with("raster_") && file_name.ends_with(".png") {
+                if file_name.starts_with("raster_")
+                    && std::path::Path::new(&file_name)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+                {
                     let display = file_name
                         .strip_prefix("raster_")
                         .unwrap_or(&file_name)
@@ -39,7 +43,6 @@ pub fn builtin_raster_path(display_name: &str) -> PathBuf {
         .join("images")
         .join(format!("raster_{display_name}.png"))
 }
-
 
 /// Result from background particle source loading.
 pub enum ParticleSourceResult {

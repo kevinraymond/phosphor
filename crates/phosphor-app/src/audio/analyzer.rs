@@ -302,47 +302,43 @@ impl FftAnalyzer {
     }
 
     fn extract_features(&mut self) -> AudioFeatures {
-        let mut out = AudioFeatures::default();
-
-        // 7-band energy extraction:
-        // Bass bands (linear RMS) — from large FFT
-        out.sub_bass = self.large.band_energy_linear(20.0, 60.0);
-        out.bass = self.large.band_energy_linear(60.0, 250.0);
-
-        // Mid bands (linear) — from medium FFT
-        out.low_mid = self.medium.band_energy_linear(250.0, 500.0);
-        out.mid = self.medium.band_energy_linear(500.0, 2000.0);
-        out.upper_mid = self.medium.band_energy_db(2000.0, 4000.0);
-
-        // High bands (dB-scaled) — from small FFT
-        out.presence = self.small.band_energy_db(4000.0, 6000.0);
-        out.brilliance = self.small.band_energy_db(6000.0, 20000.0);
-
         // RMS from time domain (use last 2048 samples for reasonable window)
         let td_start = FFT_LARGE - 2048;
         let sum_sq: f32 = self.time_domain[td_start..].iter().map(|s| s * s).sum();
-        out.rms = (sum_sq / 2048.0).sqrt();
+        let rms = (sum_sq / 2048.0).sqrt();
 
         // Kick detection: half-wave rectified spectral flux in 30-120 Hz (from large FFT)
         let kick_flux = self.large.spectral_flux_range(30.0, 120.0);
         // Normalize by running max with decay
         self.kick_max = (self.kick_max * 0.999).max(kick_flux).max(0.001);
-        out.kick = (kick_flux / self.kick_max).clamp(0.0, 1.0);
+        let kick = (kick_flux / self.kick_max).clamp(0.0, 1.0);
         self.prev_kick_flux = kick_flux;
 
         // Spectral features (from large FFT for best frequency resolution)
         let centroid_hz = self.spectral_centroid();
-        out.centroid = centroid_hz / (self.sample_rate * 0.5);
 
-        out.flux = self.spectral_flux();
-
-        out.flatness = self.spectral_flatness();
-
-        out.rolloff = self.spectral_rolloff() / (self.sample_rate * 0.5);
-
-        out.bandwidth = (self.spectral_bandwidth(centroid_hz) / (self.sample_rate * 0.5)).min(1.0);
-
-        out.zcr = self.zero_crossing_rate();
+        let mut out = AudioFeatures {
+            // 7-band energy extraction:
+            // Bass bands (linear RMS) — from large FFT
+            sub_bass: self.large.band_energy_linear(20.0, 60.0),
+            bass: self.large.band_energy_linear(60.0, 250.0),
+            // Mid bands (linear) — from medium FFT
+            low_mid: self.medium.band_energy_linear(250.0, 500.0),
+            mid: self.medium.band_energy_linear(500.0, 2000.0),
+            upper_mid: self.medium.band_energy_db(2000.0, 4000.0),
+            // High bands (dB-scaled) — from small FFT
+            presence: self.small.band_energy_db(4000.0, 6000.0),
+            brilliance: self.small.band_energy_db(6000.0, 20000.0),
+            rms,
+            kick,
+            centroid: centroid_hz / (self.sample_rate * 0.5),
+            flux: self.spectral_flux(),
+            flatness: self.spectral_flatness(),
+            rolloff: self.spectral_rolloff() / (self.sample_rate * 0.5),
+            bandwidth: (self.spectral_bandwidth(centroid_hz) / (self.sample_rate * 0.5)).min(1.0),
+            zcr: self.zero_crossing_rate(),
+            ..Default::default()
+        };
 
         // MFCC extraction (from large FFT magnitude)
         self.compute_mfccs(&mut out);

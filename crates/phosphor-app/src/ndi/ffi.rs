@@ -64,8 +64,11 @@ pub struct NdiLib {
     pub fn_send_video: FnSendVideo,
 }
 
-// Safety: NdiLib only stores function pointers and a library handle, all thread-safe.
+// SAFETY: NdiLib only stores function pointers (Copy, inherently thread-safe) and a
+// library handle. The function pointers are valid for the lifetime of _lib.
+// SAFETY: NDI SDK functions are documented as thread-safe.
 unsafe impl Send for NdiLib {}
+// SAFETY: NDI SDK functions are documented as thread-safe.
 unsafe impl Sync for NdiLib {}
 
 impl NdiLib {
@@ -74,6 +77,9 @@ impl NdiLib {
         let mut diagnostics = Vec::new();
         let lib = load_ndi_library(&mut diagnostics)?;
 
+        // SAFETY: Loading symbols from the NDI shared library via dlsym. Symbol names
+        // are null-terminated and match the NDI SDK's exported C API. The returned function
+        // pointers are valid as long as `lib` (moved into Self._lib) is alive.
         unsafe {
             let fn_initialize: FnInitialize = *lib
                 .get::<FnInitialize>(b"NDIlib_initialize\0")
@@ -111,7 +117,8 @@ pub struct NdiSender {
     _source_name: CString,
 }
 
-// Safety: NDI sender is thread-safe per NDI SDK documentation.
+// SAFETY: NDI sender is thread-safe per NDI SDK documentation. The send instance
+// is only used from the sender thread after creation.
 unsafe impl Send for NdiSender {}
 
 impl NdiSender {
@@ -119,6 +126,7 @@ impl NdiSender {
     pub fn new(source_name: &str) -> Result<Self, String> {
         let lib = NdiLib::load()?;
 
+        // SAFETY: NDI SDK initialization via FFI. Called once before any other NDI calls.
         let ok = unsafe { (lib.fn_initialize)() };
         if !ok {
             return Err("NDIlib_initialize failed".into());
@@ -133,8 +141,11 @@ impl NdiSender {
             clock_audio: false,
         };
 
+        // SAFETY: fn_send_create takes a pointer to a repr(C) struct with valid c_name pointer.
+        // We check for null return before using the instance.
         let instance = unsafe { (lib.fn_send_create)(&create) };
         if instance.is_null() {
+            // SAFETY: Cleaning up NDI after failed sender creation.
             unsafe { (lib.fn_destroy)() };
             return Err("NDIlib_send_create failed".into());
         }
@@ -165,6 +176,9 @@ impl NdiSender {
             p_metadata: std::ptr::null(),
             timestamp: 0,
         };
+        // SAFETY: instance is a valid NDI sender (checked non-null at creation).
+        // frame is a repr(C) struct with valid data pointer and correct dimensions.
+        // data.as_ptr() is valid for width * height * 4 bytes (BGRA).
         unsafe { (self.lib.fn_send_video)(self.instance, &frame) };
     }
 }
@@ -172,8 +186,12 @@ impl NdiSender {
 impl Drop for NdiSender {
     fn drop(&mut self) {
         if !self.instance.is_null() {
+            // SAFETY: instance was obtained from fn_send_create and is non-null.
+            // fn_send_destroy is called exactly once (in Drop).
             unsafe { (self.lib.fn_send_destroy)(self.instance) };
         }
+        // SAFETY: fn_destroy balances the fn_initialize call in NdiSender::new().
+        // Called after fn_send_destroy, per NDI SDK teardown order.
         unsafe { (self.lib.fn_destroy)() };
         log::info!("NDI sender destroyed");
     }
@@ -237,6 +255,8 @@ fn try_load_from_dir(
 ) -> Option<libloading::Library> {
     for name in platform_lib_names() {
         let full = dir.join(name);
+        // SAFETY: Loading a shared library via dlopen. The path points to the NDI
+        // runtime library. The library's global constructors (if any) run on load.
         match unsafe { libloading::Library::new(&full) } {
             Ok(lib) => {
                 log::info!("NDI library loaded from {}", full.display());
@@ -316,6 +336,8 @@ fn load_ndi_library(diagnostics: &mut Vec<String>) -> Result<libloading::Library
     // 3. Bare library names via system linker (LD_LIBRARY_PATH, /usr/lib, etc.).
     diagnostics.push("system linker search".to_string());
     for name in platform_lib_names() {
+        // SAFETY: Loading a shared library by name via the system linker (dlopen with
+        // bare name). The system linker searches LD_LIBRARY_PATH, /usr/lib, etc.
         match unsafe { libloading::Library::new(name) } {
             Ok(lib) => return Ok(lib),
             Err(e) => {

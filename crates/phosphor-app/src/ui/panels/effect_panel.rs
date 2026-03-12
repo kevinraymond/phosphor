@@ -150,9 +150,7 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = gap;
 
-        let current = loader
-            .current_effect
-            .and_then(|i| loader.effects.get(i));
+        let current = loader.current_effect.and_then(|i| loader.effects.get(i));
         let can_copy = current.map_or(false, |e| !e.hidden);
         let is_user = current.map_or(false, |e| !EffectLoader::is_builtin(e));
 
@@ -160,13 +158,11 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
         if ui
             .add_enabled(
                 can_copy,
-                egui::Button::new(RichText::new("Copy").size(SMALL_SIZE).color(
-                    if can_copy {
-                        tc.text_primary
-                    } else {
-                        tc.text_secondary
-                    },
-                ))
+                egui::Button::new(RichText::new("Copy").size(SMALL_SIZE).color(if can_copy {
+                    tc.text_primary
+                } else {
+                    tc.text_secondary
+                }))
                 .fill(tc.card_bg)
                 .stroke(Stroke::new(1.0, tc.card_border))
                 .corner_radius(CornerRadius::same(4)),
@@ -182,13 +178,11 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
         if ui
             .add_enabled(
                 is_user,
-                egui::Button::new(RichText::new("Edit").size(SMALL_SIZE).color(
-                    if is_user {
-                        tc.text_primary
-                    } else {
-                        tc.text_secondary
-                    },
-                ))
+                egui::Button::new(RichText::new("Edit").size(SMALL_SIZE).color(if is_user {
+                    tc.text_primary
+                } else {
+                    tc.text_secondary
+                }))
                 .fill(tc.card_bg)
                 .stroke(Stroke::new(1.0, tc.card_border))
                 .corner_radius(CornerRadius::same(4)),
@@ -236,7 +230,11 @@ fn type_tooltip(et: EffectType) -> &'static str {
 fn draw_type_legend(ui: &mut Ui, tc: &crate::ui::theme::colors::ThemeColors) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
-        for et in [EffectType::Shader, EffectType::Particle, EffectType::Feedback] {
+        for et in [
+            EffectType::Shader,
+            EffectType::Particle,
+            EffectType::Feedback,
+        ] {
             let color = type_color(et);
             let resp = ui
                 .horizontal(|ui| {
@@ -315,10 +313,8 @@ fn draw_effect_grid(
                 let rect = response.rect;
 
                 // Left type color strip (3px)
-                let strip_rect = Rect::from_min_size(
-                    rect.left_top(),
-                    Vec2::new(3.0, rect.height()),
-                );
+                let strip_rect =
+                    Rect::from_min_size(rect.left_top(), Vec2::new(3.0, rect.height()));
                 let strip_alpha = if is_current || is_armed { 1.0 } else { 0.6 };
                 let strip_color = Color32::from_rgba_unmultiplied(
                     et_color.r(),
@@ -350,8 +346,7 @@ fn draw_effect_grid(
                         if is_current { 230 } else { 128 },
                     )
                 };
-                let badge_pos =
-                    egui::pos2(rect.right() - 14.0, rect.center().y);
+                let badge_pos = egui::pos2(rect.right() - 14.0, rect.center().y);
                 ui.painter().text(
                     badge_pos,
                     egui::Align2::LEFT_CENTER,
@@ -416,14 +411,19 @@ fn draw_footer(
     user: &[(usize, &PfxEffect)],
     tc: &crate::ui::theme::colors::ThemeColors,
 ) {
-    let all: Vec<&PfxEffect> = builtin
+    let all: Vec<&PfxEffect> = builtin.iter().chain(user.iter()).map(|(_, e)| *e).collect();
+    let sh = all
         .iter()
-        .chain(user.iter())
-        .map(|(_, e)| *e)
-        .collect();
-    let sh = all.iter().filter(|e| e.effect_type() == EffectType::Shader).count();
-    let ps = all.iter().filter(|e| e.effect_type() == EffectType::Particle).count();
-    let fb = all.iter().filter(|e| e.effect_type() == EffectType::Feedback).count();
+        .filter(|e| e.effect_type() == EffectType::Shader)
+        .count();
+    let ps = all
+        .iter()
+        .filter(|e| e.effect_type() == EffectType::Particle)
+        .count();
+    let fb = all
+        .iter()
+        .filter(|e| e.effect_type() == EffectType::Feedback)
+        .count();
 
     ui.add_space(4.0);
     ui.separator();

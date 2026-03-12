@@ -147,18 +147,13 @@ pub fn decode_all_frames(
     let mut delays_ms = Vec::with_capacity(est_frames);
     let mut buf = vec![0u8; frame_size];
 
-    loop {
-        match stdout.read_exact(&mut buf) {
-            Ok(()) => {
-                frames.push(DecodedFrame {
-                    data: buf.clone(),
-                    width: meta.width,
-                    height: meta.height,
-                });
-                delays_ms.push(delay_ms.max(1));
-            }
-            Err(_) => break, // EOF
-        }
+    while stdout.read_exact(&mut buf).is_ok() {
+        frames.push(DecodedFrame {
+            data: buf.clone(),
+            width: meta.width,
+            height: meta.height,
+        });
+        delays_ms.push(delay_ms.max(1));
     }
 
     let _ = child.wait();

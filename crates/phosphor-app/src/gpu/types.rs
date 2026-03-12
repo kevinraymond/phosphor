@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Output resolution for capture targets (NDI, recording).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OutputResolution {
+    #[default]
     Match,
     Res720p,
     Res1080p,
@@ -37,12 +38,6 @@ impl OutputResolution {
             OutputResolution::Res4K => "4K",
             OutputResolution::Res8K => "8K",
         }
-    }
-}
-
-impl Default for OutputResolution {
-    fn default() -> Self {
-        OutputResolution::Match
     }
 }
 

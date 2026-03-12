@@ -97,11 +97,8 @@ pub(crate) fn draw_section_arrow_sized(ui: &mut Ui, is_open: bool, color: Color3
             pos2(c.x - half * 0.5, c.y + half),
         ]
     };
-    ui.painter().add(Shape::convex_polygon(
-        points,
-        color,
-        Stroke::NONE,
-    ));
+    ui.painter()
+        .add(Shape::convex_polygon(points, color, Stroke::NONE));
 }
 
 /// Collapsible section with card styling and custom header content (e.g. status dots).

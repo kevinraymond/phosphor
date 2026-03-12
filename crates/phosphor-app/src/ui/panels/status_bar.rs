@@ -40,6 +40,8 @@ fn fixed_value(ui: &mut Ui, text: &str, width: f32, color: Color32) {
 /// Duration to show status errors before auto-clearing.
 const ERROR_DISPLAY_SECS: f64 = 6.0;
 
+// UI status bar function requires multiple bool flags for indicator states
+#[allow(clippy::fn_params_excessive_bools)]
 pub fn draw_status_bar(
     ui: &mut Ui,
     shader_error: &Option<String>,
@@ -144,8 +146,7 @@ pub fn draw_status_bar(
                 } else {
                     OFF
                 };
-                let (rect, _) =
-                    ui.allocate_exact_size(Vec2::new(8.0, 8.0), egui::Sense::hover());
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), egui::Sense::hover());
                 ui.painter().circle_filled(rect.center(), 3.0, color);
             }
             label(ui, "WEB");
@@ -160,8 +161,7 @@ pub fn draw_status_bar(
                 } else {
                     OFF
                 };
-                let (rect, _) =
-                    ui.allocate_exact_size(Vec2::new(8.0, 8.0), egui::Sense::hover());
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), egui::Sense::hover());
                 ui.painter().circle_filled(rect.center(), 3.0, color);
             }
             label(ui, "OSC");
@@ -176,8 +176,7 @@ pub fn draw_status_bar(
                 } else {
                     OFF
                 };
-                let (rect, _) =
-                    ui.allocate_exact_size(Vec2::new(8.0, 8.0), egui::Sense::hover());
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), egui::Sense::hover());
                 ui.painter().circle_filled(rect.center(), 3.0, color);
             }
             label(ui, "MIDI");

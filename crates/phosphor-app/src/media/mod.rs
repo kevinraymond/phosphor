@@ -55,18 +55,12 @@ impl WebcamBackend {
     }
 
     /// Start capture using the native (nokhwa) backend.
-    pub fn start_native(
-        device_index: u32,
-        resolution: Option<(u32, u32)>,
-    ) -> Result<Self, String> {
+    pub fn start_native(device_index: u32, resolution: Option<(u32, u32)>) -> Result<Self, String> {
         webcam::WebcamCapture::start(device_index, resolution).map(Self::Native)
     }
 
     /// Start capture using the ffmpeg backend.
-    pub fn start_ffmpeg(
-        device_name: &str,
-        resolution: Option<(u32, u32)>,
-    ) -> Result<Self, String> {
+    pub fn start_ffmpeg(device_name: &str, resolution: Option<(u32, u32)>) -> Result<Self, String> {
         webcam_ffmpeg::FfmpegCapture::start(device_name, resolution).map(Self::Ffmpeg)
     }
 }
@@ -153,12 +147,11 @@ impl MediaLayer {
             MediaSource::Live { .. } => 0.0,
         };
 
-        let mut transport = TransportState::default();
-        transport.duration = duration;
-        // Static images and live sources don't use transport playback
-        if !source.is_animated() {
-            transport.playing = false;
-        }
+        let transport = TransportState {
+            duration,
+            playing: source.is_animated(),
+            ..Default::default()
+        };
 
         // Create frame texture (sRGB for auto-conversion on sample)
         let frame_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -506,11 +499,16 @@ impl MediaLayer {
         // Recompute letterbox
         let mirror = {
             #[cfg(feature = "webcam")]
-            { self.mirror }
+            {
+                self.mirror
+            }
             #[cfg(not(feature = "webcam"))]
-            { false }
+            {
+                false
+            }
         };
-        let uniforms = compute_media_uniforms(self.media_width, self.media_height, width, height, mirror);
+        let uniforms =
+            compute_media_uniforms(self.media_width, self.media_height, width, height, mirror);
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
 
         // Rebuild bind group (output_target view changed but frame texture/sampler/uniform didn't)

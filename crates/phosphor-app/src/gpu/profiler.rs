@@ -35,11 +35,7 @@ impl Profiler {
 
     /// Render the profiling panel into egui.
     pub fn ui(&self, ui: &mut egui::Ui) {
-        ui.label(
-            egui::RichText::new("GPU Timings")
-                .strong()
-                .size(14.0),
-        );
+        ui.label(egui::RichText::new("GPU Timings").strong().size(14.0));
         if self.latest_timings.is_empty() {
             ui.label("No GPU timing data (timestamps may not be supported)");
             return;

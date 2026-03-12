@@ -141,11 +141,7 @@ pub fn draw_osc_panel(ui: &mut Ui, osc: &mut OscSystem) {
 
     // Triggers
     ui.add_space(4.0);
-    ui.label(
-        RichText::new("TRIGGERS")
-            .size(8.0)
-            .color(tc.text_secondary),
-    );
+    ui.label(RichText::new("TRIGGERS").size(8.0).color(tc.text_secondary));
     ui.add_space(2.0);
 
     let half = ui.available_width() / 2.0;
@@ -250,7 +246,10 @@ pub fn draw_osc_badge(ui: &mut Ui, osc: &mut OscSystem, param_name: &str) {
         let mapping = &osc.config.params[param_name];
         let label = abbreviate_address(&mapping.address);
         let resp = ui
-            .add(egui::Button::new(RichText::new(&label).color(OSC_GREEN).size(9.0)).min_size(badge_min))
+            .add(
+                egui::Button::new(RichText::new(&label).color(OSC_GREEN).size(9.0))
+                    .min_size(badge_min),
+            )
             .on_hover_text(format!(
                 "{}\nClick to re-learn, right-click to clear",
                 mapping.address

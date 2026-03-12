@@ -394,13 +394,7 @@ pub fn draw_shader_editor(
                         } else {
                             state.paired_is_dirty()
                         };
-                        let pfx_label = if pfx_active && pfx_dirty {
-                            "Effect *"
-                        } else if !pfx_active && pfx_dirty {
-                            "Effect *"
-                        } else {
-                            "Effect"
-                        };
+                        let pfx_label = if pfx_dirty { "Effect *" } else { "Effect" };
                         let pfx_btn = ui.add(
                             egui::Button::new(RichText::new(pfx_label).size(12.0).color(
                                 if pfx_active {

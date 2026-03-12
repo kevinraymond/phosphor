@@ -82,12 +82,6 @@ fn default_true() -> bool {
     true
 }
 
-impl Default for BlendMode {
-    fn default() -> Self {
-        BlendMode::Normal
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preset {
     pub layers: Vec<LayerPreset>,
@@ -97,6 +91,7 @@ pub struct Preset {
     pub postprocess: PostProcessDef,
 }
 
+#[derive(Default)]
 pub struct PresetStore {
     pub presets: Vec<(String, Preset)>,
     pub current_preset: Option<usize>,
@@ -107,12 +102,7 @@ pub struct PresetStore {
 
 impl PresetStore {
     pub fn new() -> Self {
-        Self {
-            presets: Vec::new(),
-            current_preset: None,
-            dirty: false,
-            builtin_count: 0,
-        }
+        Self::default()
     }
 
     /// Returns true if the preset at `index` is a built-in preset.
@@ -618,10 +608,7 @@ mod tests {
         }"#;
         let lp: LayerPreset = serde_json::from_str(json).unwrap();
         assert!(lp.particle_image_path.is_none());
-        assert_eq!(
-            lp.particle_video_path,
-            Some("/tmp/fire.mp4".to_string())
-        );
+        assert_eq!(lp.particle_video_path, Some("/tmp/fire.mp4".to_string()));
     }
 
     #[test]

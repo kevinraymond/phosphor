@@ -67,12 +67,19 @@ struct PulseLib {
     pa_strerror: unsafe extern "C" fn(error: c_int) -> *const c_char,
 }
 
-// Safety: pa_simple is only accessed from the capture thread after creation.
+// SAFETY: PulseLib stores function pointers and library handles. The function pointers
+// are valid for the lifetime of the loaded libraries (held by _lib_simple/_lib_pulse).
+// pa_simple is only accessed from the capture thread after creation.
 unsafe impl Send for PulseLib {}
+// SAFETY: See above — function pointers are inherently Sync (read-only after load).
 unsafe impl Sync for PulseLib {}
 
 impl PulseLib {
     fn load() -> Result<Self> {
+        // SAFETY: Loading shared libraries and resolving symbols via dlopen/dlsym.
+        // The returned function pointers are valid as long as _lib_simple and _lib_pulse
+        // are kept alive (stored in Self). Symbol names are null-terminated and match
+        // the PulseAudio Simple API.
         unsafe {
             // Load libpulse first (libpulse-simple depends on it)
             let lib_pulse = Library::new("libpulse.so.0")
@@ -121,6 +128,8 @@ impl PulseLib {
     }
 
     fn strerror(&self, error: c_int) -> String {
+        // SAFETY: pa_strerror returns a static string pointer valid for the library's lifetime.
+        // We check for null before dereferencing.
         unsafe {
             let ptr = (self.pa_strerror)(error);
             if ptr.is_null() {
@@ -136,6 +145,7 @@ impl PulseLib {
 #[allow(dead_code)]
 pub fn pulse_available() -> bool {
     static AVAILABLE: OnceLock<bool> = OnceLock::new();
+    // SAFETY: Library::new calls dlopen, which is safe to call to probe for library availability.
     *AVAILABLE.get_or_init(|| unsafe {
         Library::new("libpulse-simple.so.0").is_ok() && Library::new("libpulse.so.0").is_ok()
     })
@@ -203,14 +213,17 @@ fn open_connection(
 
     let monitor_device = find_monitor_source();
 
-    let c_app = CString::new(app_name).unwrap();
-    let c_stream = CString::new(stream_desc).unwrap();
-    let c_dev = monitor_device
-        .as_ref()
-        .map(|s| CString::new(s.as_str()).unwrap());
+    let c_app = CString::new(app_name).expect("app name must not contain null bytes");
+    let c_stream = CString::new(stream_desc).expect("stream desc must not contain null bytes");
+    let c_dev = monitor_device.as_ref().map(|s| {
+        CString::new(s.as_str()).expect("PulseAudio device name must not contain null bytes")
+    });
     let dev_ptr = c_dev.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
 
     let mut error: c_int = 0;
+    // SAFETY: Calling pa_simple_new via FFI. All CString pointers are valid for the
+    // duration of this call. The spec and attr structs are repr(C) with correct layout.
+    // We check for null return (error) before using the handle.
     let handle = unsafe {
         (lib.pa_simple_new)(
             std::ptr::null(), // default server
@@ -239,6 +252,7 @@ fn open_connection(
 
     // Log actual latency if available
     let mut lat_err: c_int = 0;
+    // SAFETY: handle is non-null (checked above). pa_simple_get_latency is a simple query.
     let latency_us = unsafe { (lib.pa_simple_get_latency)(handle, &mut lat_err) };
     if lat_err == 0 {
         log::info!(
@@ -323,6 +337,9 @@ struct SimpleHandle {
     free_fn: unsafe extern "C" fn(*mut pa_simple),
 }
 
+// SAFETY: SimpleHandle stores a pa_simple pointer as usize. The pointer is only used
+// from a single thread (the capture thread) after construction. The free_fn is called
+// once on drop.
 unsafe impl Send for SimpleHandle {}
 
 impl SimpleHandle {
@@ -339,6 +356,8 @@ impl SimpleHandle {
 
 impl Drop for SimpleHandle {
     fn drop(&mut self) {
+        // SAFETY: self.ptr was obtained from pa_simple_new (non-null, valid).
+        // free_fn is pa_simple_free, which is safe to call once on a valid handle.
         unsafe { (self.free_fn)(self.as_ptr()) };
     }
 }
@@ -383,6 +402,8 @@ impl PulseCapture {
 
                         let t0 = Instant::now();
                         let mut error: c_int = 0;
+                        // SAFETY: pa_simple_read FFI call. simple.as_ptr() is a valid
+                        // pa_simple handle. buf is a valid, correctly-sized buffer.
                         let ret = unsafe {
                             (read_fn)(
                                 simple.as_ptr(),
@@ -393,6 +414,8 @@ impl PulseCapture {
                         };
 
                         if ret < 0 {
+                            // SAFETY: pa_strerror returns a static string pointer.
+                            // We check for null before dereferencing.
                             let msg = unsafe {
                                 let ptr = (strerror_fn)(error);
                                 if ptr.is_null() {
@@ -488,6 +511,8 @@ impl PulseCapture {
         while Instant::now() < deadline {
             let t0 = Instant::now();
             let mut error: c_int = 0;
+            // SAFETY: pa_simple_read FFI call. simple holds a valid pa_simple handle.
+            // buf is correctly sized for FRAG_BYTES of f32 data.
             let ret = unsafe {
                 (lib.pa_simple_read)(
                     simple.as_ptr(),

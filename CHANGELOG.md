@@ -9,6 +9,24 @@
 - **Cargo.toml metadata** — added `description`, `repository`, `readme`, `publish` fields to member crate
 - **CI format check** — added `cargo fmt --all -- --check` job to CI workflow
 - **Dependency auditing** — added `deny.toml` and `cargo-deny` CI job for license compliance and vulnerability scanning
+- **Direct video recording** — record Phosphor output directly to MP4/MKV via FFmpeg subprocess with NVENC hardware encoding (auto-fallback to CPU encoders). Supports H.264, HEVC, and AV1 codecs up to 8K resolution at 30/60 FPS with configurable CQ quality. Includes audio capture from the active audio input (muxed as AAC via named FIFO). Recording runs independently alongside NDI output. New "Outputs" subsection in Settings panel with record button, codec/resolution/FPS/quality/audio controls, and live status display (duration, file size, encoder info). No new crate dependencies — uses the same subprocess pattern as the FFmpeg webcam backend.
+- **Shared FrameCapture** — extracted double-buffered GPU readback from `NdiCapture` into `gpu::frame_capture::FrameCapture`, reused by both NDI and recording systems
+- **OutputResolution::Res8K** — 7680x4320 output resolution option for both NDI and recording
+- **OutputResolution moved to `gpu::types`** — shared by NDI and recording modules (NDI re-exports for backwards compatibility)
+
+### Changed
+- **Background shader compilation** — shader hot-reload (fragment + compute) now compiles on a dedicated background thread instead of blocking the main render loop. Eliminates 50-500ms frame hitches when saving `.wgsl` files during development. Old pipeline continues rendering while the new one compiles; swap is atomic on completion.
+- **Error handling sweep** — replaced all runtime `.unwrap()` calls with `.expect("reason")` documenting invariants (mutex locks, container access, thread spawns). Added `// SAFETY:` comments to all 22 unsafe blocks across FFI bindings (WASAPI, PulseAudio, JACK, NDI, ALSA) and internal unsafe code (ring buffer, pipeline cache). Enabled `clippy::undocumented_unsafe_blocks` lint to prevent future regressions.
+- **Idiomatic Rust pass** — eliminated per-frame allocations and unnecessary clones across the hot path:
+  - `ParamStore::split_borrow()` for disjoint field access (removes 3× `defs.clone()` per frame in MIDI/OSC/WS update paths)
+  - `PlaybackState` now derives `Copy` (removes `state.clone()` per frame in timeline tick)
+  - Binding bus: snapshot moved instead of cloned; `HashMap::get_mut` fast-path for runtime lookup (avoids `binding.id.clone()` per enabled binding per frame)
+  - Match on `&ParamDef` / `&TransformDef` references instead of cloning owned values
+  - PFX hot-reload: `new_effect` moved instead of cloned; `old_effect` borrow replaces full clone
+  - Shader hot-reload: effect borrowed from loader instead of cloned
+  - Added `#[derive(Debug)]` to `BindingRuntime`, `LearnState`, `BindingTemplate`, `TemplateEntry`, `NdiFrame`, `PresetDecodeRequest`, `DepthFrame`; `Default`+`Clone` on `BindingRuntime`
+  - `builtin_raster_images()` returns `&'static [String]` instead of `&'static Vec<String>`
+  - MIDI panel: port selection deferred to after iteration (avoids `available_ports.clone()`)
 
 ### Fixed
 - **Accretion drift** -- N-body simulation no longer drifts off-screen over time. Nonlinear centering force (gentle at origin, strong near edges), center-biased seed spawning, and tighter boundary kill prevent compounding center-of-mass shift

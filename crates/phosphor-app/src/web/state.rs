@@ -132,11 +132,14 @@ pub struct PresetsChanged {
 
 // -- Builders --
 
+/// Per-layer tuple: (params, effect_index, blend_mode, opacity, enabled, locked).
+pub type LayerTuple<'a> = (&'a ParamStore, Option<usize>, BlendMode, f32, bool, bool);
+
 pub fn build_full_state(
     effects: &[PfxEffect],
     layer_infos: &[LayerInfo],
     active_layer: usize,
-    layers: &[(&ParamStore, Option<usize>, BlendMode, f32, bool, bool)],
+    layers: &[LayerTuple<'_>],
     preset_store: &PresetStore,
     postprocess_enabled: bool,
 ) -> String {
@@ -363,8 +366,10 @@ mod tests {
 
     #[test]
     fn audio_snapshot_raw_bpm() {
-        let mut f = AudioFeatures::default();
-        f.bpm = 0.4; // normalized, display = 120 BPM
+        let f = AudioFeatures {
+            bpm: 0.4, // normalized, display = 120 BPM
+            ..Default::default()
+        };
         let json = build_audio_snapshot(&f);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let bpm = v["bpm"].as_f64().unwrap();

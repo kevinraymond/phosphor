@@ -83,7 +83,8 @@ impl SymbiosisPreset {
             Self::Membrane => {
                 for i in 0..n {
                     for j in 0..n {
-                        let dist = ((j as i32 - i as i32).abs()).min(n as i32 - (j as i32 - i as i32).abs());
+                        let dist = ((j as i32 - i as i32).abs())
+                            .min(n as i32 - (j as i32 - i as i32).abs());
                         m[i * 8 + j] = if dist == 0 {
                             0.5
                         } else if dist == 1 {
@@ -174,7 +175,7 @@ impl SymbiosisState {
         let n = self.num_species as usize;
         for k in 0..count {
             let s = seed + k as f32 * 7.13;
-            let h = (s * 43758.5453).sin().fract().abs();
+            let h = (s * 43_758.547).sin().fract().abs();
             let i = (h * n as f32) as usize % n;
             let j = ((h * 31.7 + 0.3).fract() * n as f32) as usize % n;
             let val = (h * 97.3 + 0.7).fract() * 2.0 - 1.0;
@@ -191,7 +192,7 @@ impl SymbiosisState {
         for i in 0..n {
             for j in 0..n {
                 let s = seed + (i * 8 + j) as f32 * 3.17;
-                self.target_matrix[i * 8 + j] = (s * 43758.5453).sin().fract() * 2.0 - 1.0;
+                self.target_matrix[i * 8 + j] = (s * 43_758.547).sin().fract() * 2.0 - 1.0;
             }
         }
         self.interpolation_progress = 0.0;

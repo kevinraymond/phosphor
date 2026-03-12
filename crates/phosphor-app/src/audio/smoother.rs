@@ -302,9 +302,11 @@ mod tests {
     #[test]
     fn beat_and_beat_phase_bypass() {
         let mut smoother = FeatureSmoother::new();
-        let mut raw = AudioFeatures::default();
-        raw.beat = 1.0;
-        raw.beat_phase = 0.75;
+        let raw = AudioFeatures {
+            beat: 1.0,
+            beat_phase: 0.75,
+            ..Default::default()
+        };
         let out = smoother.smooth(&raw, 0.01);
         assert!(approx_eq(out.beat, 1.0, 1e-6));
         assert!(approx_eq(out.beat_phase, 0.75, 1e-6));
@@ -313,9 +315,11 @@ mod tests {
     #[test]
     fn fast_attack_rising_signal() {
         let mut smoother = FeatureSmoother::new();
-        let mut raw = AudioFeatures::default();
-        // sub_bass attack = 0.02s
-        raw.sub_bass = 1.0;
+        let raw = AudioFeatures {
+            // sub_bass attack = 0.02s
+            sub_bass: 1.0,
+            ..Default::default()
+        };
         let out = smoother.smooth(&raw, 0.02);
         // After one frame at dt=attack_tau, alpha ≈ 1-1/e ≈ 0.632, so output ≈ 0.632
         assert!(out.sub_bass > 0.5, "got {}", out.sub_bass);
@@ -324,9 +328,11 @@ mod tests {
     #[test]
     fn slow_release_falling_signal() {
         let mut smoother = FeatureSmoother::new();
-        let mut raw = AudioFeatures::default();
-        // Prime with high value
-        raw.sub_bass = 1.0;
+        let mut raw = AudioFeatures {
+            // Prime with high value
+            sub_bass: 1.0,
+            ..Default::default()
+        };
         for _ in 0..100 {
             smoother.smooth(&raw, 0.001);
         }
@@ -340,9 +346,11 @@ mod tests {
     #[test]
     fn dt_zero_no_change() {
         let mut smoother = FeatureSmoother::new();
-        let mut raw = AudioFeatures::default();
-        // Prime with many frames so state converges to 0.5
-        raw.rms = 0.5;
+        let mut raw = AudioFeatures {
+            // Prime with many frames so state converges to 0.5
+            rms: 0.5,
+            ..Default::default()
+        };
         for _ in 0..500 {
             smoother.smooth(&raw, 0.01);
         }
@@ -357,8 +365,10 @@ mod tests {
     #[test]
     fn steady_state_converges() {
         let mut smoother = FeatureSmoother::new();
-        let mut raw = AudioFeatures::default();
-        raw.mid = 0.7;
+        let raw = AudioFeatures {
+            mid: 0.7,
+            ..Default::default()
+        };
         let mut last = 0.0;
         for _ in 0..1000 {
             let out = smoother.smooth(&raw, 0.01);
@@ -370,10 +380,12 @@ mod tests {
     #[test]
     fn all_features_finite() {
         let mut smoother = FeatureSmoother::new();
-        let mut raw = AudioFeatures::default();
-        raw.sub_bass = 0.5;
-        raw.rms = 0.3;
-        raw.onset = 0.8;
+        let raw = AudioFeatures {
+            sub_bass: 0.5,
+            rms: 0.3,
+            onset: 0.8,
+            ..Default::default()
+        };
         let out = smoother.smooth(&raw, 0.016);
         for v in out.as_slice() {
             assert!(v.is_finite(), "non-finite value found");

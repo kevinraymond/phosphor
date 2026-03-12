@@ -250,7 +250,7 @@ pub fn generate_geometry(shape: &str, max_particles: u32, particle_size: f32) ->
             for i in 0..n {
                 let gx = (i % side) as f32 / side as f32 * 2.0 - 1.0;
                 let gy = (i / side) as f32 / side as f32 * 2.0 - 1.0;
-                let checker = ((i % side) + (i / side)) % 2 == 0;
+                let checker = ((i % side) + (i / side)).is_multiple_of(2);
                 let packed = if checker {
                     pack_color_for_density(0.9, 0.5, 0.2, nu, area, ps)
                 } else {
@@ -423,7 +423,9 @@ pub fn load_video_morph_targets(
         return Vec::new();
     }
 
-    let num_frames = (available_slots as usize).min(MORPH_MAX_TARGETS as usize).min(frames.len());
+    let num_frames = (available_slots as usize)
+        .min(MORPH_MAX_TARGETS as usize)
+        .min(frames.len());
     let sample_def = ImageSampleDef {
         mode: "grid".to_string(),
         threshold: 0.1,
@@ -479,7 +481,7 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
 }
 
 fn hash_f32(n: f32) -> f32 {
-    (n * 43758.5453).sin().fract().abs()
+    (n * 43_758.547).sin().fract().abs()
 }
 
 /// Pack RGB with alpha computed from expected particle overlap density.

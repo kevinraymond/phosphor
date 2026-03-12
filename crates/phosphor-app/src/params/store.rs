@@ -56,6 +56,12 @@ impl ParamStore {
         self.changed = true;
     }
 
+    /// Borrow defs, values, and changed flag as disjoint fields.
+    /// Avoids cloning defs when callers need `&[ParamDef]` + `&mut values` simultaneously.
+    pub fn split_borrow(&mut self) -> (&[ParamDef], &mut HashMap<String, ParamValue>, &mut bool) {
+        (&self.defs, &mut self.values, &mut self.changed)
+    }
+
     pub fn set(&mut self, name: &str, value: ParamValue) {
         self.values.insert(name.to_string(), value);
         self.changed = true;
