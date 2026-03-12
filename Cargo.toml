@@ -12,7 +12,9 @@ opt-level = 1
 opt-level = 2
 
 [profile.release]
-lto = "thin"
+# Fat LTO: modest benefit for this GPU-bound app (helps CPU-side egui/audio),
+# but increases compile time significantly vs "thin".
+lto = "fat"
 codegen-units = 1
 
 [workspace.lints.clippy]
@@ -63,6 +65,8 @@ cast_possible_wrap = "allow"
 assigning_clones = "allow"
 cloned_instead_of_copied = "allow"
 ref_option = "allow"
+# Require SAFETY comments on all unsafe blocks
+undocumented_unsafe_blocks = "warn"
 
 [patch.crates-io]
 midir = { path = "patches/midir" }

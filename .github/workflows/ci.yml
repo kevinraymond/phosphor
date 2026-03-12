@@ -21,6 +21,24 @@ permissions:
   contents: write
 
 jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  deny:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deny check
+        uses: EmbarkStudios/cargo-deny-action@v2
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -127,7 +145,7 @@ jobs:
 
   tag-release:
     name: Tag release if version changed
-    needs: [lint, test, build]
+    needs: [fmt, deny, lint, test, build]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:

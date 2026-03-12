@@ -4,6 +4,10 @@ version = "1.7.0"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
+description = "Real-time audio-reactive particle and shader engine for live performance"
+repository = "https://github.com/kevinraymond/phosphor"
+readme = "../../README.md"
+publish = false
 
 [dependencies]
 # GPU

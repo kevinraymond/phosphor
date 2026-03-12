@@ -6,10 +6,9 @@
 ## Unreleased
 
 ### Added
-- **Direct video recording** — record Phosphor output directly to MP4/MKV via FFmpeg subprocess with NVENC hardware encoding (auto-fallback to CPU encoders). Supports H.264, HEVC, and AV1 codecs up to 8K resolution at 30/60 FPS with configurable CQ quality. Includes audio capture from the active audio input (muxed as AAC via named FIFO). Recording runs independently alongside NDI output. New "Outputs" subsection in Settings panel with record button, codec/resolution/FPS/quality/audio controls, and live status display (duration, file size, encoder info). No new crate dependencies — uses the same subprocess pattern as the FFmpeg webcam backend.
-- **Shared FrameCapture** — extracted double-buffered GPU readback from `NdiCapture` into `gpu::frame_capture::FrameCapture`, reused by both NDI and recording systems
-- **OutputResolution::Res8K** — 7680x4320 output resolution option for both NDI and recording
-- **OutputResolution moved to `gpu::types`** — shared by NDI and recording modules (NDI re-exports for backwards compatibility)
+- **Cargo.toml metadata** — added `description`, `repository`, `readme`, `publish` fields to member crate
+- **CI format check** — added `cargo fmt --all -- --check` job to CI workflow
+- **Dependency auditing** — added `deny.toml` and `cargo-deny` CI job for license compliance and vulnerability scanning
 
 ### Fixed
 - **Accretion drift** -- N-body simulation no longer drifts off-screen over time. Nonlinear centering force (gentle at origin, strong near edges), center-biased seed spawning, and tighter boundary kill prevent compounding center-of-mass shift
