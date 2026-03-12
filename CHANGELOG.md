@@ -5,6 +5,8 @@
 
 ## Unreleased
 
+## v1.7.1 — 2026-03-12
+
 ### Fixed
 - **Binding matrix button** — clicking the "Matrix" button in the left panel now correctly opens the binding matrix (previously opened for one frame then immediately closed due to same-frame click-outside detection)
 - **Status bar hint** — added `B binding matrix` keyboard hint to the status bar
