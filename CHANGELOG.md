@@ -5,6 +5,10 @@
 
 ## Unreleased
 
+### Fixed
+- **Binding matrix button** — clicking the "Matrix" button in the left panel now correctly opens the binding matrix (previously opened for one frame then immediately closed due to same-frame click-outside detection)
+- **Status bar hint** — added `B binding matrix` keyboard hint to the status bar
+
 ### Added
 - **Cargo.toml metadata** — added `description`, `repository`, `readme`, `publish` fields to member crate
 - **CI format check** — added `cargo fmt --all -- --check` job to CI workflow
