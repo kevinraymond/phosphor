@@ -10,7 +10,7 @@
 | **Audio** | BPM detection · 7-band spectrum · 13 MFCC timbral features · 12 chroma pitch classes · Beat sync |
 | **Effects** | 23 built-in effects (particle sims, feedback shaders, reaction-diffusion, flocking, strange attractors, morphing) |
 | **Compositing** | 8-layer stack · 10 blend modes · Media layers (GIF/PNG/MP4) · Webcam layers · Monocular depth (MiDaS) |
-| **Control** | MIDI input with learn + auto-connect · OSC in/out with learn · Web touch surface (phone/tablet) |
+| **Control** | Binding matrix (flow editor) · MIDI learn + auto-connect · OSC in/out with learn · Web touch surface (phone/tablet) |
 | **Output** | NDI® (`--features ndi`, runtime-loaded) · Presets · Scene cues with timeline morphing |
 
 ## Note from Dev
@@ -73,9 +73,14 @@ On first launch: the UI fades in automatically after a couple seconds (or press 
 |-----|--------|
 | `D` | Toggle UI overlay |
 | `F` | Toggle fullscreen |
+| `B` | Open binding matrix |
 | `[` / `]` | Cycle active layer |
 | `Tab` | Cycle UI widgets |
 | `Esc` | Quit |
+
+### Binding Matrix
+
+Press **B** (or click "Matrix" in the left panel) to open the binding matrix — a full-screen flow editor for connecting any source to any target. Three columns show sources (left), active bindings (center), and targets (right) with animated Bezier connection lines. Sources include MIDI CCs, OSC addresses, audio features, and WebSocket bridges (e.g. MediaPipe hand/pose/face tracking, game controllers). Targets include all effect parameters, layer opacity/blend, particle settings, and post-processing controls.
 
 ### MIDI
 
