@@ -8,6 +8,7 @@ use crate::media::decoder::MediaSource;
 use crate::preset::Preset;
 
 /// Request sent to the background decode thread.
+#[derive(Debug)]
 pub struct PresetDecodeRequest {
     pub preset_index: usize,
     pub preset: Preset,
@@ -153,18 +154,13 @@ impl PresetLoader {
             };
 
             // Before starting work, drain any newer request that arrived
-            loop {
-                match request_rx.try_recv() {
-                    Ok(newer) => {
-                        log::debug!(
-                            "Preset loader: skipping gen {} for newer gen {}",
-                            request.generation,
-                            newer.generation
-                        );
-                        request = newer;
-                    }
-                    Err(_) => break,
-                }
+            while let Ok(newer) = request_rx.try_recv() {
+                log::debug!(
+                    "Preset loader: skipping gen {} for newer gen {}",
+                    request.generation,
+                    newer.generation
+                );
+                request = newer;
             }
 
             'decode: loop {

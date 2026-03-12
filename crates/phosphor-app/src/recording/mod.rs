@@ -141,7 +141,8 @@ impl RecordingSystem {
         let ffmpeg_audio = audio_fifo_info
             .as_ref()
             .map(|(path, sr)| (path.as_path(), *sr));
-        let child = encoder::spawn_ffmpeg(encoder_name, &self.config, w, h, &output_path, ffmpeg_audio)?;
+        let child =
+            encoder::spawn_ffmpeg(encoder_name, &self.config, w, h, &output_path, ffmpeg_audio)?;
 
         // Spawn encoder thread
         let (tx, rx) = crossbeam_channel::bounded(2);
@@ -182,7 +183,13 @@ impl RecordingSystem {
         };
 
         let audio_str = if has_audio { " +audio" } else { "" };
-        log::info!("Recording started: {}x{}{} → {}", w, h, audio_str, output_path.display());
+        log::info!(
+            "Recording started: {}x{}{} → {}",
+            w,
+            h,
+            audio_str,
+            output_path.display()
+        );
         Ok(output_path)
     }
 
@@ -247,7 +254,13 @@ impl RecordingSystem {
 
     /// Whether current recording includes audio.
     pub fn has_audio(&self) -> bool {
-        matches!(self.state, RecordingState::Recording { has_audio: true, .. })
+        matches!(
+            self.state,
+            RecordingState::Recording {
+                has_audio: true,
+                ..
+            }
+        )
     }
 
     /// Capture output dimensions.

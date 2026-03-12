@@ -8,25 +8,26 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::Result;
-use windows::core::Interface;
 use windows::Win32::Media::Audio::{
-    eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator,
-    MMDeviceEnumerator, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK,
-    WAVEFORMATEXTENSIBLE,
+    AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, IAudioCaptureClient, IAudioClient,
+    IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEXTENSIBLE, eConsole, eRender,
 };
 use windows::Win32::Media::Multimedia::KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
 use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
-    COINIT_MULTITHREADED, STGM_READ,
+    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+    CoUninitialize, STGM_READ,
 };
 use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
+use windows::core::Interface;
 
 use super::capture::RingBuffer;
 
 /// Check if WASAPI loopback is available at runtime. Cached.
 pub fn wasapi_available() -> bool {
     static AVAILABLE: OnceLock<bool> = OnceLock::new();
+    // SAFETY: COM APIs are FFI calls. CoInitializeEx/CoCreateInstance are safe to call
+    // from any thread; we balance CoInitializeEx with CoUninitialize when we initialized it.
     *AVAILABLE.get_or_init(|| unsafe {
         let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
         // Accept S_OK, S_FALSE, and RPC_E_CHANGED_MODE (0x80010106)
@@ -69,6 +70,9 @@ fn get_device_name(device: &windows::Win32::Media::Audio::IMMDevice) -> String {
     fn inner(
         device: &windows::Win32::Media::Audio::IMMDevice,
     ) -> std::result::Result<String, windows::core::Error> {
+        // SAFETY: Windows COM property store APIs are FFI calls. The device handle
+        // is valid (passed by reference from the caller). PropVariantToStringAlloc
+        // returns a valid PWSTR on success.
         unsafe {
             let store: IPropertyStore = device.OpenPropertyStore(STGM_READ)?;
             let prop = store.GetValue(&PKEY_Device_FriendlyName)?;
@@ -84,6 +88,9 @@ fn get_device_name(device: &windows::Win32::Media::Audio::IMMDevice) -> String {
 /// Query device info (name, sample rate, channels, etc.) with COM initialized.
 /// Caller must have called CoInitializeEx before this.
 fn query_device_info() -> Result<(String, u32, u16, u16, u16)> {
+    // SAFETY: Windows COM/WASAPI FFI calls. COM must be initialized before calling
+    // (ensured by caller via com_init()). We free the mix_format_ptr with CoTaskMemFree
+    // after reading its fields.
     unsafe {
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
@@ -109,6 +116,8 @@ fn query_device_info() -> Result<(String, u32, u16, u16, u16)> {
 /// Initialize COM, tolerating RPC_E_CHANGED_MODE (already initialized in another mode).
 /// Returns true if we initialized COM (and should call CoUninitialize), false if it was already init'd.
 fn com_init() -> Result<bool> {
+    // SAFETY: CoInitializeEx is safe to call from any thread. We handle all HRESULT
+    // return values including RPC_E_CHANGED_MODE (already initialized in another mode).
     unsafe {
         let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
         if hr.is_ok() {
@@ -119,7 +128,8 @@ fn com_init() -> Result<bool> {
             log::info!("COM already initialized (apartment-threaded), reusing");
             return Ok(false); // Already initialized, don't uninitialize
         }
-        hr.ok().map_err(|e| anyhow::anyhow!("COM init failed: {e}"))?;
+        hr.ok()
+            .map_err(|e| anyhow::anyhow!("COM init failed: {e}"))?;
         Ok(true)
     }
 }
@@ -130,6 +140,7 @@ impl WasapiCapture {
 
         let result = query_device_info();
         if we_initialized_com {
+            // SAFETY: We initialized COM above via com_init(), so we must uninitialize it.
             unsafe { CoUninitialize() };
         }
         let (device_name, sample_rate, channels, bits_per_sample, block_align) = result?;
@@ -182,6 +193,9 @@ fn wasapi_capture_thread(
     bits_per_sample: u16,
     block_align: usize,
 ) {
+    // SAFETY: COM must be initialized per-thread for WASAPI calls. We initialize at thread
+    // start and uninitialize at thread end. The capture loop uses only COM/WASAPI FFI calls
+    // with handles obtained within this thread's COM context.
     unsafe {
         if CoInitializeEx(None, COINIT_MULTITHREADED).is_err() {
             log::error!("WASAPI thread: COM init failed");
@@ -205,7 +219,7 @@ fn wasapi_capture_thread(
 }
 
 /// Inner capture loop separated for cleaner error handling.
-/// Safety: must be called on a thread with COM initialized.
+/// Must be called on a thread with COM initialized.
 fn wasapi_capture_loop(
     ring: &Arc<RingBuffer>,
     callback_count: &Arc<AtomicU64>,
@@ -214,6 +228,10 @@ fn wasapi_capture_loop(
     bits_per_sample: u16,
     block_align: usize,
 ) -> Result<()> {
+    // SAFETY: All WASAPI/COM FFI calls within. COM is initialized by the caller
+    // (wasapi_capture_thread). Buffer pointer from GetBuffer is valid for num_frames *
+    // block_align bytes until ReleaseBuffer is called. We call ReleaseBuffer each iteration.
+    // mix_format_ptr is valid until we drop the audio_client.
     unsafe {
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;

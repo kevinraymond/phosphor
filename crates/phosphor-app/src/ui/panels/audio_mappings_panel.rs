@@ -98,11 +98,14 @@ pub fn draw_audio_mappings(ui: &mut Ui, mappings: &[AudioMapping]) {
                         },
                     );
                     draw_arrow_right(ui, tc.text_secondary);
-                    ui.add(egui::Label::new(
-                        RichText::new(&mapping.target)
-                            .size(SMALL_SIZE)
-                            .color(tc.text_primary),
-                    ).truncate());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&mapping.target)
+                                .size(SMALL_SIZE)
+                                .color(tc.text_primary),
+                        )
+                        .truncate(),
+                    );
                 });
             });
 

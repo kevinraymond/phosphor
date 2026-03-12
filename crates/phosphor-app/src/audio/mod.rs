@@ -11,8 +11,8 @@ pub mod wasapi_capture;
 
 pub use features::AudioFeatures;
 
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -169,7 +169,9 @@ impl AudioSystem {
                     using_native_backend: opened.using_native_backend,
                     cached_devices: Arc::new(Mutex::new(Vec::new())),
                     scan_in_flight: Arc::new(AtomicBool::new(false)),
-                    last_scan: Instant::now() - Duration::from_secs(60),
+                    last_scan: Instant::now()
+                        .checked_sub(Duration::from_secs(60))
+                        .expect("60s subtraction from now cannot underflow"),
                     recording_ring,
                     sample_rate: sample_rate as u32,
                 }
@@ -190,7 +192,9 @@ impl AudioSystem {
                     using_native_backend: false,
                     cached_devices: Arc::new(Mutex::new(Vec::new())),
                     scan_in_flight: Arc::new(AtomicBool::new(false)),
-                    last_scan: Instant::now() - Duration::from_secs(60),
+                    last_scan: Instant::now()
+                        .checked_sub(Duration::from_secs(60))
+                        .expect("60s subtraction from now cannot underflow"),
                     recording_ring,
                     sample_rate: 44100,
                 }
@@ -225,7 +229,8 @@ impl AudioSystem {
         self.started_at = new.started_at;
         self._capture = new._capture.take();
         self.using_native_backend = new.using_native_backend;
-        self.recording_ring = std::mem::replace(&mut new.recording_ring, Arc::new(RingBuffer::new()));
+        self.recording_ring =
+            std::mem::replace(&mut new.recording_ring, Arc::new(RingBuffer::new()));
         self.sample_rate = new.sample_rate;
         // Keep existing cached_devices/scan_in_flight/last_scan — no need to re-scan on switch
         // `new` is dropped here — its Drop is a no-op since thread_handle is None and shutdown is true
@@ -245,13 +250,17 @@ impl AudioSystem {
                     // Pre-load libjack and install null error handlers before cpal touches ALSA
                     capture::suppress_jack_errors();
                     let devs = AudioCapture::list_devices();
-                    *cache.lock().unwrap() = devs;
+                    // Recover from poisoned mutex — device list is non-critical UI data.
+                    *cache.lock().unwrap_or_else(|e| e.into_inner()) = devs;
                     flag.store(false, Ordering::Release);
                 })
                 .ok();
             self.last_scan = Instant::now();
         }
-        self.cached_devices.lock().unwrap().clone()
+        self.cached_devices
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Drain the channel and return the most recent features.

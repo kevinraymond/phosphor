@@ -71,7 +71,7 @@ mod tests {
         let mut norm = AdaptiveNormalizer::new();
         let raw = AudioFeatures::default();
         let out = norm.normalize(&raw);
-        for &v in out.as_slice().iter() {
+        for &v in out.as_slice() {
             assert!(v.is_finite());
         }
     }
@@ -79,8 +79,10 @@ mod tests {
     #[test]
     fn constant_below_span_outputs_zero() {
         let mut norm = AdaptiveNormalizer::new();
-        let mut raw = AudioFeatures::default();
-        raw.sub_bass = 0.001; // below span threshold (0.01)
+        let raw = AudioFeatures {
+            sub_bass: 0.001, // below span threshold (0.01)
+            ..Default::default()
+        };
         for _ in 0..100 {
             let out = norm.normalize(&raw);
             assert!(out.sub_bass >= 0.0);
@@ -90,8 +92,10 @@ mod tests {
     #[test]
     fn spike_pushes_max() {
         let mut norm = AdaptiveNormalizer::new();
-        let mut raw = AudioFeatures::default();
-        raw.sub_bass = 1.0;
+        let raw = AudioFeatures {
+            sub_bass: 1.0,
+            ..Default::default()
+        };
         let out = norm.normalize(&raw);
         // After a spike, the value should be near 1.0 (at top of range)
         assert!(out.sub_bass >= 0.0);
@@ -102,11 +106,13 @@ mod tests {
     fn max_decays_after_spike() {
         let mut norm = AdaptiveNormalizer::new();
         // Feed a spike
-        let mut raw = AudioFeatures::default();
-        raw.sub_bass = 1.0;
+        let raw = AudioFeatures {
+            sub_bass: 1.0,
+            ..Default::default()
+        };
         norm.normalize(&raw);
         // Feed zeros for many frames
-        raw.sub_bass = 0.0;
+        let raw = AudioFeatures::default();
         let mut last_max = norm.running_max[0];
         for _ in 0..200 {
             norm.normalize(&raw);
@@ -120,10 +126,12 @@ mod tests {
     #[test]
     fn beat_fields_pass_through() {
         let mut norm = AdaptiveNormalizer::new();
-        let mut raw = AudioFeatures::default();
-        raw.beat = 1.0; // index 17
-        raw.beat_phase = 0.7; // index 18
-        raw.bpm = 0.4; // index 19
+        let raw = AudioFeatures {
+            beat: 1.0,       // index 17
+            beat_phase: 0.7, // index 18
+            bpm: 0.4,        // index 19
+            ..Default::default()
+        };
         let out = norm.normalize(&raw);
         assert!(approx_eq(out.beat, 1.0, 1e-6));
         assert!(approx_eq(out.beat_phase, 0.7, 1e-6));
@@ -133,16 +141,18 @@ mod tests {
     #[test]
     fn onset_is_normalized() {
         let mut norm = AdaptiveNormalizer::new();
-        let mut raw = AudioFeatures::default();
+        let mut raw = AudioFeatures {
+            onset: 0.5,
+            ..Default::default()
+        };
         // Feed onset values to build range
-        raw.onset = 0.5;
         for _ in 0..50 {
             norm.normalize(&raw);
         }
         raw.onset = 1.0; // spike
         let out = norm.normalize(&raw);
         // Onset (index 16) should be normalized, not passed through
-        assert!(out.onset >= 0.0 && out.onset <= 1.0);
+        assert!((0.0..=1.0).contains(&out.onset));
     }
 
     #[test]
@@ -157,6 +167,6 @@ mod tests {
         }
         // Later outputs should be in 0-1 range and mostly increasing
         let last = outputs[outputs.len() - 1];
-        assert!(last >= 0.0 && last <= 1.0);
+        assert!((0.0..=1.0).contains(&last));
     }
 }

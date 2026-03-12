@@ -29,10 +29,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
     let tc = theme_colors(ui.ctx());
 
     // ── LIVE pulsing dot (when timeline active) ──
-    let is_live = info
-        .timeline
-        .as_ref()
-        .map_or(false, |t| t.active);
+    let is_live = info.timeline.as_ref().map_or(false, |t| t.active);
     if is_live {
         // Oscillate between 0.4 and 1.0 opacity using elapsed time
         let t = ui.input(|i| i.time) as f32;
@@ -63,7 +60,8 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
         });
         ui.add_space(4.0);
         // Keep animating at ~20fps (avoids full-speed repaints that cause flashing)
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(50));
     }
 
     // ── Zone 1: Scene Management ──
@@ -368,8 +366,8 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
             // Scrollable cue list: fixed-height viewport for up to 6 cards
             let card_height = 57.0; // approx height per two-line cue card
             let max_visible = 6;
-            let scroll_height = (info.cue_list.len() as f32 * card_height)
-                .min(max_visible as f32 * card_height);
+            let scroll_height =
+                (info.cue_list.len() as f32 * card_height).min(max_visible as f32 * card_height);
             let avail_w = ui.available_width();
             ui.allocate_ui(Vec2::new(avail_w, scroll_height), |ui| {
                 egui::ScrollArea::vertical()
@@ -510,16 +508,17 @@ fn draw_scene_tile(
                 // Delete button — hover-reveal
                 if hovered || is_armed {
                     let del_text = if is_armed { "Sure?" } else { "×" };
-                    let del_color = if is_armed { tc.error } else { tc.text_secondary };
+                    let del_color = if is_armed {
+                        tc.error
+                    } else {
+                        tc.text_secondary
+                    };
                     let del_btn_w = if is_armed { 32.0 } else { del_w };
                     let del_btn = egui::Button::new(
                         RichText::new(del_text).size(SMALL_SIZE).color(del_color),
                     )
                     .frame(false);
-                    if ui
-                        .add_sized(Vec2::new(del_btn_w, 22.0), del_btn)
-                        .clicked()
-                    {
+                    if ui.add_sized(Vec2::new(del_btn_w, 22.0), del_btn).clicked() {
                         if is_armed {
                             ui.ctx().data_mut(|d| {
                                 d.insert_temp(egui::Id::new("delete_scene"), idx);
@@ -576,12 +575,7 @@ fn draw_cue_row(
     } else if is_target {
         Stroke::new(
             1.0,
-            Color32::from_rgba_unmultiplied(
-                tc.accent.r(),
-                tc.accent.g(),
-                tc.accent.b(),
-                40,
-            ),
+            Color32::from_rgba_unmultiplied(tc.accent.r(), tc.accent.g(), tc.accent.b(), 40),
         )
     } else {
         Stroke::new(1.0, tc.card_border)
@@ -595,157 +589,158 @@ fn draw_cue_row(
         .outer_margin(egui::Margin::symmetric(0, 1))
         .show(ui, |ui| {
             ui.push_id(idx, |ui| {
-            let row_hovered = ui.rect_contains_pointer(ui.max_rect());
+                let row_hovered = ui.rect_contains_pointer(ui.max_rect());
 
-            // ── Top row: cue number + name + hover-reveal × ──
-            ui.horizontal(|ui| {
-                // Cue number (right-aligned in 14px)
-                let num_color = if is_current {
-                    tc.accent
-                } else {
-                    tc.text_secondary
-                };
-                ui.add_sized(
-                    Vec2::new(14.0, MIN_INTERACT_HEIGHT),
-                    egui::Label::new(
-                        RichText::new(format!("{}.", idx + 1))
-                            .size(SMALL_SIZE)
-                            .color(num_color),
-                    ),
-                );
+                // ── Top row: cue number + name + hover-reveal × ──
+                ui.horizontal(|ui| {
+                    // Cue number (right-aligned in 14px)
+                    let num_color = if is_current {
+                        tc.accent
+                    } else {
+                        tc.text_secondary
+                    };
+                    ui.add_sized(
+                        Vec2::new(14.0, MIN_INTERACT_HEIGHT),
+                        egui::Label::new(
+                            RichText::new(format!("{}.", idx + 1))
+                                .size(SMALL_SIZE)
+                                .color(num_color),
+                        ),
+                    );
 
-                // Preset name — click to jump
-                let name_color = if is_current {
-                    tc.accent
-                } else {
-                    tc.text_primary
-                };
-                let display = truncate_scene_name(&cue.preset_name, 22);
-                let name_btn = egui::Button::new(
-                    RichText::new(&display).size(SMALL_SIZE).color(name_color),
-                )
-                .frame(false);
-
-                let del_w = if row_hovered { 16.0 + ui.spacing().item_spacing.x } else { 0.0 };
-                let name_w = (ui.available_width() - del_w).max(30.0);
-                if ui
-                    .add_sized(Vec2::new(name_w, MIN_INTERACT_HEIGHT), name_btn)
-                    .on_hover_text(&cue.preset_name)
-                    .clicked()
-                {
-                    ui.ctx().data_mut(|d| {
-                        d.insert_temp(egui::Id::new("scene_jump_to_cue"), idx);
-                    });
-                }
-
-                // Remove cue button — hover-reveal
-                if row_hovered {
-                    let del_btn = egui::Button::new(
-                        RichText::new("×").size(SMALL_SIZE).color(tc.text_secondary),
+                    // Preset name — click to jump
+                    let name_color = if is_current {
+                        tc.accent
+                    } else {
+                        tc.text_primary
+                    };
+                    let display = truncate_scene_name(&cue.preset_name, 22);
+                    let name_btn = egui::Button::new(
+                        RichText::new(&display).size(SMALL_SIZE).color(name_color),
                     )
                     .frame(false);
+
+                    let del_w = if row_hovered {
+                        16.0 + ui.spacing().item_spacing.x
+                    } else {
+                        0.0
+                    };
+                    let name_w = (ui.available_width() - del_w).max(30.0);
                     if ui
-                        .add_sized(Vec2::new(16.0, MIN_INTERACT_HEIGHT), del_btn)
+                        .add_sized(Vec2::new(name_w, MIN_INTERACT_HEIGHT), name_btn)
+                        .on_hover_text(&cue.preset_name)
                         .clicked()
                     {
                         ui.ctx().data_mut(|d| {
-                            d.insert_temp(egui::Id::new("scene_remove_cue"), idx);
+                            d.insert_temp(egui::Id::new("scene_jump_to_cue"), idx);
                         });
                     }
-                }
-            });
 
-            // ── Bottom row: transition badge + duration | Hold: duration ──
-            ui.horizontal(|ui| {
-                ui.add_space(18.0); // align under name (past cue number)
+                    // Remove cue button — hover-reveal
+                    if row_hovered {
+                        let del_btn = egui::Button::new(
+                            RichText::new("×").size(SMALL_SIZE).color(tc.text_secondary),
+                        )
+                        .frame(false);
+                        if ui
+                            .add_sized(Vec2::new(16.0, MIN_INTERACT_HEIGHT), del_btn)
+                            .clicked()
+                        {
+                            ui.ctx().data_mut(|d| {
+                                d.insert_temp(egui::Id::new("scene_remove_cue"), idx);
+                            });
+                        }
+                    }
+                });
 
-                // Transition badge (colored, click-to-cycle)
-                let trans_color = match cue.transition {
-                    TransitionType::Cut => tc.text_secondary,
-                    TransitionType::Dissolve => tc.accent,
-                    TransitionType::ParamMorph => tc.success,
-                };
-                let trans_btn = egui::Button::new(
-                    RichText::new(cue.transition.display_name())
-                        .size(SMALL_SIZE)
-                        .color(trans_color),
-                )
-                .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(1.0, trans_color))
-                .corner_radius(CornerRadius::same(WIDGET_ROUNDING));
-                if ui
-                    .add_sized(Vec2::new(48.0, MIN_INTERACT_HEIGHT), trans_btn)
-                    .on_hover_text("Transition IN to this cue (click to cycle)")
-                    .clicked()
-                {
-                    let next = match cue.transition {
-                        TransitionType::Cut => TransitionType::Dissolve,
-                        TransitionType::Dissolve => TransitionType::ParamMorph,
-                        TransitionType::ParamMorph => TransitionType::Cut,
+                // ── Bottom row: transition badge + duration | Hold: duration ──
+                ui.horizontal(|ui| {
+                    ui.add_space(18.0); // align under name (past cue number)
+
+                    // Transition badge (colored, click-to-cycle)
+                    let trans_color = match cue.transition {
+                        TransitionType::Cut => tc.text_secondary,
+                        TransitionType::Dissolve => tc.accent,
+                        TransitionType::ParamMorph => tc.success,
                     };
-                    ui.ctx().data_mut(|d| {
-                        d.insert_temp(
-                            egui::Id::new("scene_set_cue_transition"),
-                            (idx, next),
+                    let trans_btn = egui::Button::new(
+                        RichText::new(cue.transition.display_name())
+                            .size(SMALL_SIZE)
+                            .color(trans_color),
+                    )
+                    .fill(Color32::TRANSPARENT)
+                    .stroke(Stroke::new(1.0, trans_color))
+                    .corner_radius(CornerRadius::same(WIDGET_ROUNDING));
+                    if ui
+                        .add_sized(Vec2::new(48.0, MIN_INTERACT_HEIGHT), trans_btn)
+                        .on_hover_text("Transition IN to this cue (click to cycle)")
+                        .clicked()
+                    {
+                        let next = match cue.transition {
+                            TransitionType::Cut => TransitionType::Dissolve,
+                            TransitionType::Dissolve => TransitionType::ParamMorph,
+                            TransitionType::ParamMorph => TransitionType::Cut,
+                        };
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new("scene_set_cue_transition"), (idx, next));
+                        });
+                    }
+
+                    // Editable transition duration (only for non-Cut)
+                    if cue.transition != TransitionType::Cut {
+                        let dur_id = egui::Id::new("cue_dur").with(idx);
+                        let mut dur: f32 = ui
+                            .ctx()
+                            .data_mut(|d| d.get_temp(dur_id).unwrap_or(cue.transition_secs));
+                        let drag = ui.add_sized(
+                            Vec2::new(38.0, MIN_INTERACT_HEIGHT),
+                            egui::DragValue::new(&mut dur)
+                                .range(0.1..=30.0)
+                                .speed(0.05)
+                                .suffix("s")
+                                .max_decimals(1),
+                        );
+                        if drag.changed() {
+                            ui.ctx().data_mut(|d| {
+                                d.insert_temp(dur_id, dur);
+                                d.insert_temp(
+                                    egui::Id::new("scene_set_cue_transition_secs"),
+                                    (idx, dur),
+                                );
+                            });
+                        }
+                    }
+
+                    // Spacer to push hold to right
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Hold time (always visible, not gated on Timer mode)
+                        let hold_id = egui::Id::new("cue_hold").with(idx);
+                        let mut hold: f32 = ui.ctx().data_mut(|d| {
+                            d.get_temp(hold_id).unwrap_or(cue.hold_secs.unwrap_or(4.0))
+                        });
+                        let drag = ui.add(
+                            egui::DragValue::new(&mut hold)
+                                .range(0.5..=120.0)
+                                .speed(0.1)
+                                .suffix("s")
+                                .max_decimals(1),
+                        );
+                        if drag.changed() {
+                            ui.ctx().data_mut(|d| {
+                                d.insert_temp(hold_id, hold);
+                                d.insert_temp(
+                                    egui::Id::new("scene_set_cue_hold_secs"),
+                                    (idx, hold),
+                                );
+                            });
+                        }
+                        ui.label(
+                            RichText::new("Hold:")
+                                .size(SMALL_SIZE)
+                                .color(tc.text_secondary),
                         );
                     });
-                }
-
-                // Editable transition duration (only for non-Cut)
-                if cue.transition != TransitionType::Cut {
-                    let dur_id = egui::Id::new("cue_dur").with(idx);
-                    let mut dur: f32 = ui.ctx().data_mut(|d| {
-                        d.get_temp(dur_id).unwrap_or(cue.transition_secs)
-                    });
-                    let drag = ui.add_sized(
-                        Vec2::new(38.0, MIN_INTERACT_HEIGHT),
-                        egui::DragValue::new(&mut dur)
-                            .range(0.1..=30.0)
-                            .speed(0.05)
-                            .suffix("s")
-                            .max_decimals(1),
-                    );
-                    if drag.changed() {
-                        ui.ctx().data_mut(|d| {
-                            d.insert_temp(dur_id, dur);
-                            d.insert_temp(
-                                egui::Id::new("scene_set_cue_transition_secs"),
-                                (idx, dur),
-                            );
-                        });
-                    }
-                }
-
-                // Spacer to push hold to right
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Hold time (always visible, not gated on Timer mode)
-                    let hold_id = egui::Id::new("cue_hold").with(idx);
-                    let mut hold: f32 = ui.ctx().data_mut(|d| {
-                        d.get_temp(hold_id).unwrap_or(cue.hold_secs.unwrap_or(4.0))
-                    });
-                    let drag = ui.add(
-                        egui::DragValue::new(&mut hold)
-                            .range(0.5..=120.0)
-                            .speed(0.1)
-                            .suffix("s")
-                            .max_decimals(1),
-                    );
-                    if drag.changed() {
-                        ui.ctx().data_mut(|d| {
-                            d.insert_temp(hold_id, hold);
-                            d.insert_temp(
-                                egui::Id::new("scene_set_cue_hold_secs"),
-                                (idx, hold),
-                            );
-                        });
-                    }
-                    ui.label(
-                        RichText::new("Hold:")
-                            .size(SMALL_SIZE)
-                            .color(tc.text_secondary),
-                    );
                 });
-            });
             }); // push_id
         });
 
@@ -792,11 +787,7 @@ fn draw_cue_row(
                     );
                     widgets::draw_diagonal_stripes(painter, progress_rect, stripe_color, 4.0);
                 }
-            } else if let TimelineInfoState::Holding {
-                elapsed,
-                hold_secs,
-            } = &tl.state
-            {
+            } else if let TimelineInfoState::Holding { elapsed, hold_secs } = &tl.state {
                 if idx == tl.current_cue {
                     // Hold progress bar (green)
                     if let Some(hold) = hold_secs {

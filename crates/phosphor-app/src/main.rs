@@ -286,12 +286,27 @@ impl ApplicationHandler for PhosphorApp {
                                 source_loading_name: String::new(),
                                 builtin_images: Vec::new(), // set below
                                 has_morph: ps.morph_state.is_some(),
-                                morph_target_count: ps.morph_state.as_ref().map_or(0, |m| m.target_count),
-                                morph_source_index: ps.morph_state.as_ref().map_or(0, |m| m.source_index),
-                                morph_dest_index: ps.morph_state.as_ref().map_or(0, |m| m.dest_index),
+                                morph_target_count: ps
+                                    .morph_state
+                                    .as_ref()
+                                    .map_or(0, |m| m.target_count),
+                                morph_source_index: ps
+                                    .morph_state
+                                    .as_ref()
+                                    .map_or(0, |m| m.source_index),
+                                morph_dest_index: ps
+                                    .morph_state
+                                    .as_ref()
+                                    .map_or(0, |m| m.dest_index),
                                 morph_progress: ps.morph_state.as_ref().map_or(0.0, |m| m.progress),
-                                morph_transitioning: ps.morph_state.as_ref().map_or(false, |m| m.transitioning),
-                                morph_transition_style: ps.morph_state.as_ref().map_or(0, |m| m.transition_style),
+                                morph_transitioning: ps
+                                    .morph_state
+                                    .as_ref()
+                                    .map_or(false, |m| m.transitioning),
+                                morph_transition_style: ps
+                                    .morph_state
+                                    .as_ref()
+                                    .map_or(0, |m| m.transition_style),
                                 morph_auto_cycle: ps.morph_state.as_ref().map_or(0, |m| {
                                     match m.auto_cycle {
                                         crate::gpu::particle::morph::AutoCycle::Off => 0,
@@ -299,33 +314,55 @@ impl ApplicationHandler for PhosphorApp {
                                         crate::gpu::particle::morph::AutoCycle::Timed(_) => 2,
                                     }
                                 }),
-                                morph_hold_duration: ps.morph_state.as_ref().map_or(2.0, |m| m.hold_duration),
-                                morph_target_labels: ps.def.morph_targets.as_ref().map_or_else(Vec::new, |targets| {
-                                    targets.iter().map(|t| {
-                                        if t.source == "random" {
-                                            "random".to_string()
-                                        } else if t.source == "snapshot" {
-                                            "snap".to_string()
-                                        } else if let Some(shape) = t.source.strip_prefix("geometry:") {
-                                            shape.to_string()
-                                        } else if let Some(img) = t.source.strip_prefix("image:") {
-                                            let name = img.trim_end_matches(".png");
-                                            let name = name.strip_prefix("raster_").unwrap_or(name);
-                                            name.to_string()
-                                        } else if let Some(text) = t.source.strip_prefix("text:") {
-                                            if text.len() > 8 {
-                                                format!("{}...", &text[..8])
-                                            } else {
-                                                text.to_string()
-                                            }
-                                        } else if let Some(rest) = t.source.strip_prefix("video:") {
-                                            // "video:clip.mp4:f42" → "f42"
-                                            rest.rsplit(':').next().unwrap_or(rest).to_string()
-                                        } else {
-                                            t.source.clone()
-                                        }
-                                    }).collect()
-                                }),
+                                morph_hold_duration: ps
+                                    .morph_state
+                                    .as_ref()
+                                    .map_or(2.0, |m| m.hold_duration),
+                                morph_target_labels: ps.def.morph_targets.as_ref().map_or_else(
+                                    Vec::new,
+                                    |targets| {
+                                        targets
+                                            .iter()
+                                            .map(|t| {
+                                                if t.source == "random" {
+                                                    "random".to_string()
+                                                } else if t.source == "snapshot" {
+                                                    "snap".to_string()
+                                                } else if let Some(shape) =
+                                                    t.source.strip_prefix("geometry:")
+                                                {
+                                                    shape.to_string()
+                                                } else if let Some(img) =
+                                                    t.source.strip_prefix("image:")
+                                                {
+                                                    let name = img.trim_end_matches(".png");
+                                                    let name = name
+                                                        .strip_prefix("raster_")
+                                                        .unwrap_or(name);
+                                                    name.to_string()
+                                                } else if let Some(text) =
+                                                    t.source.strip_prefix("text:")
+                                                {
+                                                    if text.len() > 8 {
+                                                        format!("{}...", &text[..8])
+                                                    } else {
+                                                        text.to_string()
+                                                    }
+                                                } else if let Some(rest) =
+                                                    t.source.strip_prefix("video:")
+                                                {
+                                                    // "video:clip.mp4:f42" → "f42"
+                                                    rest.rsplit(':')
+                                                        .next()
+                                                        .unwrap_or(rest)
+                                                        .to_string()
+                                                } else {
+                                                    t.source.clone()
+                                                }
+                                            })
+                                            .collect()
+                                    },
+                                ),
                             }
                         });
                     // Overlay loader state + built-in images onto particle info
@@ -334,7 +371,7 @@ impl ApplicationHandler for PhosphorApp {
                         pi.source_loading_name = app.particle_source_loader.loading_name.clone();
                         if pi.has_image_source {
                             pi.builtin_images =
-                                crate::gpu::particle::builtin_raster_images().clone();
+                                crate::gpu::particle::builtin_raster_images().to_vec();
                         }
                     }
                     let particle_count = particle_info.as_ref().map(|p| p.max_count);
@@ -495,7 +532,10 @@ impl ApplicationHandler for PhosphorApp {
                                 #[cfg(not(feature = "webcam"))]
                                 device_index: 0,
                                 #[cfg(feature = "webcam")]
-                                capture_running: app.webcam_capture.as_ref().map_or(false, |c| c.is_running()),
+                                capture_running: app
+                                    .webcam_capture
+                                    .as_ref()
+                                    .map_or(false, |c| c.is_running()),
                                 #[cfg(not(feature = "webcam"))]
                                 capture_running: false,
                             }
@@ -530,13 +570,19 @@ impl ApplicationHandler for PhosphorApp {
                             ffmpeg_found: app.recording.encoder_info.ffmpeg_found,
                             encoder_info: app.recording.encoder_info.clone(),
                             config: app.recording.config.clone(),
-                            duration_secs: app.recording.duration().map_or(0.0, |d| d.as_secs_f64()),
+                            duration_secs: app
+                                .recording
+                                .duration()
+                                .map_or(0.0, |d| d.as_secs_f64()),
                             frames_encoded: app.recording.frames_encoded(),
                             bytes_written: app.recording.total_bytes_written(),
                             output_width: app.recording.capture_dimensions().0,
                             output_height: app.recording.capture_dimensions().1,
                             encoder_name: match &app.recording.state {
-                                crate::recording::RecordingState::Recording { encoder_name, .. } => encoder_name.clone(),
+                                crate::recording::RecordingState::Recording {
+                                    encoder_name,
+                                    ..
+                                } => encoder_name.clone(),
                                 _ => String::new(),
                             },
                             error: match &app.recording.state {
@@ -630,15 +676,28 @@ impl ApplicationHandler for PhosphorApp {
 
                     // Draw binding matrix modal
                     if app.binding_matrix.open {
-                        let layers: Vec<crate::ui::panels::binding_helpers::LayerParamInfo> =
-                            app.layer_stack.layers.iter().enumerate().map(|(i, l)| {
-                                let effect_name = l.effect_index()
+                        let layers: Vec<crate::ui::panels::binding_helpers::LayerParamInfo> = app
+                            .layer_stack
+                            .layers
+                            .iter()
+                            .enumerate()
+                            .map(|(i, l)| {
+                                let effect_name = l
+                                    .effect_index()
                                     .and_then(|idx| app.effect_loader.effects.get(idx))
                                     .map(|eff| eff.name.clone())
                                     .unwrap_or_default();
-                                let param_names = l.param_store.defs
+                                let param_names = l
+                                    .param_store
+                                    .defs
                                     .iter()
-                                    .filter(|d| matches!(d, crate::params::ParamDef::Float { .. } | crate::params::ParamDef::Bool { .. }))
+                                    .filter(|d| {
+                                        matches!(
+                                            d,
+                                            crate::params::ParamDef::Float { .. }
+                                                | crate::params::ParamDef::Bool { .. }
+                                        )
+                                    })
                                     .map(|d| d.name().to_string())
                                     .collect();
                                 crate::ui::panels::binding_helpers::LayerParamInfo {
@@ -646,12 +705,17 @@ impl ApplicationHandler for PhosphorApp {
                                     effect_name,
                                     param_names,
                                 }
-                            }).collect();
+                            })
+                            .collect();
                         let bind_info = crate::ui::panels::binding_helpers::BindingPanelInfo {
                             layers,
                             active_layer,
                             layer_count: layer_infos.len(),
-                            preset_name: app.preset_store.current_name().unwrap_or("(unsaved)").to_string(),
+                            preset_name: app
+                                .preset_store
+                                .current_name()
+                                .unwrap_or("(unsaved)")
+                                .to_string(),
                         };
                         crate::ui::panels::binding_matrix::draw_binding_matrix(
                             &ctx,
@@ -945,7 +1009,8 @@ impl ApplicationHandler for PhosphorApp {
                     if let Some(use_ffmpeg) = set_ffmpeg {
                         if use_ffmpeg && !crate::media::webcam_ffmpeg::ffmpeg_available() {
                             app.status_error = Some((
-                                "FFmpeg not found in PATH. Install FFmpeg to use this feature.".into(),
+                                "FFmpeg not found in PATH. Install FFmpeg to use this feature."
+                                    .into(),
                                 std::time::Instant::now(),
                             ));
                         } else {
@@ -1100,7 +1165,9 @@ impl ApplicationHandler for PhosphorApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("rec_codec_change")));
                     if let Some(idx) = rec_codec {
-                        if let Some(&codec) = crate::recording::types::VideoCodec::ALL.get(idx as usize) {
+                        if let Some(&codec) =
+                            crate::recording::types::VideoCodec::ALL.get(idx as usize)
+                        {
                             app.recording.config.codec = codec;
                             app.recording.config.save();
                         }
@@ -1111,7 +1178,9 @@ impl ApplicationHandler for PhosphorApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("rec_resolution_change")));
                     if let Some(idx) = rec_res {
-                        if let Some(&res) = crate::gpu::types::OutputResolution::ALL.get(idx as usize) {
+                        if let Some(&res) =
+                            crate::gpu::types::OutputResolution::ALL.get(idx as usize)
+                        {
                             app.recording.config.resolution = res;
                             app.recording.config.save();
                         }
@@ -1140,7 +1209,9 @@ impl ApplicationHandler for PhosphorApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("rec_container_change")));
                     if let Some(idx) = rec_container {
-                        if let Some(&cont) = crate::recording::types::Container::ALL.get(idx as usize) {
+                        if let Some(&cont) =
+                            crate::recording::types::Container::ALL.get(idx as usize)
+                        {
                             app.recording.config.container = cont;
                             app.recording.config.save();
                         }
@@ -1549,7 +1620,8 @@ impl ApplicationHandler for PhosphorApp {
                                             // Start webcam capture if not already running
                                             #[cfg(feature = "webcam")]
                                             {
-                                                obstacle_start_webcam = app.webcam_capture.is_none();
+                                                obstacle_start_webcam =
+                                                    app.webcam_capture.is_none();
                                                 ps.obstacle_enabled = true;
                                                 ps.obstacle_source = "webcam".to_string();
                                                 ps.obstacle_image_path = None;
@@ -1646,10 +1718,9 @@ impl ApplicationHandler for PhosphorApp {
                 // Handle obstacle webcam device switch
                 #[cfg(feature = "webcam")]
                 {
-                    let switch_obs_device: Option<u32> = app
-                        .egui_overlay
-                        .context()
-                        .data_mut(|d| d.remove_temp(egui::Id::new("switch_obstacle_webcam_device")));
+                    let switch_obs_device: Option<u32> = app.egui_overlay.context().data_mut(|d| {
+                        d.remove_temp(egui::Id::new("switch_obstacle_webcam_device"))
+                    });
                     if let Some(new_idx) = switch_obs_device {
                         let old_idx = app.webcam_device_index;
                         app.webcam_capture = None;
@@ -1662,8 +1733,10 @@ impl ApplicationHandler for PhosphorApp {
                             }
                             Err(e) => {
                                 log::error!("Failed to switch obstacle webcam device: {e}");
-                                app.status_error =
-                                    Some((format!("Camera failed: {e}"), std::time::Instant::now()));
+                                app.status_error = Some((
+                                    format!("Camera failed: {e}"),
+                                    std::time::Instant::now(),
+                                ));
                                 // Restore previous capture
                                 match app.start_webcam(old_idx, Some((1280, 720))) {
                                     Ok(capture) => {
@@ -1722,7 +1795,7 @@ impl ApplicationHandler for PhosphorApp {
                                                 }
                                             }
                                             Err(e) => {
-                                                log::error!("Failed to decode obstacle video: {e}")
+                                                log::error!("Failed to decode obstacle video: {e}");
                                             }
                                         }
                                     }
@@ -1882,8 +1955,10 @@ impl ApplicationHandler for PhosphorApp {
                             }
                             Err(e) => {
                                 log::error!("Failed to switch webcam device: {e}");
-                                app.status_error =
-                                    Some((format!("Camera failed: {e}"), std::time::Instant::now()));
+                                app.status_error = Some((
+                                    format!("Camera failed: {e}"),
+                                    std::time::Instant::now(),
+                                ));
                                 // Restore previous capture
                                 match app.start_webcam(old_idx, Some((1280, 720))) {
                                     Ok(capture) => {
@@ -2221,10 +2296,11 @@ impl ApplicationHandler for PhosphorApp {
                         {
                             if let Some(layer) = app.layer_stack.active_mut() {
                                 if let Some(effect) = layer.as_effect_mut() {
-                                    if let Some(ps) =
-                                        effect.pass_executor.particle_system.as_mut()
+                                    if let Some(ps) = effect.pass_executor.particle_system.as_mut()
                                     {
-                                        let needs_upload = if let Some(ref mut morph) = ps.morph_state {
+                                        let needs_upload = if let Some(ref mut morph) =
+                                            ps.morph_state
+                                        {
                                             if let Some(target) = morph_trigger {
                                                 morph.trigger_morph(target);
                                             }
@@ -2242,7 +2318,8 @@ impl ApplicationHandler for PhosphorApp {
                                                 morph.transition_style = style;
                                             }
                                             if let Some(src) = morph_set_source {
-                                                morph.source_index = src.min(morph.target_count.saturating_sub(1));
+                                                morph.source_index =
+                                                    src.min(morph.target_count.saturating_sub(1));
                                             }
                                             if let Some(progress) = morph_manual_blend {
                                                 // Manual scrub: set progress directly, mark transitioning so shader interpolates
@@ -2252,7 +2329,11 @@ impl ApplicationHandler for PhosphorApp {
                                                 morph.hold_timer = 0.0;
                                             }
                                             // Helper: pick target slot — selected slot, or next empty (based on def count), or last
-                                            let def_count = ps.def.morph_targets.as_ref().map_or(0, |t| t.len() as u32);
+                                            let def_count = ps
+                                                .def
+                                                .morph_targets
+                                                .as_ref()
+                                                .map_or(0, |t| t.len() as u32);
                                             let pick_slot = || -> u32 {
                                                 if let Some(s) = morph_selected_slot {
                                                     s.min(3)
@@ -2266,7 +2347,8 @@ impl ApplicationHandler for PhosphorApp {
                                             if let Some(clear) = morph_clear_slot {
                                                 let slot = clear.min(3);
                                                 morph.remove_target(slot);
-                                                if let Some(ref mut targets) = ps.def.morph_targets {
+                                                if let Some(ref mut targets) = ps.def.morph_targets
+                                                {
                                                     if (slot as usize) < targets.len() {
                                                         targets.remove(slot as usize);
                                                     }
@@ -2276,17 +2358,20 @@ impl ApplicationHandler for PhosphorApp {
 
                                             if let Some(shape) = morph_add_geo {
                                                 let slot = pick_slot();
-                                                let data = crate::gpu::particle::morph::generate_geometry(
-                                                    &shape,
-                                                    ps.max_particles,
-                                                    ps.def.initial_size,
-                                                );
+                                                let data =
+                                                    crate::gpu::particle::morph::generate_geometry(
+                                                        &shape,
+                                                        ps.max_particles,
+                                                        ps.def.initial_size,
+                                                    );
                                                 morph.load_target(slot, data);
-                                                let def = crate::gpu::particle::types::MorphTargetDef {
-                                                    source: format!("geometry:{}", shape),
-                                                    color: None,
-                                                };
-                                                if let Some(ref mut targets) = ps.def.morph_targets {
+                                                let def =
+                                                    crate::gpu::particle::types::MorphTargetDef {
+                                                        source: format!("geometry:{}", shape),
+                                                        color: None,
+                                                    };
+                                                if let Some(ref mut targets) = ps.def.morph_targets
+                                                {
                                                     while targets.len() <= slot as usize {
                                                         targets.push(crate::gpu::particle::types::MorphTargetDef {
                                                             source: String::new(), color: None,
@@ -2309,7 +2394,9 @@ impl ApplicationHandler for PhosphorApp {
                                                         source: format!("text:{}", text),
                                                         color: None,
                                                     };
-                                                    if let Some(ref mut targets) = ps.def.morph_targets {
+                                                    if let Some(ref mut targets) =
+                                                        ps.def.morph_targets
+                                                    {
                                                         while targets.len() <= slot as usize {
                                                             targets.push(crate::gpu::particle::types::MorphTargetDef {
                                                                 source: String::new(), color: None,
@@ -2317,7 +2404,11 @@ impl ApplicationHandler for PhosphorApp {
                                                         }
                                                         targets[slot as usize] = def;
                                                     }
-                                                    log::info!("Loaded morph text target into slot {}: \"{}\"", slot, text);
+                                                    log::info!(
+                                                        "Loaded morph text target into slot {}: \"{}\"",
+                                                        slot,
+                                                        text
+                                                    );
                                                     needs_upload = true;
                                                 }
                                             }
@@ -2330,7 +2421,11 @@ impl ApplicationHandler for PhosphorApp {
                                                 &app.gpu.device,
                                                 &app.gpu.queue,
                                             );
-                                            ctx.data_mut(|d| d.remove_temp::<u32>(egui::Id::new("morph_selected_slot")));
+                                            ctx.data_mut(|d| {
+                                                d.remove_temp::<u32>(egui::Id::new(
+                                                    "morph_selected_slot",
+                                                ))
+                                            });
                                         }
                                         // Snapshot needs &self on ps, so do it outside the morph borrow
                                         if morph_snapshot.is_some() {
@@ -2338,7 +2433,12 @@ impl ApplicationHandler for PhosphorApp {
                                                 s.min(3)
                                             } else {
                                                 // Use def count to stay in sync with morph_targets vec
-                                                (ps.def.morph_targets.as_ref().map_or(0, |t| t.len()) as u32).min(3)
+                                                (ps.def
+                                                    .morph_targets
+                                                    .as_ref()
+                                                    .map_or(0, |t| t.len())
+                                                    as u32)
+                                                    .min(3)
                                             };
                                             let data = ps.snapshot_particles(
                                                 &app.gpu.device,
@@ -2348,11 +2448,13 @@ impl ApplicationHandler for PhosphorApp {
                                                 if let Some(ref mut morph) = ps.morph_state {
                                                     morph.load_target(slot, data);
                                                 }
-                                                let def = crate::gpu::particle::types::MorphTargetDef {
-                                                    source: "snapshot".to_string(),
-                                                    color: None,
-                                                };
-                                                if let Some(ref mut targets) = ps.def.morph_targets {
+                                                let def =
+                                                    crate::gpu::particle::types::MorphTargetDef {
+                                                        source: "snapshot".to_string(),
+                                                        color: None,
+                                                    };
+                                                if let Some(ref mut targets) = ps.def.morph_targets
+                                                {
                                                     while targets.len() <= slot as usize {
                                                         targets.push(crate::gpu::particle::types::MorphTargetDef {
                                                             source: String::new(), color: None,
@@ -2364,27 +2466,47 @@ impl ApplicationHandler for PhosphorApp {
                                                     &app.gpu.device,
                                                     &app.gpu.queue,
                                                 );
-                                                log::info!("Loaded morph snapshot into slot {}", slot);
+                                                log::info!(
+                                                    "Loaded morph snapshot into slot {}",
+                                                    slot
+                                                );
                                             }
-                                            ctx.data_mut(|d| d.remove_temp::<u32>(egui::Id::new("morph_selected_slot")));
+                                            ctx.data_mut(|d| {
+                                                d.remove_temp::<u32>(egui::Id::new(
+                                                    "morph_selected_slot",
+                                                ))
+                                            });
                                         }
                                         if morph_load_img.is_some() {
                                             // Store pending flag + target slot for when result arrives
                                             let target_slot = morph_selected_slot;
                                             ctx.data_mut(|d| {
-                                                d.insert_temp(egui::Id::new("morph_image_pending"), true);
+                                                d.insert_temp(
+                                                    egui::Id::new("morph_image_pending"),
+                                                    true,
+                                                );
                                                 if let Some(s) = target_slot {
-                                                    d.insert_temp(egui::Id::new("morph_pending_slot"), s);
+                                                    d.insert_temp(
+                                                        egui::Id::new("morph_pending_slot"),
+                                                        s,
+                                                    );
                                                 }
-                                                d.remove_temp::<u32>(egui::Id::new("morph_selected_slot"));
+                                                d.remove_temp::<u32>(egui::Id::new(
+                                                    "morph_selected_slot",
+                                                ));
                                             });
                                             app.particle_source_loader.open_image_dialog();
                                         }
                                         #[cfg(feature = "video")]
                                         if morph_load_video.is_some() {
                                             ctx.data_mut(|d| {
-                                                d.insert_temp(egui::Id::new("morph_video_pending"), true);
-                                                d.remove_temp::<u32>(egui::Id::new("morph_selected_slot"));
+                                                d.insert_temp(
+                                                    egui::Id::new("morph_video_pending"),
+                                                    true,
+                                                );
+                                                d.remove_temp::<u32>(egui::Id::new(
+                                                    "morph_selected_slot",
+                                                ));
                                             });
                                             app.particle_source_loader.open_video_dialog();
                                         }
@@ -2428,19 +2550,29 @@ impl ApplicationHandler for PhosphorApp {
                                             if morph_pending.is_some() {
                                                 if !aux.is_empty() {
                                                     if let Some(ref mut morph) = ps.morph_state {
-                                                        let slot = morph_pending_slot.unwrap_or_else(|| {
-                                                            (ps.def.morph_targets.as_ref().map_or(0, |t| t.len()) as u32).min(3)
-                                                        });
+                                                        let slot = morph_pending_slot
+                                                            .unwrap_or_else(|| {
+                                                                (ps.def
+                                                                    .morph_targets
+                                                                    .as_ref()
+                                                                    .map_or(0, |t| t.len())
+                                                                    as u32)
+                                                                    .min(3)
+                                                            });
                                                         morph.load_target(slot, aux);
                                                         let filename = std::path::Path::new(&path)
                                                             .file_name()
-                                                            .map(|f| f.to_string_lossy().to_string())
+                                                            .map(|f| {
+                                                                f.to_string_lossy().to_string()
+                                                            })
                                                             .unwrap_or_default();
                                                         let def = crate::gpu::particle::types::MorphTargetDef {
                                                             source: format!("image:{}", filename),
                                                             color: None,
                                                         };
-                                                        if let Some(ref mut targets) = ps.def.morph_targets {
+                                                        if let Some(ref mut targets) =
+                                                            ps.def.morph_targets
+                                                        {
                                                             while targets.len() <= slot as usize {
                                                                 targets.push(crate::gpu::particle::types::MorphTargetDef {
                                                                     source: String::new(), color: None,
@@ -2450,7 +2582,10 @@ impl ApplicationHandler for PhosphorApp {
                                                         }
                                                         log::info!(
                                                             "Loaded morph target image into slot {}: {} ({}x{})",
-                                                            slot, path, width, height
+                                                            slot,
+                                                            path,
+                                                            width,
+                                                            height
                                                         );
                                                     }
                                                     ps.upload_morph_targets(
@@ -2500,7 +2635,12 @@ impl ApplicationHandler for PhosphorApp {
                                                 // Load evenly-spaced frames into morph slots
                                                 if let Some(ref mut morph) = ps.morph_state {
                                                     // When full, replace all 4 slots with video frames
-                                                    let def_count = ps.def.morph_targets.as_ref().map_or(0, |t| t.len()) as u32;
+                                                    let def_count = ps
+                                                        .def
+                                                        .morph_targets
+                                                        .as_ref()
+                                                        .map_or(0, |t| t.len())
+                                                        as u32;
                                                     let num_slots = if def_count >= 4 {
                                                         4u32
                                                     } else {
@@ -2517,7 +2657,9 @@ impl ApplicationHandler for PhosphorApp {
                                                         ps.max_particles,
                                                         &path,
                                                     );
-                                                    for (i, (label, data)) in targets.into_iter().enumerate() {
+                                                    for (i, (label, data)) in
+                                                        targets.into_iter().enumerate()
+                                                    {
                                                         let slot = start_slot + i as u32;
                                                         if slot < 4 && !data.is_empty() {
                                                             morph.load_target(slot, data);
@@ -2525,7 +2667,9 @@ impl ApplicationHandler for PhosphorApp {
                                                                 source: label.clone(),
                                                                 color: None,
                                                             };
-                                                            if let Some(ref mut defs) = ps.def.morph_targets {
+                                                            if let Some(ref mut defs) =
+                                                                ps.def.morph_targets
+                                                            {
                                                                 while defs.len() <= slot as usize {
                                                                     defs.push(crate::gpu::particle::types::MorphTargetDef {
                                                                         source: String::new(), color: None,
@@ -2533,7 +2677,11 @@ impl ApplicationHandler for PhosphorApp {
                                                                 }
                                                                 defs[slot as usize] = def;
                                                             }
-                                                            log::info!("Loaded morph video frame into slot {}: {}", slot, label);
+                                                            log::info!(
+                                                                "Loaded morph video frame into slot {}: {}",
+                                                                slot,
+                                                                label
+                                                            );
                                                         }
                                                     }
                                                     ps.upload_morph_targets(

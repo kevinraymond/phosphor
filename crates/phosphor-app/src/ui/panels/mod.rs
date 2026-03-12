@@ -195,10 +195,8 @@ pub fn draw_panels(
                             }
                             if ui
                                 .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("Matrix").size(9.0),
-                                    )
-                                    .min_size(egui::vec2(60.0, 18.0)),
+                                    egui::Button::new(egui::RichText::new("Matrix").size(9.0))
+                                        .min_size(egui::vec2(60.0, 18.0)),
                                 )
                                 .on_hover_text("Open Binding Matrix (B)")
                                 .clicked()
@@ -276,25 +274,23 @@ pub fn draw_panels(
                         let dim_label = egui::Color32::from_white_alpha(38); // ~0.15
                         let on_label = egui::Color32::from_white_alpha(90); // ~0.35
                         // Helper: dot + tiny label (right-to-left order)
-                        let status_dot = |ui: &mut egui::Ui,
-                                              on: bool,
-                                              color: egui::Color32,
-                                              label: &str| {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 3.0;
-                                let (r, _) = ui.allocate_exact_size(
-                                    egui::vec2(4.0, 4.0),
-                                    egui::Sense::hover(),
-                                );
-                                let c = if on { color } else { dot_off };
-                                ui.painter().circle_filled(r.center(), 2.0, c);
-                                ui.label(
-                                    egui::RichText::new(label)
-                                        .size(7.0)
-                                        .color(if on { on_label } else { dim_label }),
-                                );
-                            });
-                        };
+                        let status_dot =
+                            |ui: &mut egui::Ui, on: bool, color: egui::Color32, label: &str| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 3.0;
+                                    let (r, _) = ui.allocate_exact_size(
+                                        egui::vec2(4.0, 4.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    let c = if on { color } else { dot_off };
+                                    ui.painter().circle_filled(r.center(), 2.0, c);
+                                    ui.label(egui::RichText::new(label).size(7.0).color(if on {
+                                        on_label
+                                    } else {
+                                        dim_label
+                                    }));
+                                });
+                            };
                         // Drawn right-to-left, so reverse visual order
                         status_dot(ui, rec_on, dot_active_rec, "REC");
                         #[cfg(feature = "ndi")]
@@ -376,9 +372,13 @@ pub fn draw_panels(
                         {
                             let outputs_on = rec_on || {
                                 #[cfg(feature = "ndi")]
-                                { ndi_on }
+                                {
+                                    ndi_on
+                                }
                                 #[cfg(not(feature = "ndi"))]
-                                { false }
+                                {
+                                    false
+                                }
                             };
                             let (out_badge, out_color) = if rec_on {
                                 ("REC", dot_active_rec)
@@ -398,9 +398,7 @@ pub fn draw_panels(
                                     // Recording
                                     if let Some(ref info) = rec_info {
                                         ui.label(
-                                            egui::RichText::new("Recording")
-                                                .size(10.0)
-                                                .strong(),
+                                            egui::RichText::new("Recording").size(10.0).strong(),
                                         );
                                         recording_panel::draw_recording_panel(ui, info);
                                     }
@@ -409,11 +407,7 @@ pub fn draw_panels(
                                     #[cfg(feature = "ndi")]
                                     if let Some(ref info) = ndi_info {
                                         ui.add_space(6.0);
-                                        ui.label(
-                                            egui::RichText::new("NDI®")
-                                                .size(10.0)
-                                                .strong(),
-                                        );
+                                        ui.label(egui::RichText::new("NDI®").size(10.0).strong());
                                         ndi_panel::draw_ndi_panel(ui, info);
                                     }
                                 },
@@ -421,22 +415,14 @@ pub fn draw_panels(
                         }
 
                         // Global subsection
-                        widgets::subsection(
-                            ui,
-                            "sub_global",
-                            "Global",
-                            None,
-                            dim,
-                            true,
-                            |ui| {
-                                settings_panel::draw_settings_panel(
-                                    ui,
-                                    current_theme,
-                                    particle_quality,
-                                    use_ffmpeg_webcam,
-                                );
-                            },
-                        );
+                        widgets::subsection(ui, "sub_global", "Global", None, dim, true, |ui| {
+                            settings_panel::draw_settings_panel(
+                                ui,
+                                current_theme,
+                                particle_quality,
+                                use_ffmpeg_webcam,
+                            );
+                        });
                     },
                 );
             });

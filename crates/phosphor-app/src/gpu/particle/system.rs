@@ -203,7 +203,7 @@ impl ParticleSystem {
         def: &ParticleDef,
         compute_source: &str,
         interaction: bool,
-    ) -> Result<Self, String> {
+    ) -> Self {
         // Clamp max_count to device storage buffer binding limit
         // With SoA, each buffer is one vec4f per particle (16 bytes), so the limit is higher
         let max_storage = device.limits().max_storage_buffer_binding_size as u64;
@@ -238,13 +238,17 @@ impl ParticleSystem {
                 device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(label_a),
                     size: component_size,
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC,
                     mapped_at_creation: false,
                 }),
                 device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(label_b),
                     size: component_size,
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC,
                     mapped_at_creation: false,
                 }),
             ]
@@ -327,8 +331,14 @@ impl ParticleSystem {
         // Pre-allocate at max_particles size so updates can use write_buffer without
         // recreating the buffer or bind groups (enables per-frame video source updates).
         // Morph effects use 4x stride (4 targets per particle interleaved).
-        let aux_multiplier = if def.morph { super::morph::MORPH_MAX_TARGETS as usize } else { 1 };
-        let aux_size = (std::mem::size_of::<ParticleAux>() * max_particles as usize * aux_multiplier).max(16) as u64;
+        let aux_multiplier = if def.morph {
+            super::morph::MORPH_MAX_TARGETS as usize
+        } else {
+            1
+        };
+        let aux_size =
+            (std::mem::size_of::<ParticleAux>() * max_particles as usize * aux_multiplier).max(16)
+                as u64;
         let aux_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("particle-aux"),
             size: aux_size,
@@ -525,14 +535,14 @@ impl ParticleSystem {
         // Build compute pipeline layout matching compute_bind_group_layouts() logic:
         // groups 0=core, 1=flow field, 2=trails, 3=spatial hash, 4=R-D (if present)
         let mut bgl_refs: Vec<&BindGroupLayout> = vec![&compute_bgl, &flow_field_bgl];
-        if spatial_hash.is_some() {
+        if let Some(ref sh) = spatial_hash {
             // Spatial hash at group 3 requires group 2 to exist (contiguous)
             if let Some(ref trail_bgl) = trail_compute_bgl {
                 bgl_refs.push(trail_bgl);
             } else {
                 bgl_refs.push(&empty_bgl);
             }
-            bgl_refs.push(&spatial_hash.as_ref().unwrap().query_bgl);
+            bgl_refs.push(&sh.query_bgl);
         } else if let Some(ref trail_bgl) = trail_compute_bgl {
             bgl_refs.push(trail_bgl);
         }
@@ -808,7 +818,9 @@ impl ParticleSystem {
         let use_compute_raster = match def.render_mode.as_str() {
             "compute" => {
                 if def.blend == "wboit" {
-                    log::warn!("Compute rasterizer is incompatible with WBOIT blend — falling back to billboard");
+                    log::warn!(
+                        "Compute rasterizer is incompatible with WBOIT blend — falling back to billboard"
+                    );
                     false
                 } else {
                     true
@@ -853,14 +865,8 @@ impl ParticleSystem {
             wboit_composite_bind_group,
             wboit_composite_bgl,
         ) = if def.blend == "wboit" && compute_raster.is_none() {
-            let (at, av, rt, rv, rp, cp, cbg, cbgl) = create_wboit_resources(
-                device,
-                hdr_format,
-                1920,
-                1080,
-                &render_bgl,
-                &sprite_bgl,
-            );
+            let (at, av, rt, rv, rp, cp, cbg, cbgl) =
+                create_wboit_resources(device, hdr_format, 1920, 1080, &render_bgl, &sprite_bgl);
             (
                 Some(at),
                 Some(av),
@@ -875,7 +881,7 @@ impl ParticleSystem {
             (None, None, None, None, None, None, None, None)
         };
 
-        Ok(Self {
+        Self {
             max_particles,
             uniforms: bytemuck::Zeroable::zeroed(),
             render_uniforms: bytemuck::Zeroable::zeroed(),
@@ -1001,7 +1007,7 @@ impl ParticleSystem {
             video_path: None,
             static_image_path: None,
             current_aux: Vec::new(),
-        })
+        }
     }
 
     /// Build the list of bind group layouts for compute pipeline creation.
@@ -1036,14 +1042,28 @@ impl ParticleSystem {
     /// Replace the compute shader and rebuild the pipeline (for switching shader at runtime).
     /// Unlike recompile_compute, this also updates current_compute_source.
     #[allow(dead_code)]
-    pub fn set_compute_shader(&mut self, device: &Device, source: &str) -> Result<(), String> {
-        self.recompile_compute(device, source)?;
+    pub fn set_compute_shader(&mut self, device: &Device, source: &str) {
+        self.recompile_compute(device, source);
         self.current_compute_source = source.to_string();
-        Ok(())
+    }
+
+    /// Get cloned bind group layouts for background compilation.
+    pub fn cloned_compute_bind_group_layouts(&self) -> Vec<BindGroupLayout> {
+        self.compute_bind_group_layouts()
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Swap in a pre-compiled compute pipeline (used after background compilation).
+    pub fn swap_compute_pipeline(&mut self, pipeline: wgpu::ComputePipeline) {
+        self.compute_pipeline = pipeline;
     }
 
     /// Recompile the compute pipeline (for hot-reload).
-    pub fn recompile_compute(&mut self, device: &Device, source: &str) -> Result<(), String> {
+    /// NOTE: This blocks the main thread during compilation. Prefer using
+    /// `ShaderCompiler` for background compilation + `swap_compute_pipeline()`.
+    pub fn recompile_compute(&mut self, device: &Device, source: &str) {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("particle-compute-hotreload"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -1067,7 +1087,6 @@ impl ParticleSystem {
         });
 
         self.compute_pipeline = pipeline;
-        Ok(())
     }
 
     /// Update uniforms from app state. Call before dispatch().
@@ -1268,8 +1287,7 @@ impl ParticleSystem {
             let steps = ((self.rd_steps_per_frame as f32
                 * (0.5 + p5)
                 * (1.0 + self.uniforms.beat * 1.0)) as u32)
-                .max(1)
-                .min(32);
+                .clamp(1, 32);
 
             for _step in 0..steps {
                 {
@@ -1850,16 +1868,20 @@ impl ParticleSystem {
         queue.submit(std::iter::once(encoder.finish()));
 
         // Block until GPU completes copy
-        let _ = device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
 
         // Map both staging buffers
-        pos_staging
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, |_| {});
+        pos_staging.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         color_staging
             .slice(..)
             .map_async(wgpu::MapMode::Read, |_| {});
-        let _ = device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
 
         let pos_mapped = pos_staging.slice(..).get_mapped_range();
         let color_mapped = color_staging.slice(..).get_mapped_range();
@@ -1877,7 +1899,8 @@ impl ParticleSystem {
                 let g = (color_data[i * 4 + 1].clamp(0.0, 1.0) * 255.0) as u8;
                 let b = (color_data[i * 4 + 2].clamp(0.0, 1.0) * 255.0) as u8;
                 let a = (color_data[i * 4 + 3].clamp(0.0, 1.0) * 255.0) as u8;
-                let packed = (r as u32) | ((g as u32) << 8) | ((b as u32) << 16) | ((a as u32) << 24);
+                let packed =
+                    (r as u32) | ((g as u32) << 8) | ((b as u32) << 16) | ((a as u32) << 24);
                 result.push(ParticleAux {
                     home: [x, y, f32::from_bits(packed), 0.0],
                 });
@@ -1909,11 +1932,8 @@ impl ParticleSystem {
         // EffectLoader::prepend_compute_libraries(). This fallback uses raw source.
         let default_source =
             include_str!("../../../../../assets/shaders/builtin/particle_sim.wgsl");
-        if let Err(e) = self.recompile_compute(device, default_source) {
-            log::error!("Failed to restore default compute shader: {e}");
-        } else {
-            self.current_compute_source = default_source.to_string();
-        }
+        self.recompile_compute(device, default_source);
+        self.current_compute_source = default_source.to_string();
 
         // Reset emitter shape
         self.def.emitter.shape = "point".to_string();
@@ -2086,9 +2106,7 @@ impl ParticleSystem {
         self.spatial_hash = Some(hash);
 
         // Recompile pipeline with spatial hash BGL (group 3) now included
-        if let Err(e) = self.recompile_compute(device, &self.current_compute_source.clone()) {
-            log::error!("Failed to recompile compute pipeline with spatial hash: {e}");
-        }
+        self.recompile_compute(device, &self.current_compute_source.clone());
     }
 
     /// Get the spatial hash query bind group layout, if interaction is enabled.
@@ -2319,9 +2337,7 @@ impl ParticleSystem {
         self.trail_compute_bind_group = Some(trail_compute_bind_group);
 
         // Recompile compute pipeline with trail bind group (group 2)
-        if let Err(e) = self.recompile_compute(device, &self.current_compute_source.clone()) {
-            log::error!("Failed to recompile compute pipeline with trails: {e}");
-        }
+        self.recompile_compute(device, &self.current_compute_source.clone());
 
         // Trail indirect args buffer (vertex_count = 6*(trail_length-1), instance_count from alive)
         let trail_indirect_args_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -3323,8 +3339,8 @@ fn create_rd_resources(
     u32,                            // rd_steps_per_frame
     u32,                            // rd_grid_size
 ) {
-    let grid_size = rd_def.grid_size.max(64).min(2048);
-    let steps = rd_def.steps_per_frame.max(1).min(32);
+    let grid_size = rd_def.grid_size.clamp(64, 2048);
+    let steps = rd_def.steps_per_frame.clamp(1, 32);
 
     // Two Rgba16Float textures for ping-pong R-D simulation
     let tex_desc = wgpu::TextureDescriptor {
@@ -3629,10 +3645,20 @@ fn create_wboit_resources(
     BindGroupLayout,
 ) {
     // Create accum (Rgba16Float) and revealage (R8Unorm) textures
-    let (accum_tex, accum_view) =
-        create_wboit_texture(device, width, height, TextureFormat::Rgba16Float, "wboit-accum");
-    let (reveal_tex, reveal_view) =
-        create_wboit_texture(device, width, height, TextureFormat::R8Unorm, "wboit-reveal");
+    let (accum_tex, accum_view) = create_wboit_texture(
+        device,
+        width,
+        height,
+        TextureFormat::Rgba16Float,
+        "wboit-accum",
+    );
+    let (reveal_tex, reveal_view) = create_wboit_texture(
+        device,
+        width,
+        height,
+        TextureFormat::R8Unorm,
+        "wboit-reveal",
+    );
 
     // --- WBOIT render pipeline (2 color targets) ---
     let wboit_render_source =
@@ -3648,66 +3674,65 @@ fn create_wboit_resources(
         push_constant_ranges: &[],
     });
 
-    let wboit_render_pipeline =
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("particle-render-wboit"),
-            layout: Some(&wboit_render_layout),
-            vertex: VertexState {
-                module: &wboit_render_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: PipelineCompilationOptions::default(),
-            },
-            fragment: Some(FragmentState {
-                module: &wboit_render_shader,
-                entry_point: Some("fs_wboit"),
-                targets: &[
-                    // location(0): accumulation — One + One (additive)
-                    Some(ColorTargetState {
-                        format: TextureFormat::Rgba16Float,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::One,
-                                dst_factor: wgpu::BlendFactor::One,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                            alpha: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::One,
-                                dst_factor: wgpu::BlendFactor::One,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                        }),
-                        write_mask: wgpu::ColorWrites::ALL,
+    let wboit_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("particle-render-wboit"),
+        layout: Some(&wboit_render_layout),
+        vertex: VertexState {
+            module: &wboit_render_shader,
+            entry_point: Some("vs_main"),
+            buffers: &[],
+            compilation_options: PipelineCompilationOptions::default(),
+        },
+        fragment: Some(FragmentState {
+            module: &wboit_render_shader,
+            entry_point: Some("fs_wboit"),
+            targets: &[
+                // location(0): accumulation — One + One (additive)
+                Some(ColorTargetState {
+                    format: TextureFormat::Rgba16Float,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
                     }),
-                    // location(1): revealage — Zero + OneMinusSrc (multiplicative product of (1-alpha))
-                    Some(ColorTargetState {
-                        format: TextureFormat::R8Unorm,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::Zero,
-                                dst_factor: wgpu::BlendFactor::OneMinusSrc,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                            alpha: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::Zero,
-                                dst_factor: wgpu::BlendFactor::OneMinusSrc,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                        }),
-                        write_mask: wgpu::ColorWrites::ALL,
+                    write_mask: wgpu::ColorWrites::ALL,
+                }),
+                // location(1): revealage — Zero + OneMinusSrc (multiplicative product of (1-alpha))
+                Some(ColorTargetState {
+                    format: TextureFormat::R8Unorm,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::Zero,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrc,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::Zero,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrc,
+                            operation: wgpu::BlendOperation::Add,
+                        },
                     }),
-                ],
-                compilation_options: PipelineCompilationOptions::default(),
-            }),
-            primitive: PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
+                    write_mask: wgpu::ColorWrites::ALL,
+                }),
+            ],
+            compilation_options: PipelineCompilationOptions::default(),
+        }),
+        primitive: PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    });
 
     // --- WBOIT composite pipeline (fullscreen triangle) ---
     let composite_source =
@@ -3758,46 +3783,45 @@ fn create_wboit_resources(
         push_constant_ranges: &[],
     });
 
-    let composite_pipeline =
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("wboit-composite"),
-            layout: Some(&composite_layout),
-            vertex: VertexState {
-                module: &composite_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: PipelineCompilationOptions::default(),
-            },
-            fragment: Some(FragmentState {
-                module: &composite_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(ColorTargetState {
-                    format: hdr_format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::SrcAlpha,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: PipelineCompilationOptions::default(),
-            }),
-            primitive: PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
+    let composite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("wboit-composite"),
+        layout: Some(&composite_layout),
+        vertex: VertexState {
+            module: &composite_shader,
+            entry_point: Some("vs_main"),
+            buffers: &[],
+            compilation_options: PipelineCompilationOptions::default(),
+        },
+        fragment: Some(FragmentState {
+            module: &composite_shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(ColorTargetState {
+                format: hdr_format,
+                blend: Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::SrcAlpha,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                    alpha: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::One,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: PipelineCompilationOptions::default(),
+        }),
+        primitive: PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    });
 
     // Composite bind group
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {

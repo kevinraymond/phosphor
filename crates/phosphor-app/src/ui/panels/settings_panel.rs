@@ -80,10 +80,7 @@ pub fn draw_settings_panel(
     {
         let mut ffmpeg = use_ffmpeg_webcam;
         let resp = ui
-            .checkbox(
-                &mut ffmpeg,
-                RichText::new("FFmpeg webcam").size(SMALL_SIZE),
-            )
+            .checkbox(&mut ffmpeg, RichText::new("FFmpeg webcam").size(SMALL_SIZE))
             .on_hover_text(
                 "Use FFmpeg for webcam capture. Enable if your camera isn't detected \
                  (e.g. virtual cameras like Irium or DroidCam). Requires FFmpeg installed.",

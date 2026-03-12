@@ -184,7 +184,7 @@ impl BindingBus {
         osc: &OscSystem,
     ) -> Vec<(String, f32)> {
         // Collect source snapshots (always, even with no bindings — needed for matrix meters)
-        let mut snapshot = SourceSnapshot::new();
+        let mut snapshot = HashMap::with_capacity(64);
 
         if let Some(features) = audio {
             snapshot.extend(sources::collect_audio(features));
@@ -193,9 +193,8 @@ impl BindingBus {
         snapshot.extend(sources::collect_osc(osc));
         snapshot.extend(sources::collect_websocket(&self.ws_bind_values));
 
-        self.last_snapshot = snapshot.clone();
-
         if self.bindings.is_empty() {
+            self.last_snapshot = snapshot;
             return Vec::new();
         }
 
@@ -225,7 +224,7 @@ impl BindingBus {
         }
 
         // Evaluate each enabled binding
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(self.bindings.len());
 
         for binding in &self.bindings {
             if !binding.enabled {
@@ -236,10 +235,10 @@ impl BindingBus {
                 continue;
             };
 
-            let runtime = self
-                .runtimes
-                .entry(binding.id.clone())
-                .or_insert_with(BindingRuntime::new);
+            let runtime = match self.runtimes.get_mut(binding.id.as_str()) {
+                Some(r) => r,
+                None => self.runtimes.entry(binding.id.clone()).or_default(),
+            };
 
             runtime.last_input = Some(*value);
             runtime.last_raw = Some(raw.clone());
@@ -250,14 +249,15 @@ impl BindingBus {
             results.push((binding.target.clone(), output));
         }
 
+        self.last_snapshot = snapshot;
+
         results
     }
 
     /// Load preset-scoped bindings (called on preset load).
     pub fn load_preset_bindings(&mut self, preset_name: &str) {
         // Remove existing preset-scoped bindings
-        self.bindings
-            .retain(|b| b.scope != BindingScope::Preset);
+        self.bindings.retain(|b| b.scope != BindingScope::Preset);
 
         let preset_bindings = persistence::load_preset(preset_name);
         for b in &preset_bindings {
@@ -313,6 +313,7 @@ impl BindingBus {
     }
 
     /// Check if any source type has active bindings (for UI indicators).
+    #[allow(dead_code)]
     pub fn has_source_type(&self, prefix: &str) -> bool {
         self.bindings
             .iter()
@@ -408,7 +409,11 @@ mod tests {
             pending_triggers: Vec::new(),
         };
 
-        bus.add_binding("audio.kick".into(), "param.P.w".into(), BindingScope::Global);
+        bus.add_binding(
+            "audio.kick".into(),
+            "param.P.w".into(),
+            BindingScope::Global,
+        );
         let id2 = bus.add_binding("audio.rms".into(), "param.P.x".into(), BindingScope::Global);
 
         assert_eq!(bus.active_count(), 2);

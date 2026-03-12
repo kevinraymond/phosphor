@@ -436,8 +436,8 @@ mod tests {
         // Jitter values should be in [-1, 1]
         for i in 0..1000 {
             let (jx, jy) = grid_jitter(i);
-            assert!(jx >= -1.0 && jx <= 1.0, "jx={jx} out of range for i={i}");
-            assert!(jy >= -1.0 && jy <= 1.0, "jy={jy} out of range for i={i}");
+            assert!((-1.0..=1.0).contains(&jx), "jx={jx} out of range for i={i}");
+            assert!((-1.0..=1.0).contains(&jy), "jy={jy} out of range for i={i}");
         }
     }
 

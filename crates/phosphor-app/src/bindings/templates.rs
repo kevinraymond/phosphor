@@ -2,6 +2,7 @@ use super::bus::BindingBus;
 use super::types::{BindingScope, TransformDef};
 
 /// A built-in binding template.
+#[derive(Debug)]
 pub struct BindingTemplate {
     pub name: &'static str,
     pub description: &'static str,
@@ -9,6 +10,7 @@ pub struct BindingTemplate {
 }
 
 /// A single entry in a template.
+#[derive(Debug)]
 pub struct TemplateEntry {
     pub source: &'static str,
     /// Target pattern - "{effect}" is replaced with the current effect name.
@@ -19,8 +21,7 @@ pub struct TemplateEntry {
 
 /// All available built-in templates.
 pub fn builtin_templates() -> &'static [&'static BindingTemplate] {
-    static ALL: &[&BindingTemplate] =
-        &[&AUDIO_REACTIVE, &BEAT_SYNC, &SPECTRAL_BANDS, &MIDI_FADERS];
+    static ALL: &[&BindingTemplate] = &[&AUDIO_REACTIVE, &BEAT_SYNC, &SPECTRAL_BANDS, &MIDI_FADERS];
     ALL
 }
 

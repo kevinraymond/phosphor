@@ -13,7 +13,9 @@ use crossbeam_channel::{Receiver, Sender};
 
 use self::types::{WebConfig, WebFrameResult, WsInMessage};
 use crate::audio::features::AudioFeatures;
-use crate::params::{ParamDef, ParamStore, ParamValue};
+use std::collections::HashMap;
+
+use crate::params::{ParamDef, ParamValue};
 
 /// Central WebSocket system: owns accept thread, client channels, config.
 pub struct WebSystem {
@@ -135,9 +137,11 @@ impl WebSystem {
     }
 
     /// Main per-frame update. Drains WS messages, returns structured results.
+    /// Accepts split-borrowed ParamStore fields to avoid cloning defs.
     pub fn update(
         &mut self,
-        param_store: &mut ParamStore,
+        param_values: &mut HashMap<String, ParamValue>,
+        param_changed: &mut bool,
         param_defs: &[ParamDef],
     ) -> WebFrameResult {
         let mut result = WebFrameResult::empty();
@@ -158,7 +162,7 @@ impl WebSystem {
         for msg in messages {
             match msg {
                 WsInMessage::SetParam { name, value } => {
-                    apply_param(param_store, param_defs, &name, value);
+                    apply_param(param_values, param_changed, param_defs, &name, value);
                 }
                 WsInMessage::SetLayerParam { layer, name, value } => {
                     result.layer_params.push((layer, name, value));
@@ -317,15 +321,23 @@ impl Drop for WebSystem {
 }
 
 /// Apply a normalized (0-1) float value to a param, scaling to its defined range.
-fn apply_param(store: &mut ParamStore, defs: &[ParamDef], name: &str, value: f32) {
+fn apply_param(
+    values: &mut HashMap<String, ParamValue>,
+    changed: &mut bool,
+    defs: &[ParamDef],
+    name: &str,
+    value: f32,
+) {
     if let Some(def) = defs.iter().find(|d| d.name() == name) {
         match def {
             ParamDef::Float { min, max, .. } => {
                 let val = min + (max - min) * value.clamp(0.0, 1.0);
-                store.set(name, ParamValue::Float(val));
+                values.insert(name.to_string(), ParamValue::Float(val));
+                *changed = true;
             }
             ParamDef::Bool { .. } => {
-                store.set(name, ParamValue::Bool(value > 0.5));
+                values.insert(name.to_string(), ParamValue::Bool(value > 0.5));
+                *changed = true;
             }
             _ => {}
         }

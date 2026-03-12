@@ -92,24 +92,27 @@ impl GpuContext {
         }));
 
         // Create pipeline cache (load from disk if available)
-        let pipeline_cache =
-            if device.features().contains(wgpu::Features::PIPELINE_CACHE) {
-                let cached_data = pipeline_cache_path()
-                    .and_then(|p| std::fs::read(p).ok());
-                let cache = unsafe {
-                    device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor {
-                        label: Some("phosphor-pipeline-cache"),
-                        data: cached_data.as_deref(),
-                        fallback: true,
-                    })
-                };
-                log::info!("Pipeline cache created (loaded {} bytes from disk)",
-                    cached_data.as_ref().map_or(0, |d| d.len()));
-                Some(cache)
-            } else {
-                log::info!("Pipeline cache not supported by adapter");
-                None
+        let pipeline_cache = if device.features().contains(wgpu::Features::PIPELINE_CACHE) {
+            let cached_data = pipeline_cache_path().and_then(|p| std::fs::read(p).ok());
+            // SAFETY: create_pipeline_cache requires unsafe per wgpu API because loading
+            // cached data from disk could theoretically cause driver issues if corrupted.
+            // We set fallback=true so wgpu creates an empty cache if data is invalid.
+            let cache = unsafe {
+                device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor {
+                    label: Some("phosphor-pipeline-cache"),
+                    data: cached_data.as_deref(),
+                    fallback: true,
+                })
             };
+            log::info!(
+                "Pipeline cache created (loaded {} bytes from disk)",
+                cached_data.as_ref().map_or(0, |d| d.len())
+            );
+            Some(cache)
+        } else {
+            log::info!("Pipeline cache not supported by adapter");
+            None
+        };
 
         let size = window.inner_size();
         let capabilities = surface.get_capabilities(&adapter);

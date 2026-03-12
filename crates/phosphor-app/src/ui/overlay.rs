@@ -55,12 +55,12 @@ impl EguiOverlay {
         fonts
             .families
             .get_mut(&egui::FontFamily::Proportional)
-            .unwrap()
+            .expect("egui always has Proportional font family")
             .insert(0, "Inter-Regular".into());
         fonts
             .families
             .get_mut(&egui::FontFamily::Monospace)
-            .unwrap()
+            .expect("egui always has Monospace font family")
             .insert(0, "JetBrainsMono".into());
         ctx.set_fonts(fonts);
 

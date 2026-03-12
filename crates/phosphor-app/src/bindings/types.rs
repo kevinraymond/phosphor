@@ -52,6 +52,7 @@ pub enum TransformDef {
 }
 
 /// Per-binding runtime state (not serialized).
+#[derive(Debug, Default, Clone)]
 pub struct BindingRuntime {
     pub smooth_state: f32,
     pub last_input: Option<f32>,
@@ -79,6 +80,7 @@ pub struct SourceRaw {
 }
 
 /// What the binding bus is currently learning.
+#[derive(Debug, Clone)]
 pub struct LearnState {
     pub binding_id: BindingId,
     pub field: LearnField,

@@ -645,9 +645,7 @@ impl TempoEstimator {
                 .sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             let noise_floor = sorted_vals[sorted_vals.len() / 2]; // median
             let peak = autocorr[best_lag];
-            ((peak - noise_floor) / (1.0 - noise_floor).max(1e-6))
-                .max(0.0)
-                .min(1.0)
+            ((peak - noise_floor) / (1.0 - noise_floor).max(1e-6)).clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -1236,8 +1234,8 @@ mod tests {
         let (lo, hi) = od.bin_range(20.0, 80.0, 4096);
         // bin_width = 44100/4096 ≈ 10.77 Hz
         // lo = round(20/10.77) = 2, hi = round(80/10.77) = 7
-        assert!(lo >= 1 && lo <= 3, "lo={}", lo);
-        assert!(hi >= 6 && hi <= 8, "hi={}", hi);
+        assert!((1..=3).contains(&lo), "lo={}", lo);
+        assert!((6..=8).contains(&hi), "hi={}", hi);
     }
 
     // ---- BeatScheduler tests ----
@@ -1269,7 +1267,7 @@ mod tests {
         for i in 1..100 {
             let t = 1.0 + (i as f64) * 0.01;
             let (_, phase, _) = bs.process(false, 0.0, t, false);
-            assert!(phase >= 0.0 && phase <= 1.0, "phase={} at t={}", phase, t);
+            assert!((0.0..=1.0).contains(&phase), "phase={} at t={}", phase, t);
         }
     }
 
@@ -1368,14 +1366,15 @@ mod tests {
         let bpm = run_bpm_convergence_test(230.0, 10.0);
         // Accept 230 BPM or half-tempo 115 BPM (prior centered at 150 favors lower octave)
         let in_range = (bpm > 92.0 && bpm < 138.0) || (bpm > 184.0 && bpm < 276.0);
-        assert!(in_range,
-            "230 BPM: expected 92-138 or 184-276, got {bpm}");
+        assert!(in_range, "230 BPM: expected 92-138 or 184-276, got {bpm}");
     }
 
     #[test]
     fn bpm_no_octave_double_145() {
         let bpm = run_bpm_convergence_test(145.0, 10.0);
-        assert!(bpm > 116.0 && bpm < 174.0,
-            "145 BPM: expected 116-174 (not 290 octave double), got {bpm}");
+        assert!(
+            bpm > 116.0 && bpm < 174.0,
+            "145 BPM: expected 116-174 (not 290 octave double), got {bpm}"
+        );
     }
 }

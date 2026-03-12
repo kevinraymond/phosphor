@@ -152,7 +152,12 @@ impl PassExecutor {
             rp.draw(0..3, 0..1);
         }
 
-        let final_target = self.passes.last().unwrap().target.write_target();
+        let final_target = self
+            .passes
+            .last()
+            .expect("pipeline always has at least one pass")
+            .target
+            .write_target();
 
         // 3. Particle render pass — composites on top of last fragment pass with LoadOp::Load
         if let Some(ref ps) = self.particle_system {
@@ -208,6 +213,9 @@ impl PassExecutor {
     }
 
     /// Try to recompile a specific pass's shader (for hot-reload).
+    /// NOTE: This blocks the main thread during compilation. Prefer using
+    /// `ShaderCompiler` for background compilation + `swap_pass_pipeline()`.
+    #[allow(dead_code)]
     pub fn recompile_pass(
         &mut self,
         pass_index: usize,
@@ -229,6 +237,32 @@ impl PassExecutor {
                 placeholder,
                 pass.has_feedback,
             );
+            Ok(())
+        } else {
+            Err(format!("Pass index {pass_index} out of range"))
+        }
+    }
+
+    /// Swap in a pre-compiled pipeline for a specific pass (used after background compilation).
+    /// Recreates bind groups to match the new pipeline's layout.
+    pub fn swap_pass_pipeline(
+        &mut self,
+        pass_index: usize,
+        pipeline: ShaderPipeline,
+        device: &Device,
+        uniform_buffer: &UniformBuffer,
+        placeholder: &PlaceholderTexture,
+    ) -> Result<(), String> {
+        if let Some(pass) = self.passes.get_mut(pass_index) {
+            pass.bind_groups = create_pass_bind_groups(
+                device,
+                uniform_buffer,
+                &pipeline.bind_group_layout,
+                &pass.target,
+                placeholder,
+                pass.has_feedback,
+            );
+            pass.pipeline = pipeline;
             Ok(())
         } else {
             Err(format!("Pass index {pass_index} out of range"))

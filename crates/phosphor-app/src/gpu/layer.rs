@@ -10,8 +10,9 @@ use crate::media::MediaLayer;
 use crate::params::ParamStore;
 
 /// Blend mode for compositing layers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum BlendMode {
+    #[default]
     Normal,
     Add,
     Screen,
@@ -113,8 +114,8 @@ pub struct EffectLayer {
 
 /// Content type for a layer.
 pub enum LayerContent {
-    Effect(EffectLayer),
-    Media(MediaLayer),
+    Effect(Box<EffectLayer>),
+    Media(Box<MediaLayer>),
 }
 
 /// A single compositing layer. Owns its own rendering pipeline and parameters.
@@ -138,7 +139,7 @@ impl Layer {
             name,
             custom_name: None,
             param_store,
-            content: LayerContent::Effect(effect),
+            content: LayerContent::Effect(Box::new(effect)),
             blend_mode: BlendMode::Normal,
             opacity: 1.0,
             enabled: true,
@@ -154,7 +155,7 @@ impl Layer {
             name,
             custom_name: None,
             param_store: ParamStore::new(),
-            content: LayerContent::Media(media),
+            content: LayerContent::Media(Box::new(media)),
             blend_mode: BlendMode::Normal,
             opacity: 1.0,
             enabled: true,

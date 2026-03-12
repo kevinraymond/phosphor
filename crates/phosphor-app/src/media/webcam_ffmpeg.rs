@@ -37,10 +37,11 @@ pub fn ffmpeg_available() -> bool {
 /// - Linux: `/dev/video0`
 /// - Windows: `Integrated Camera` (DirectShow name)
 /// - macOS: `0` (avfoundation index)
+#[allow(clippy::unnecessary_wraps)] // Returns Result for cross-platform API; Linux path is infallible
 pub fn list_devices() -> Result<Vec<(u32, String)>, String> {
     #[cfg(target_os = "linux")]
     {
-        list_devices_linux()
+        Ok(list_devices_linux())
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -59,10 +60,10 @@ pub fn list_devices() -> Result<Vec<(u32, String)>, String> {
 /// Linux: scan /sys/class/video4linux to find capture-capable devices.
 /// Deduplicates by card name (keeps lowest-numbered device per card).
 #[cfg(target_os = "linux")]
-fn list_devices_linux() -> Result<Vec<(u32, String)>, String> {
+fn list_devices_linux() -> Vec<(u32, String)> {
     let sysfs = std::path::Path::new("/sys/class/video4linux");
     if !sysfs.exists() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
     let mut entries: Vec<(u32, String, String)> = Vec::new(); // (dev_num, path, card_name)
     if let Ok(dir) = std::fs::read_dir(sysfs) {
@@ -72,7 +73,10 @@ fn list_devices_linux() -> Result<Vec<(u32, String)>, String> {
             if !name_str.starts_with("video") {
                 continue;
             }
-            let dev_num: u32 = name_str.trim_start_matches("video").parse().unwrap_or(u32::MAX);
+            let dev_num: u32 = name_str
+                .trim_start_matches("video")
+                .parse()
+                .unwrap_or(u32::MAX);
             let dev_path = format!("/dev/{name_str}");
             let card_name = std::fs::read_to_string(entry.path().join("name"))
                 .unwrap_or_default()
@@ -96,7 +100,7 @@ fn list_devices_linux() -> Result<Vec<(u32, String)>, String> {
             result.push((idx, dev_path.clone()));
         }
     }
-    Ok(result)
+    result
 }
 
 impl FfmpegCapture {
@@ -290,7 +294,7 @@ fn read_exact_timeout(
         match reader.read(&mut buf[filled..]) {
             Ok(0) => return Err("EOF from ffmpeg".into()),
             Ok(n) => filled += n,
-            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(e) => return Err(format!("Read error: {e}")),
         }
     }
@@ -347,7 +351,7 @@ fn capture_thread(
                     break;
                 }
                 Ok(n) => filled += n,
-                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {}
                 Err(e) => {
                     log::warn!("FFmpeg read error: {e}");
                     failed = true;

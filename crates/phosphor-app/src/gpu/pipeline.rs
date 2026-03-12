@@ -46,6 +46,7 @@ impl ShaderPipeline {
         })
     }
 
+    #[allow(dead_code)]
     pub fn recreate_pipeline(
         &mut self,
         device: &Device,
@@ -64,8 +65,13 @@ impl ShaderPipeline {
             source: wgpu::ShaderSource::Wgsl(full_source.into()),
         });
 
-        let pipeline =
-            Self::create_pipeline(device, format, &self.bind_group_layout, &shader_module, cache);
+        let pipeline = Self::create_pipeline(
+            device,
+            format,
+            &self.bind_group_layout,
+            &shader_module,
+            cache,
+        );
 
         // Check if any validation errors occurred during shader/pipeline creation.
         if let Some(error) = pollster::block_on(device.pop_error_scope()) {

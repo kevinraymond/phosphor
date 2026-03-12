@@ -74,7 +74,7 @@ pub fn collect_audio(features: &AudioFeatures) -> SourceSnapshot {
 
 /// Collect MIDI CC values into source snapshot.
 pub fn collect_midi(midi: &MidiSystem) -> SourceSnapshot {
-    let mut map = SourceSnapshot::new();
+    let mut map = HashMap::with_capacity(midi.last_cc_values.len());
 
     for (&(cc, channel), &(raw_value, ref device_name)) in &midi.last_cc_values {
         // Sanitize device name for use as key segment
@@ -98,7 +98,7 @@ pub fn collect_midi(midi: &MidiSystem) -> SourceSnapshot {
 
 /// Collect OSC values into source snapshot.
 pub fn collect_osc(osc: &OscSystem) -> SourceSnapshot {
-    let mut map = SourceSnapshot::new();
+    let mut map = HashMap::with_capacity(osc.last_raw_values.len());
 
     for (address, &value) in &osc.last_raw_values {
         let key = format!("osc.{address}");
@@ -119,7 +119,7 @@ pub fn collect_osc(osc: &OscSystem) -> SourceSnapshot {
 
 /// Collect WebSocket binding values into source snapshot.
 pub fn collect_websocket(ws_values: &HashMap<String, f32>) -> SourceSnapshot {
-    let mut map = SourceSnapshot::new();
+    let mut map = HashMap::with_capacity(ws_values.len());
 
     for (key, &value) in ws_values {
         let source_key = format!("ws.{key}");
@@ -141,7 +141,13 @@ pub fn collect_websocket(ws_values: &HashMap<String, f32>) -> SourceSnapshot {
 /// Sanitize device name: replace spaces and dots with underscores.
 fn sanitize_device_name(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 

@@ -8,6 +8,7 @@ use crossbeam_channel::Receiver;
 use super::ffi::NdiSender;
 
 /// Frame data sent from the render thread to the NDI sender thread.
+#[derive(Debug)]
 pub struct NdiFrame {
     pub data: Vec<u8>,
     pub width: u32,
@@ -36,7 +37,7 @@ pub fn spawn_sender_thread(
             std::thread::Builder::new()
                 .name("ndi-sender-noop".into())
                 .spawn(|| {})
-                .unwrap()
+                .expect("failed to spawn noop thread")
         })
 }
 
@@ -54,7 +55,7 @@ fn sender_loop(
                 sender.send_video(&frame.data, frame.width, frame.height);
                 frame_counter.fetch_add(1, Ordering::Relaxed);
             }
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
         }
     }

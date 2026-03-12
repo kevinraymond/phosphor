@@ -1,6 +1,6 @@
 use egui::{
-    collapsing_header::CollapsingState, Color32, CornerRadius, Frame, Margin, RichText, Stroke,
-    Ui, Vec2,
+    Color32, CornerRadius, Frame, Margin, RichText, Stroke, Ui, Vec2,
+    collapsing_header::CollapsingState,
 };
 
 use crate::preset::PresetStore;
@@ -30,17 +30,17 @@ fn draw_pulse_dot(ui: &mut Ui, time: f64) {
     ui.painter().circle(
         center,
         ring_radius,
-        Color32::from_rgba_unmultiplied(AMBER.r(), AMBER.g(), AMBER.b(), (ring_alpha * 255.0) as u8),
+        Color32::from_rgba_unmultiplied(
+            AMBER.r(),
+            AMBER.g(),
+            AMBER.b(),
+            (ring_alpha * 255.0) as u8,
+        ),
         Stroke::NONE,
     );
 
     // Inner solid dot
-    ui.painter().circle(
-        center,
-        3.0,
-        AMBER,
-        Stroke::NONE,
-    );
+    ui.painter().circle(center, 3.0, AMBER, Stroke::NONE);
 }
 
 /// Top-level preset section with custom header (replaces widgets::section for presets).
@@ -173,74 +173,68 @@ fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
                                 .size(SMALL_SIZE)
                                 .color(AMBER_TEXT),
                         );
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                // Reset button (neutral style)
-                                let reset_btn = ui.add(
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Reset button (neutral style)
+                            let reset_btn = ui.add(
+                                egui::Button::new(
+                                    RichText::new("Reset")
+                                        .size(SMALL_SIZE - 1.0)
+                                        .color(tc.text_secondary),
+                                )
+                                .fill(Color32::from_rgba_unmultiplied(255, 255, 255, 13)) // ~5%
+                                .stroke(Stroke::new(
+                                    1.0,
+                                    Color32::from_rgba_unmultiplied(255, 255, 255, 31), // ~12%
+                                ))
+                                .corner_radius(CornerRadius::same(3)),
+                            );
+                            if reset_btn
+                                .on_hover_text("Discard changes and reload preset")
+                                .clicked()
+                            {
+                                ui.ctx().data_mut(|d| {
+                                    d.insert_temp(egui::Id::new("pending_preset"), current_idx);
+                                });
+                            }
+
+                            // Update button (amber, only for user presets)
+                            if is_user_preset {
+                                let update_btn = ui.add(
                                     egui::Button::new(
-                                        RichText::new("Reset")
+                                        RichText::new("Update")
                                             .size(SMALL_SIZE - 1.0)
-                                            .color(tc.text_secondary),
+                                            .color(AMBER_TEXT),
                                     )
-                                    .fill(Color32::from_rgba_unmultiplied(255, 255, 255, 13)) // ~5%
+                                    .fill(Color32::from_rgba_unmultiplied(
+                                        AMBER.r(),
+                                        AMBER.g(),
+                                        AMBER.b(),
+                                        64, // ~25%
+                                    ))
                                     .stroke(Stroke::new(
                                         1.0,
-                                        Color32::from_rgba_unmultiplied(255, 255, 255, 31), // ~12%
+                                        Color32::from_rgba_unmultiplied(
+                                            AMBER.r(),
+                                            AMBER.g(),
+                                            AMBER.b(),
+                                            128, // ~50%
+                                        ),
                                     ))
                                     .corner_radius(CornerRadius::same(3)),
                                 );
-                                if reset_btn
-                                    .on_hover_text("Discard changes and reload preset")
+                                if update_btn
+                                    .on_hover_text("Save changes to current preset")
                                     .clicked()
                                 {
                                     ui.ctx().data_mut(|d| {
                                         d.insert_temp(
-                                            egui::Id::new("pending_preset"),
-                                            current_idx,
+                                            egui::Id::new("save_preset"),
+                                            current_name.clone(),
                                         );
                                     });
                                 }
-
-                                // Update button (amber, only for user presets)
-                                if is_user_preset {
-                                    let update_btn = ui.add(
-                                        egui::Button::new(
-                                            RichText::new("Update")
-                                                .size(SMALL_SIZE - 1.0)
-                                                .color(AMBER_TEXT),
-                                        )
-                                        .fill(Color32::from_rgba_unmultiplied(
-                                            AMBER.r(),
-                                            AMBER.g(),
-                                            AMBER.b(),
-                                            64, // ~25%
-                                        ))
-                                        .stroke(Stroke::new(
-                                            1.0,
-                                            Color32::from_rgba_unmultiplied(
-                                                AMBER.r(),
-                                                AMBER.g(),
-                                                AMBER.b(),
-                                                128, // ~50%
-                                            ),
-                                        ))
-                                        .corner_radius(CornerRadius::same(3)),
-                                    );
-                                    if update_btn
-                                        .on_hover_text("Save changes to current preset")
-                                        .clicked()
-                                    {
-                                        ui.ctx().data_mut(|d| {
-                                            d.insert_temp(
-                                                egui::Id::new("save_preset"),
-                                                current_name.clone(),
-                                            );
-                                        });
-                                    }
-                                }
-                            },
-                        );
+                            }
+                        });
                     });
                 });
 
@@ -437,21 +431,21 @@ fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
         let is_armed = new_armed.map_or(false, |t| now - t < 3.0);
 
         let (label, fill, stroke_color) = if dirty_and_selected && is_armed {
-            ("Discard changes?", tc.warning.linear_multiply(0.25), tc.warning)
+            (
+                "Discard changes?",
+                tc.warning.linear_multiply(0.25),
+                tc.warning,
+            )
         } else {
             ("+ New", tc.card_bg, tc.card_border)
         };
 
         if ui
             .add(
-                egui::Button::new(
-                    RichText::new(label)
-                        .size(SMALL_SIZE)
-                        .color(tc.text_primary),
-                )
-                .fill(fill)
-                .stroke(Stroke::new(1.0, stroke_color))
-                .corner_radius(CornerRadius::same(4)),
+                egui::Button::new(RichText::new(label).size(SMALL_SIZE).color(tc.text_primary))
+                    .fill(fill)
+                    .stroke(Stroke::new(1.0, stroke_color))
+                    .corner_radius(CornerRadius::same(4)),
             )
             .on_hover_text("Clear all layers and start fresh")
             .clicked()

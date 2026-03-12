@@ -28,7 +28,13 @@ pub struct FrameCapture {
 }
 
 impl FrameCapture {
-    pub fn new(device: &Device, width: u32, height: u32, format: TextureFormat, label: &str) -> Self {
+    pub fn new(
+        device: &Device,
+        width: u32,
+        height: u32,
+        format: TextureFormat,
+        label: &str,
+    ) -> Self {
         let texture = device.create_texture(&TextureDescriptor {
             label: Some(label),
             size: Extent3d {

@@ -107,11 +107,18 @@ fn handle_connection(
                 let client_id = client_counter.fetch_add(1, Ordering::Relaxed);
                 let (outbound_tx, outbound_rx) = crossbeam_channel::bounded(256);
 
-                // Get latest state for initial sync
-                let state = latest_state.lock().unwrap().clone();
+                // Get latest state for initial sync — recover from poisoned mutex
+                // rather than panicking the accept thread during a live performance.
+                let state = latest_state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
 
                 // Register client
-                clients.lock().unwrap().push(outbound_tx);
+                clients
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(outbound_tx);
 
                 let tx = inbound_tx.clone();
                 let flag = shutdown.clone();

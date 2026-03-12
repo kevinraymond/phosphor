@@ -190,7 +190,7 @@ mod tests {
         assert_eq!(cue.display_name(), "Crucible");
         cue.label = Some("Intro".to_string());
         assert_eq!(cue.display_name(), "Intro");
-        cue.label = Some("".to_string());
+        cue.label = Some(String::new());
         assert_eq!(cue.display_name(), "Crucible");
     }
 

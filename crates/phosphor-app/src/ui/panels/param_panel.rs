@@ -32,7 +32,10 @@ fn draw_midi_badge(ui: &mut Ui, midi: &mut MidiSystem, param_name: &str) {
         let mapping = &midi.config.params[param_name];
         let label = format_mapping_label(mapping.msg_type, mapping.cc);
         let resp = ui
-            .add(egui::Button::new(RichText::new(&label).color(MIDI_BLUE).size(9.0)).min_size(badge_min))
+            .add(
+                egui::Button::new(RichText::new(&label).color(MIDI_BLUE).size(9.0))
+                    .min_size(badge_min),
+            )
             .on_hover_text("Click to re-learn, right-click to clear");
         if resp.clicked() {
             midi.start_learn(LearnTarget::Param(param_name.to_string()));
@@ -100,9 +103,7 @@ pub fn draw_param_panel(
                 // Single compact row: [name left] [slider fills | value | M | O right]
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    ui.label(
-                        RichText::new(name).size(9.0).color(tc.text_secondary),
-                    );
+                    ui.label(RichText::new(name).size(9.0).color(tc.text_secondary));
                     // Right-to-left: badges rightmost, then value, slider fills the rest
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
@@ -203,8 +204,7 @@ pub fn draw_param_panel(
     ui.add_space(4.0);
     if ui
         .add(
-            egui::Button::new(RichText::new("Reset All").size(8.0))
-                .min_size(egui::vec2(0.0, 20.0)),
+            egui::Button::new(RichText::new("Reset All").size(8.0)).min_size(egui::vec2(0.0, 20.0)),
         )
         .clicked()
     {

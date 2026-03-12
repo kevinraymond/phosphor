@@ -182,11 +182,7 @@ fn draw_layer_type_legend(ui: &mut Ui, tc: &crate::ui::theme::colors::ThemeColor
                     let (rect, _) =
                         ui.allocate_exact_size(Vec2::new(3.0, 10.0), egui::Sense::hover());
                     ui.painter().rect_filled(rect, 1.0, color);
-                    ui.label(
-                        RichText::new(label)
-                            .size(8.0)
-                            .color(tc.text_secondary),
-                    );
+                    ui.label(RichText::new(label).size(8.0).color(tc.text_secondary));
                 })
                 .response;
             resp.on_hover_text(tooltip);
@@ -420,7 +416,8 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
 
                                 // Reserve space for type badge + delete button on right
                                 let right_btns_width = if num_layers > 1 { 46.0 } else { 28.0 };
-                                let label_width = (ui.available_width() - right_btns_width).max(20.0);
+                                let label_width =
+                                    (ui.available_width() - right_btns_width).max(20.0);
 
                                 if is_renaming {
                                     let mut text = ui.ctx().data_mut(|d| {
@@ -544,7 +541,6 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                                         .size(SMALL_SIZE)
                                         .color(with_alpha(type_color, badge_alpha)),
                                 );
-
                             });
                         });
                     header_center_y = _header_resp.response.rect.center().y;
@@ -698,8 +694,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                 });
 
             let card_rect = card_resp.response.rect;
-            let card_hovered = card_resp.response.hovered()
-                || ui.rect_contains_pointer(card_rect);
+            let card_hovered = card_resp.response.hovered() || ui.rect_contains_pointer(card_rect);
 
             // Left type color strip (3px)
             let strip_alpha = if layer.enabled { 1.0 } else { 0.5 };
@@ -779,7 +774,11 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                 let line_y = if slot < card_rects.len() {
                     card_rects[slot].top() - 1.0
                 } else {
-                    card_rects.last().unwrap().bottom() + 1.0
+                    card_rects
+                        .last()
+                        .expect("card_rects non-empty when slot >= len")
+                        .bottom()
+                        + 1.0
                 };
                 let left = card_rects[0].left() + 2.0;
                 let right = card_rects[0].right() - 2.0;
@@ -825,7 +824,12 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
     let can_add = num_layers < max_layers;
 
     // Type-colored button helper
-    let type_btn = |ui: &mut Ui, label: &str, type_color: Color32, can_add: bool, width: f32| -> egui::Response {
+    let type_btn = |ui: &mut Ui,
+                    label: &str,
+                    type_color: Color32,
+                    can_add: bool,
+                    width: f32|
+     -> egui::Response {
         let (fill, stroke_color, text_color) = if can_add {
             (
                 Color32::from_rgba_unmultiplied(type_color.r(), type_color.g(), type_color.b(), 18), // ~7%
@@ -855,7 +859,8 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
         #[cfg(not(feature = "webcam"))]
         let btn_count = 2.0_f32;
         let spacing = ui.spacing().item_spacing.x;
-        let btn_width = ((ui.available_width() - spacing * (btn_count - 1.0)) / btn_count).max(30.0);
+        let btn_width =
+            ((ui.available_width() - spacing * (btn_count - 1.0)) / btn_count).max(30.0);
 
         let add_btn = type_btn(ui, "+ Effect", TYPE_COLOR_EFFECT, can_add, btn_width);
         if add_btn.clicked() {

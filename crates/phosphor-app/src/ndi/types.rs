@@ -104,8 +104,10 @@ mod tests {
 
     #[test]
     fn ndi_config_alpha_from_luma_roundtrip() {
-        let mut c = NdiConfig::default();
-        c.alpha_from_luma = true;
+        let c = NdiConfig {
+            alpha_from_luma: true,
+            ..Default::default()
+        };
         let json = serde_json::to_string(&c).unwrap();
         let c2: NdiConfig = serde_json::from_str(&json).unwrap();
         assert!(c2.alpha_from_luma);

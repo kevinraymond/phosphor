@@ -14,10 +14,7 @@ pub fn migrate_legacy_if_needed() {
     // Migrate MIDI param mappings from midi.json
     let midi_config = crate::midi::mapping::MidiConfig::load();
     for (param_name, mapping) in &midi_config.params {
-        let device = midi_config
-            .port_name
-            .as_deref()
-            .unwrap_or("unknown");
+        let device = midi_config.port_name.as_deref().unwrap_or("unknown");
         let device_sanitized: String = device
             .chars()
             .map(|c| {

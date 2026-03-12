@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use anyhow::Result;
-use cpal::{Sample, SampleFormat, Stream};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{Sample, SampleFormat, Stream};
 
 /// Suppress noisy ALSA/JACK stderr messages during device enumeration.
 /// ALSA/JACK C libraries print errors for missing JACK server, OSS devices, etc.
@@ -29,11 +29,14 @@ pub fn suppress_audio_library_noise() {
         _fmt: *const std::ffi::c_char,
     ) {
     }
+    // SAFETY: snd_lib_error_set_handler is a well-defined ALSA API. Our null_handler
+    // matches the expected signature (minus va_args which we don't read). Called at
+    // startup to suppress noisy ALSA error output.
     unsafe {
         snd_lib_error_set_handler(Some(null_handler));
     }
-    // Suppress JACK "cannot connect to server" messages
-    // Safety: called once at startup before any threads are spawned.
+    // SAFETY: Called once at startup before any threads are spawned, so no data race
+    // on the environment. Suppresses JACK "cannot connect to server" messages.
     unsafe { std::env::set_var("JACK_NO_START_SERVER", "1") };
 
     // Also try to silence JACK callbacks now (may be no-op if libjack not yet loaded)
@@ -49,11 +52,21 @@ pub fn suppress_jack_errors() {
     type JackSetFn = unsafe extern "C" fn(Option<JackMsgCallback>);
     unsafe extern "C" fn jack_null_handler(_msg: *const std::ffi::c_char) {}
     unsafe extern "C" {
-        fn dlopen(filename: *const std::ffi::c_char, flags: std::ffi::c_int) -> *mut std::ffi::c_void;
-        fn dlsym(handle: *mut std::ffi::c_void, symbol: *const std::ffi::c_char) -> *mut std::ffi::c_void;
+        fn dlopen(
+            filename: *const std::ffi::c_char,
+            flags: std::ffi::c_int,
+        ) -> *mut std::ffi::c_void;
+        fn dlsym(
+            handle: *mut std::ffi::c_void,
+            symbol: *const std::ffi::c_char,
+        ) -> *mut std::ffi::c_void;
         fn dlclose(handle: *mut std::ffi::c_void) -> std::ffi::c_int;
     }
     const RTLD_NOW: std::ffi::c_int = 2;
+    // SAFETY: dlopen/dlsym/dlclose are standard POSIX APIs. We check for null returns
+    // before using handles/symbols. transmute converts the dlsym void pointer to the
+    // correct JACK callback setter signature. jack_null_handler matches the expected
+    // JackMsgCallback type. The library handle is closed after installing handlers.
     unsafe {
         // Proactively load libjack so we can install handlers before ALSA's JACK plugin runs
         let handle = dlopen(c"libjack.so.0".as_ptr(), RTLD_NOW);
@@ -82,7 +95,7 @@ const RING_MASK: u32 = (RING_SIZE - 1) as u32;
 
 /// Lock-free single-producer single-consumer ring buffer for audio samples.
 pub struct RingBuffer {
-    data: Box<[f32; RING_SIZE]>,
+    data: Box<[f32]>,
     write_pos: AtomicU32,
     read_pos: AtomicU32,
 }
@@ -90,7 +103,7 @@ pub struct RingBuffer {
 impl RingBuffer {
     pub fn new() -> Self {
         Self {
-            data: Box::new([0.0; RING_SIZE]),
+            data: vec![0.0; RING_SIZE].into_boxed_slice(),
             write_pos: AtomicU32::new(0),
             read_pos: AtomicU32::new(0),
         }
@@ -103,8 +116,9 @@ impl RingBuffer {
         for &sample in samples {
             // Safety: we're the only writer, and RING_SIZE is a power of 2
             let idx = (wp & RING_MASK) as usize;
-            // This is safe because we're the only writer and readers
-            // can tolerate stale data gracefully.
+            // SAFETY: Single-producer guarantee: only one thread calls push() (the audio
+            // callback). The write position is updated atomically with Release ordering
+            // after all writes. Readers tolerate momentarily stale data gracefully.
             unsafe {
                 let ptr = self.data.as_ptr().cast_mut();
                 *ptr.add(idx) = sample;
@@ -139,8 +153,11 @@ impl RingBuffer {
     }
 }
 
-// Safety: RingBuffer uses atomics for synchronization
+// SAFETY: RingBuffer uses atomic u32 positions for synchronization (Acquire/Release).
+// The single-producer constraint is upheld by design: only one thread calls push().
+// Readers use atomic loads and only access indices behind the write position.
 unsafe impl Send for RingBuffer {}
+// SAFETY: See above — atomics provide the cross-thread synchronization guarantees.
 unsafe impl Sync for RingBuffer {}
 
 pub struct AudioCapture {
@@ -279,8 +296,12 @@ impl AudioCapture {
 }
 
 /// Convert any cpal sample type to f32, downmix to mono, and push to ring buffer.
-fn push_samples<T: Sample>(ring: &RingBuffer, callback_count: &AtomicU64, data: &[T], channels: usize)
-where
+fn push_samples<T: Sample>(
+    ring: &RingBuffer,
+    callback_count: &AtomicU64,
+    data: &[T],
+    channels: usize,
+) where
     f32: cpal::FromSample<T>,
 {
     let count = callback_count.fetch_add(1, Ordering::Relaxed);
@@ -288,13 +309,22 @@ where
         log::info!("Audio callback fired (first data: {} samples)", data.len());
     }
     if channels == 1 {
-        let mono: Vec<f32> = data.iter().copied().map(|s| cpal::FromSample::from_sample_(s)).collect();
+        let mono: Vec<f32> = data
+            .iter()
+            .copied()
+            .map(|s| cpal::FromSample::from_sample_(s))
+            .collect();
         ring.push(&mono);
     } else {
         let mono: Vec<f32> = data
             .chunks(channels)
             .map(|frame| {
-                frame.iter().copied().map(|s| <f32 as cpal::FromSample<T>>::from_sample_(s)).sum::<f32>() / channels as f32
+                frame
+                    .iter()
+                    .copied()
+                    .map(|s| <f32 as cpal::FromSample<T>>::from_sample_(s))
+                    .sum::<f32>()
+                    / channels as f32
             })
             .collect();
         ring.push(&mono);

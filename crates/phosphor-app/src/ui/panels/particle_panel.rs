@@ -136,11 +136,7 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             feature_badge(ui, "sprite", tc.accent);
         }
         if info.is_compute_raster {
-            feature_badge(
-                ui,
-                "COMPUTE",
-                egui::Color32::from_rgb(0x40, 0xC0, 0xC0),
-            );
+            feature_badge(ui, "COMPUTE", egui::Color32::from_rgb(0x40, 0xC0, 0xC0));
         }
     });
 
@@ -300,29 +296,27 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                 } else {
                     "empty".to_string()
                 };
-                let is_current = has_target && !info.morph_transitioning && i == info.morph_dest_index;
-                let is_morphing_to = has_target && info.morph_transitioning && i == info.morph_dest_index;
+                let is_current =
+                    has_target && !info.morph_transitioning && i == info.morph_dest_index;
+                let is_morphing_to =
+                    has_target && info.morph_transitioning && i == info.morph_dest_index;
                 let is_selected = selected_slot == Some(i);
 
                 let sz = SMALL_SIZE - 1.0;
                 let btn = if is_selected {
-                    egui::Button::new(
-                        RichText::new(&label).size(sz).color(egui::Color32::WHITE),
-                    )
-                    .fill(egui::Color32::from_rgb(0xA0, 0x60, 0x30))
+                    egui::Button::new(RichText::new(&label).size(sz).color(egui::Color32::WHITE))
+                        .fill(egui::Color32::from_rgb(0xA0, 0x60, 0x30))
                 } else if is_current {
-                    egui::Button::new(
-                        RichText::new(&label).size(sz).color(egui::Color32::WHITE),
-                    )
-                    .fill(morph_active)
+                    egui::Button::new(RichText::new(&label).size(sz).color(egui::Color32::WHITE))
+                        .fill(morph_active)
                 } else if is_morphing_to {
-                    egui::Button::new(
-                        RichText::new(&label).size(sz).color(egui::Color32::WHITE),
-                    )
-                    .fill(morph_dest)
+                    egui::Button::new(RichText::new(&label).size(sz).color(egui::Color32::WHITE))
+                        .fill(morph_dest)
                 } else if !has_target {
                     egui::Button::new(
-                        RichText::new(&label).size(sz).color(tc.text_secondary.gamma_multiply(0.5)),
+                        RichText::new(&label)
+                            .size(sz)
+                            .color(tc.text_secondary.gamma_multiply(0.5)),
                     )
                 } else {
                     egui::Button::new(RichText::new(&label).size(sz))
@@ -374,9 +368,10 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                 );
                 if slot < info.morph_target_count {
                     if ui
-                        .add(egui::Button::new(
-                            RichText::new("Clear").size(SMALL_SIZE - 1.0),
-                        ).min_size(egui::vec2(0.0, 18.0)))
+                        .add(
+                            egui::Button::new(RichText::new("Clear").size(SMALL_SIZE - 1.0))
+                                .min_size(egui::vec2(0.0, 18.0)),
+                        )
                         .clicked()
                     {
                         ui.ctx().data_mut(|d| {
@@ -393,11 +388,13 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 // Source/dest selectors
-                let src_label = info.morph_target_labels
+                let src_label = info
+                    .morph_target_labels
                     .get(info.morph_source_index as usize)
                     .cloned()
                     .unwrap_or_else(|| format!("{}", info.morph_source_index));
-                let dst_label = info.morph_target_labels
+                let dst_label = info
+                    .morph_target_labels
                     .get(info.morph_dest_index as usize)
                     .cloned()
                     .unwrap_or_else(|| format!("{}", info.morph_dest_index));
@@ -409,7 +406,8 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                     .width(50.0)
                     .show_ui(ui, |ui| {
                         for i in 0..info.morph_target_count {
-                            let label = info.morph_target_labels
+                            let label = info
+                                .morph_target_labels
                                 .get(i as usize)
                                 .cloned()
                                 .unwrap_or_else(|| format!("{}", i));
@@ -434,7 +432,8 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                     .width(50.0)
                     .show_ui(ui, |ui| {
                         for i in 0..info.morph_target_count {
-                            let label = info.morph_target_labels
+                            let label = info
+                                .morph_target_labels
                                 .get(i as usize)
                                 .cloned()
                                 .unwrap_or_else(|| format!("{}", i));
@@ -489,7 +488,7 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                 .show_ui(ui, |ui| {
                     for shape in &geo_shapes {
                         if ui.selectable_label(false, *shape).clicked() {
-                            selected_geo = shape.to_string();
+                            selected_geo = (*shape).to_string();
                         }
                     }
                 });
@@ -527,9 +526,9 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
             let text_id = egui::Id::new("morph_text_input_buf");
-            let mut text_buf: String = ui.ctx().data_mut(|d| {
-                d.get_persisted_mut_or_default::<String>(text_id).clone()
-            });
+            let mut text_buf: String = ui
+                .ctx()
+                .data_mut(|d| d.get_persisted_mut_or_default::<String>(text_id).clone());
             let te = ui.add(
                 egui::TextEdit::singleline(&mut text_buf)
                     .desired_width(ui.available_width() - 42.0)
@@ -567,7 +566,9 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             let style_labels = ["Spring", "Explode", "Flow", "Cascade", "Direct"];
             let mut style = info.morph_transition_style;
             egui::ComboBox::from_id_salt("morph_style")
-                .selected_text(RichText::new(style_labels[style.min(4) as usize]).size(SMALL_SIZE - 1.0))
+                .selected_text(
+                    RichText::new(style_labels[style.min(4) as usize]).size(SMALL_SIZE - 1.0),
+                )
                 .width(60.0)
                 .show_ui(ui, |ui| {
                     for (i, label) in style_labels.iter().enumerate() {
@@ -583,11 +584,16 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             let cycle_labels = ["Off", "Beat", "Timed"];
             let mut cycle_mode = info.morph_auto_cycle;
             egui::ComboBox::from_id_salt("morph_auto_cycle")
-                .selected_text(RichText::new(cycle_labels[cycle_mode.min(2) as usize]).size(SMALL_SIZE - 1.0))
+                .selected_text(
+                    RichText::new(cycle_labels[cycle_mode.min(2) as usize]).size(SMALL_SIZE - 1.0),
+                )
                 .width(48.0)
                 .show_ui(ui, |ui| {
                     for (i, label) in cycle_labels.iter().enumerate() {
-                        if ui.selectable_label(cycle_mode == i as u32, *label).clicked() {
+                        if ui
+                            .selectable_label(cycle_mode == i as u32, *label)
+                            .clicked()
+                        {
                             cycle_mode = i as u32;
                             ui.ctx().data_mut(|d| {
                                 d.insert_temp(egui::Id::new("morph_auto_cycle"), cycle_mode);
@@ -599,7 +605,11 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             let mut hold = info.morph_hold_duration;
             // Temporarily shrink body text for this widget
             let prev = ui.style().text_styles[&egui::TextStyle::Body].size;
-            ui.style_mut().text_styles.get_mut(&egui::TextStyle::Body).unwrap().size = SMALL_SIZE - 1.0;
+            ui.style_mut()
+                .text_styles
+                .get_mut(&egui::TextStyle::Body)
+                .expect("egui always has Body text style")
+                .size = SMALL_SIZE - 1.0;
             let r = ui.add(
                 egui::DragValue::new(&mut hold)
                     .range(0.0..=8.0)
@@ -607,7 +617,11 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
                     .suffix("s")
                     .custom_formatter(|v, _| format!("{:.1}s", v)),
             );
-            ui.style_mut().text_styles.get_mut(&egui::TextStyle::Body).unwrap().size = prev;
+            ui.style_mut()
+                .text_styles
+                .get_mut(&egui::TextStyle::Body)
+                .expect("egui always has Body text style")
+                .size = prev;
             if r.changed() {
                 ui.ctx().data_mut(|d| {
                     d.insert_temp(egui::Id::new("morph_hold_duration"), hold);
@@ -680,18 +694,60 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
         }};
     }
 
-    param_row!(ui, "Emit rate", &mut emit_rate, 10.0..=emit_max, true,
-        |v, _| format!("{:.0}/s", v), "particle_emit_rate");
-    param_row!(ui, "Burst", &mut burst, 0..=burst_max, false,
-        |v, _| format!("{:.0}", v), "particle_burst");
-    param_row!(ui, "Lifetime", &mut lifetime, 0.5..=life_max, false,
-        |v, _| format!("{:.1}s", v), "particle_lifetime");
-    param_row!(ui, "Speed", &mut speed, speed_min..=speed_max, speed_log,
-        |v, _| format!("{:.3}", v), "particle_speed");
-    param_row!(ui, "Size", &mut size, size_min..=size_max, true,
-        |v, _| format!("{:.4}", v), "particle_size");
-    param_row!(ui, "Drag", &mut drag, drag_min..=1.0, false,
-        |v, _| format!("{:.3}", v), "particle_drag");
+    param_row!(
+        ui,
+        "Emit rate",
+        &mut emit_rate,
+        10.0..=emit_max,
+        true,
+        |v, _| format!("{:.0}/s", v),
+        "particle_emit_rate"
+    );
+    param_row!(
+        ui,
+        "Burst",
+        &mut burst,
+        0..=burst_max,
+        false,
+        |v, _| format!("{:.0}", v),
+        "particle_burst"
+    );
+    param_row!(
+        ui,
+        "Lifetime",
+        &mut lifetime,
+        0.5..=life_max,
+        false,
+        |v, _| format!("{:.1}s", v),
+        "particle_lifetime"
+    );
+    param_row!(
+        ui,
+        "Speed",
+        &mut speed,
+        speed_min..=speed_max,
+        speed_log,
+        |v, _| format!("{:.3}", v),
+        "particle_speed"
+    );
+    param_row!(
+        ui,
+        "Size",
+        &mut size,
+        size_min..=size_max,
+        true,
+        |v, _| format!("{:.4}", v),
+        "particle_size"
+    );
+    param_row!(
+        ui,
+        "Drag",
+        &mut drag,
+        drag_min..=1.0,
+        false,
+        |v, _| format!("{:.3}", v),
+        "particle_drag"
+    );
 }
 
 fn feature_badge_with_tooltip(ui: &mut Ui, text: &str, color: egui::Color32, tooltip: &str) {

@@ -5,20 +5,21 @@ use serde::{Deserialize, Serialize};
 use crate::gpu::types::OutputResolution;
 
 /// Video codec for recording output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum VideoCodec {
+    #[default]
     H264,
-    HEVC,
+    Hevc,
     AV1,
 }
 
 impl VideoCodec {
-    pub const ALL: &[VideoCodec] = &[VideoCodec::H264, VideoCodec::HEVC, VideoCodec::AV1];
+    pub const ALL: &[VideoCodec] = &[VideoCodec::H264, VideoCodec::Hevc, VideoCodec::AV1];
 
     pub fn display_name(self) -> &'static str {
         match self {
             VideoCodec::H264 => "H.264",
-            VideoCodec::HEVC => "HEVC",
+            VideoCodec::Hevc => "HEVC",
             VideoCodec::AV1 => "AV1",
         }
     }
@@ -27,7 +28,7 @@ impl VideoCodec {
     pub fn hw_encoder(self) -> &'static str {
         match self {
             VideoCodec::H264 => "h264_nvenc",
-            VideoCodec::HEVC => "hevc_nvenc",
+            VideoCodec::Hevc => "hevc_nvenc",
             VideoCodec::AV1 => "av1_nvenc",
         }
     }
@@ -36,21 +37,16 @@ impl VideoCodec {
     pub fn sw_encoder(self) -> &'static str {
         match self {
             VideoCodec::H264 => "libx264",
-            VideoCodec::HEVC => "libx265",
+            VideoCodec::Hevc => "libx265",
             VideoCodec::AV1 => "libsvtav1",
         }
     }
 }
 
-impl Default for VideoCodec {
-    fn default() -> Self {
-        VideoCodec::H264
-    }
-}
-
 /// Container format for recording output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Container {
+    #[default]
     Mp4,
     Mkv,
 }
@@ -70,12 +66,6 @@ impl Container {
             Container::Mp4 => "mp4",
             Container::Mkv => "mkv",
         }
-    }
-}
-
-impl Default for Container {
-    fn default() -> Self {
-        Container::Mp4
     }
 }
 
@@ -205,7 +195,7 @@ mod tests {
     #[test]
     fn video_codec_display() {
         assert_eq!(VideoCodec::H264.display_name(), "H.264");
-        assert_eq!(VideoCodec::HEVC.display_name(), "HEVC");
+        assert_eq!(VideoCodec::Hevc.display_name(), "HEVC");
         assert_eq!(VideoCodec::AV1.display_name(), "AV1");
     }
 

@@ -13,7 +13,9 @@ use self::sender::OscSender;
 use self::types::{OscConfig, OscInMessage, OscLearnTarget, OscMapping};
 use crate::audio::features::AudioFeatures;
 use crate::midi::types::TriggerAction;
-use crate::params::{ParamDef, ParamStore, ParamValue};
+use std::collections::HashMap;
+
+use crate::params::{ParamDef, ParamValue};
 
 /// Result of a single OscSystem::update() call.
 pub struct OscFrameResult {
@@ -188,9 +190,11 @@ impl OscSystem {
     }
 
     /// Main per-frame update. Drains OSC messages, applies to active layer params, returns structured results.
+    /// Accepts split-borrowed ParamStore fields to avoid cloning defs.
     pub fn update(
         &mut self,
-        param_store: &mut ParamStore,
+        param_values: &mut HashMap<String, ParamValue>,
+        param_changed: &mut bool,
         param_defs: &[ParamDef],
     ) -> OscFrameResult {
         let mut result = OscFrameResult::empty();
@@ -244,7 +248,7 @@ impl OscSystem {
 
             match msg {
                 OscInMessage::Param { name, value } => {
-                    apply_param(param_store, param_defs, &name, value);
+                    apply_param(param_values, param_changed, param_defs, &name, value);
                 }
                 OscInMessage::LayerParam { layer, name, value } => {
                     result.layer_params.push((layer, name, value));
@@ -285,7 +289,7 @@ impl OscSystem {
                     // Check learned param mappings
                     if let Some(param_name) = self.config.find_param(address) {
                         let param_name = param_name.to_string();
-                        apply_param(param_store, param_defs, &param_name, value);
+                        apply_param(param_values, param_changed, param_defs, &param_name, value);
                     }
                     // Check learned trigger mappings
                     else if let Some(action) = self.config.find_trigger(address) {
@@ -484,16 +488,23 @@ fn trigger_slug(action: &TriggerAction) -> &'static str {
 }
 
 /// Apply a float value to a param, scaling to its defined range.
-fn apply_param(store: &mut ParamStore, defs: &[ParamDef], name: &str, value: f32) {
+fn apply_param(
+    values: &mut HashMap<String, ParamValue>,
+    changed: &mut bool,
+    defs: &[ParamDef],
+    name: &str,
+    value: f32,
+) {
     if let Some(def) = defs.iter().find(|d| d.name() == name) {
         match def {
             ParamDef::Float { min, max, .. } => {
-                // OSC value is treated as 0-1 normalized, scaled to param range
                 let val = min + (max - min) * value.clamp(0.0, 1.0);
-                store.set(name, ParamValue::Float(val));
+                values.insert(name.to_string(), ParamValue::Float(val));
+                *changed = true;
             }
             ParamDef::Bool { .. } => {
-                store.set(name, ParamValue::Bool(value > 0.5));
+                values.insert(name.to_string(), ParamValue::Bool(value > 0.5));
+                *changed = true;
             }
             _ => {}
         }

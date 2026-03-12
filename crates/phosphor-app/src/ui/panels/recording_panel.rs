@@ -58,18 +58,21 @@ pub fn draw_recording_panel(ui: &mut Ui, info: &RecordingInfo) {
 
     // Record button
     let (btn_text, btn_color) = if info.recording {
-        ("\u{23F9} Stop Recording", egui::Color32::from_rgb(0xE0, 0x40, 0x40))
+        (
+            "\u{23F9} Stop Recording",
+            egui::Color32::from_rgb(0xE0, 0x40, 0x40),
+        )
     } else {
         ("\u{23FA} Record", egui::Color32::from_rgb(0xE0, 0x40, 0x40))
     };
 
-    let btn = egui::Button::new(
-        RichText::new(btn_text).size(SMALL_SIZE).color(if info.recording {
+    let btn = egui::Button::new(RichText::new(btn_text).size(SMALL_SIZE).color(
+        if info.recording {
             egui::Color32::WHITE
         } else {
             tc.text_primary
-        }),
-    )
+        },
+    ))
     .min_size(egui::vec2(120.0, 22.0));
 
     let btn = if info.recording {
@@ -86,11 +89,7 @@ pub fn draw_recording_panel(ui: &mut Ui, info: &RecordingInfo) {
 
     // Show error if any
     if let Some(ref err) = info.error {
-        ui.label(
-            RichText::new(err)
-                .size(SMALL_SIZE)
-                .color(tc.error),
-        );
+        ui.label(RichText::new(err).size(SMALL_SIZE).color(tc.error));
     }
 
     // Recording status
@@ -120,7 +119,11 @@ pub fn draw_recording_panel(ui: &mut Ui, info: &RecordingInfo) {
             ui.label(
                 RichText::new(format!(
                     "{}x{} @ {} • {}{}",
-                    info.output_width, info.output_height, info.config.fps, info.encoder_name, audio_tag
+                    info.output_width,
+                    info.output_height,
+                    info.config.fps,
+                    info.encoder_name,
+                    audio_tag
                 ))
                 .size(SMALL_SIZE)
                 .color(tc.text_secondary),

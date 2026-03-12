@@ -70,7 +70,7 @@ mod tests {
         let f = AudioFeatures::default();
         let s = f.as_slice();
         assert_eq!(s.len(), NUM_FEATURES);
-        for &v in s.iter() {
+        for &v in s {
             assert_eq!(v, 0.0);
         }
     }
@@ -90,9 +90,11 @@ mod tests {
 
     #[test]
     fn field_order_first_and_last() {
-        let mut f = AudioFeatures::default();
-        f.sub_bass = 0.11;
-        f.dominant_chroma = 0.99;
+        let f = AudioFeatures {
+            sub_bass: 0.11,
+            dominant_chroma: 0.99,
+            ..Default::default()
+        };
         let s = f.as_slice();
         assert!((s[0] - 0.11).abs() < 1e-6);
         assert!((s[45] - 0.99).abs() < 1e-6);

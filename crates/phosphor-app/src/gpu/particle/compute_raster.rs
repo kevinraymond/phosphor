@@ -266,8 +266,7 @@ impl ComputeRasterizer {
             ],
         });
 
-        let prefix_sum_pipeline =
-            create_prefix_sum_pipeline(device, &prefix_sum_bgl, num_tiles);
+        let prefix_sum_pipeline = create_prefix_sum_pipeline(device, &prefix_sum_bgl, num_tiles);
 
         let prefix_sum_bind_group = create_prefix_sum_bind_group(
             device,
@@ -422,12 +421,8 @@ impl ComputeRasterizer {
             "cr-resolve-alpha",
         );
 
-        let resolve_bind_group = create_resolve_bind_group(
-            device,
-            &resolve_bgl,
-            &fb_buffers,
-            &resolve_uniform_buffer,
-        );
+        let resolve_bind_group =
+            create_resolve_bind_group(device, &resolve_bgl, &fb_buffers, &resolve_uniform_buffer);
 
         Self {
             width,
@@ -603,7 +598,7 @@ impl ComputeRasterizer {
         target: &TextureView,
         blend_mode: &str,
     ) {
-        let mode = if blend_mode == "alpha" { 1u32 } else { 0u32 };
+        let mode = u32::from(blend_mode == "alpha");
         let uniforms = ResolveUniforms {
             width: self.width,
             height: self.height,
@@ -762,7 +757,6 @@ impl ComputeRasterizer {
 
         true
     }
-
 }
 
 // --- Helper functions ---
@@ -867,8 +861,7 @@ fn create_prefix_sum_pipeline(
     bgl: &BindGroupLayout,
     num_tiles: u32,
 ) -> ComputePipeline {
-    let source =
-        include_str!("../../../../../assets/shaders/builtin/spatial_hash_prefix_sum.wgsl");
+    let source = include_str!("../../../../../assets/shaders/builtin/spatial_hash_prefix_sum.wgsl");
     let patched = source.replace(
         "const NUM_CELLS: u32 = 1600u;",
         &format!("const NUM_CELLS: u32 = {num_tiles}u;"),
@@ -1055,10 +1048,7 @@ fn create_scatter_bind_groups(
         })
     };
 
-    [
-        make_bg(0, "cr-scatter-bg-0"),
-        make_bg(1, "cr-scatter-bg-1"),
-    ]
+    [make_bg(0, "cr-scatter-bg-0"), make_bg(1, "cr-scatter-bg-1")]
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1127,10 +1117,7 @@ fn create_tiled_bind_groups(
         })
     };
 
-    [
-        make_bg(0, "cr-tiled-bg-0"),
-        make_bg(1, "cr-tiled-bg-1"),
-    ]
+    [make_bg(0, "cr-tiled-bg-0"), make_bg(1, "cr-tiled-bg-1")]
 }
 
 fn create_resolve_bind_group(

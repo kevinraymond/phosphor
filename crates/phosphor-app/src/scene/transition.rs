@@ -168,7 +168,10 @@ impl TransitionRenderer {
         source: &RenderTarget,
     ) {
         self.ensure_targets(device, source.width, source.height, source.format);
-        let snapshot = self.snapshot.as_ref().unwrap();
+        let snapshot = self
+            .snapshot
+            .as_ref()
+            .expect("snapshot allocated by ensure_targets above");
 
         // Blit source to snapshot using crossfade at progress=0
         // (mix(A, B, 0) = A, so B can be anything — we use source for both)

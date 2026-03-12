@@ -122,8 +122,10 @@ mod tests {
 
     #[test]
     fn settings_config_with_audio_device() {
-        let mut c = SettingsConfig::default();
-        c.audio_device = Some("hw:0".to_string());
+        let c = SettingsConfig {
+            audio_device: Some("hw:0".to_string()),
+            ..Default::default()
+        };
         let json = serde_json::to_string(&c).unwrap();
         let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(c2.audio_device, Some("hw:0".to_string()));

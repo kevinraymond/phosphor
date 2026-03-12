@@ -3,13 +3,13 @@ pub mod emitter;
 pub mod flow_field;
 pub mod image_source;
 pub mod morph;
-pub mod text_source;
 pub mod obstacle;
 pub mod source_loader;
 pub mod spatial_hash;
 pub mod sprite;
 pub mod symbiosis;
 pub mod system;
+pub mod text_source;
 pub mod types;
 
 pub use source_loader::{
