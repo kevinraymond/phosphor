@@ -56,7 +56,7 @@ cargo run --release                    # no extra deps
 cargo run --release --features video   # requires: ffmpeg on PATH
 cargo run --release --features webcam  # requires: libclang-dev, v4l-utils (Linux)
 cargo run --release --features ndi     # requires: NDI SDK (runtime-loaded)
-cargo run --release --features depth   # requires: libssl-dev (build), ONNX Runtime (runtime, auto-downloaded)
+cargo run --release --features depth   # requires: libssl-dev, libclang-dev (includes webcam), ONNX Runtime (runtime, auto-downloaded)
 ```
 
 </details>

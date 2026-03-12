@@ -5,6 +5,9 @@
 
 ## Unreleased
 
+### Fixed
+- **Depth feature** — `depth` feature now depends on `webcam` (depth estimation requires webcam input), eliminating dead-code warnings when building with `--features depth` alone
+
 ### Changed
 - **README** — expanded build-from-source section with per-feature prerequisites; added Binding Matrix section and `B` keyboard shortcut
 
