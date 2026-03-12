@@ -6,7 +6,7 @@
 ## Unreleased
 
 ### Changed
-- **README** — expanded build-from-source section with per-feature prerequisites (video, webcam, ndi, depth)
+- **README** — expanded build-from-source section with per-feature prerequisites (video, webcam, ndi, depth including libssl-dev)
 
 ## v1.7.1 — 2026-03-12
 
