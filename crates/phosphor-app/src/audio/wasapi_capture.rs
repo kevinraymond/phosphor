@@ -19,11 +19,10 @@ use windows::Win32::System::Com::{
     CoUninitialize, STGM_READ,
 };
 use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
-use windows::core::Interface;
-
 use super::capture::RingBuffer;
 
 /// Check if WASAPI loopback is available at runtime. Cached.
+#[allow(dead_code)]
 pub fn wasapi_available() -> bool {
     static AVAILABLE: OnceLock<bool> = OnceLock::new();
     // SAFETY: COM APIs are FFI calls. CoInitializeEx/CoCreateInstance are safe to call
