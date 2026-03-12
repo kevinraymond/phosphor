@@ -47,13 +47,16 @@ Grab the latest release for your platform from [**GitHub Releases**](https://git
 <details>
 <summary><strong>Build from source</strong></summary>
 
-**Prerequisites:** Rust 1.90+, a Vulkan-capable GPU. Optional: [ffmpeg](https://ffmpeg.org/) on PATH for video layer support.
+**Prerequisites:** Rust 1.90+, a Vulkan-capable GPU.
 
 ```bash
 git clone https://github.com/kevinraymond/phosphor.git
 cd phosphor
-cargo run --release                   # standard build
-cargo run --release --features video  # with video layer support (requires ffmpeg)
+cargo run --release                    # no extra deps
+cargo run --release --features video   # requires: ffmpeg on PATH
+cargo run --release --features webcam  # requires: libclang-dev, v4l-utils (Linux)
+cargo run --release --features ndi     # requires: NDI SDK (runtime-loaded)
+cargo run --release --features depth   # requires: ONNX Runtime (runtime-loaded, auto-downloaded)
 ```
 
 </details>
