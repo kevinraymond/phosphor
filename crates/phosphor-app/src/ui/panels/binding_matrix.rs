@@ -203,15 +203,25 @@ pub fn draw_binding_matrix(
             });
         });
 
-    // Close on click outside the content area
-    let clicked_outside = ctx.input(|i| {
-        i.pointer.any_click()
-            && i.pointer
-                .interact_pos()
-                .is_some_and(|pos| !area_resp.response.rect.contains(pos))
+    // Close on click outside the content area (skip on the frame the matrix was just opened)
+    let just_opened = ctx.data_mut(|d| {
+        d.get_temp::<bool>(egui::Id::new("binding_matrix_just_opened"))
+            .unwrap_or(false)
     });
-    if clicked_outside {
-        state.open = false;
+    if just_opened {
+        ctx.data_mut(|d| {
+            d.insert_temp(egui::Id::new("binding_matrix_just_opened"), false);
+        });
+    } else {
+        let clicked_outside = ctx.input(|i| {
+            i.pointer.any_click()
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|pos| !area_resp.response.rect.contains(pos))
+        });
+        if clicked_outside {
+            state.open = false;
+        }
     }
 
     // Draw connection lines (Pass 2 — after layout)
