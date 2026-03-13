@@ -208,14 +208,13 @@ pub fn create_audio_fifo() -> Result<PathBuf, String> {
         if !status.success() {
             return Err("mkfifo returned non-zero".to_string());
         }
+        Ok(path)
     }
 
     #[cfg(not(unix))]
     {
-        return Err("Audio recording via FIFO not supported on this platform".to_string());
+        Err("Audio recording via FIFO not supported on this platform".to_string())
     }
-
-    Ok(path)
 }
 
 /// Spawn the ffmpeg encoder subprocess.

@@ -7,6 +7,10 @@
 
 ### Fixed
 - **Depth feature** — `depth` feature now depends on `webcam` (depth estimation requires webcam input), eliminating dead-code warnings when building with `--features depth` alone
+- **Windows CI warnings** — removed unused import, allowed dead code on `wasapi_available()`, fixed unreachable expression in `create_audio_fifo()`, fixed function pointer cast in midir patch
+
+### Added
+- **Pre-commit hook** — `.githooks/pre-commit` runs `cargo fmt --check` and `cargo clippy -D warnings`
 
 ### Changed
 - **README** — expanded build-from-source section with per-feature prerequisites; added Binding Matrix section and `B` keyboard shortcut

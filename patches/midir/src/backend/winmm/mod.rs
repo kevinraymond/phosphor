@@ -248,7 +248,7 @@ impl MidiInput {
             midiInOpen(
                 in_handle.as_mut_ptr(),
                 port_number as UINT,
-                handler::handle_input::<T> as DWORD_PTR,
+                handler::handle_input::<T> as *const () as DWORD_PTR,
                 handler_data_ptr as DWORD_PTR,
                 CALLBACK_FUNCTION,
             )

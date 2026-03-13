@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Pre-commit hook: check formatting and lints before committing.
+
+set -e
+
+# Check cargo fmt
+if ! cargo fmt --all -- --check 2>/dev/null; then
+    echo "ERROR: cargo fmt check failed. Run 'cargo fmt --all' to fix."
+    exit 1
+fi
+
+# Check clippy (default features only — cross-platform gated code checked in CI)
+if ! cargo clippy -- -D warnings 2>/dev/null; then
+    echo "ERROR: cargo clippy found warnings. Fix them before committing."
+    exit 1
+fi

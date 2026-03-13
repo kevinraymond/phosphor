@@ -9,6 +9,11 @@ Thanks for your interest in contributing! Phosphor is a live VJ engine built wit
 - Audio input device (built-in mic works)
 - Vulkan-capable GPU
 
+**Setup:**
+```bash
+git config core.hooksPath .githooks   # enable pre-commit checks (fmt + clippy)
+```
+
 **Commands:**
 ```bash
 cargo run --release              # release build (recommended)
