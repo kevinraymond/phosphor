@@ -7,6 +7,7 @@ use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
+use super::capture::RingBuffer;
 use anyhow::Result;
 use windows::Win32::Media::Audio::{
     AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, IAudioCaptureClient, IAudioClient,
@@ -19,11 +20,9 @@ use windows::Win32::System::Com::{
     CoUninitialize, STGM_READ,
 };
 use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
-use windows::core::Interface;
-
-use super::capture::RingBuffer;
 
 /// Check if WASAPI loopback is available at runtime. Cached.
+#[allow(dead_code)]
 pub fn wasapi_available() -> bool {
     static AVAILABLE: OnceLock<bool> = OnceLock::new();
     // SAFETY: COM APIs are FFI calls. CoInitializeEx/CoCreateInstance are safe to call
