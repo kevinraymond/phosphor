@@ -2,10 +2,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::ui::theme::ThemeMode;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ParticleQuality {
     Low,
     Medium,
+    #[default]
     High,
     Ultra,
     Max,
@@ -38,12 +39,6 @@ impl ParticleQuality {
             Self::Ultra => 2.0,
             Self::Max => 4.0,
         }
-    }
-}
-
-impl Default for ParticleQuality {
-    fn default() -> Self {
-        Self::High
     }
 }
 
