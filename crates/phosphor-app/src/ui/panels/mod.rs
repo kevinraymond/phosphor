@@ -452,12 +452,11 @@ pub fn draw_panels(
 
                     // Particle section (shows when active layer has particles)
                     if let Some(ref pinfo) = particle_info {
-                        let particle_badge = (if pinfo.alive_count >= 1000 {
+                        let particle_badge = if pinfo.alive_count >= 1000 {
                             format!("{:.1}K", pinfo.alive_count as f32 / 1000.0)
                         } else {
                             format!("{}", pinfo.alive_count)
-                        })
-                        .to_string();
+                        };
                         widgets::section(
                             ui,
                             "sec_particles",

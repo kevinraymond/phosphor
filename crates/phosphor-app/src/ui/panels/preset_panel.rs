@@ -612,7 +612,7 @@ fn draw_preset_grid(
                 let hover_text = if is_armed {
                     "Right-click again to DELETE".to_string()
                 } else if is_builtin_section {
-                    pname.to_string()
+                    pname.clone()
                 } else if is_current && store.dirty {
                     format!("{pname} — click to reload, right-click to delete")
                 } else if is_current {

@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### Fixed
+- **Clippy warnings** — cleared 13 default-feature clippy lints (collapsible match guards in `app.rs`/`main.rs`/`web/state.rs`, derivable `Default` for `ParticleQuality`, redundant `String` clones in UI panels)
 - **Depth feature** — `depth` feature now depends on `webcam` (depth estimation requires webcam input), eliminating dead-code warnings when building with `--features depth` alone
 - **Windows CI warnings** — removed unused import, allowed dead code on `wasapi_available()`, fixed unreachable expression in `create_audio_fifo()`, fixed function pointer cast in midir patch
 

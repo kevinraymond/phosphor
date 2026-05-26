@@ -1742,7 +1742,7 @@ impl App {
                     let path = self.effect_loader.resolve_shader_path(&pass.shader);
                     if let Ok(content) = std::fs::read_to_string(&path) {
                         self.shader_editor.open_file(&effect.name, path, content);
-                        self.shader_editor.compile_error = Some(e.to_string());
+                        self.shader_editor.compile_error = Some(e.clone());
                         // Load paired .pfx for tab switching
                         if let Some(ref pfx_path) = effect.source_path {
                             if let Ok(pfx_content) = std::fs::read_to_string(pfx_path) {
@@ -2117,15 +2117,14 @@ impl App {
                     }
                 }
             }
-            "global" => {
+            "global"
                 // global.master_opacity
-                if rest == "master_opacity" {
+                if rest == "master_opacity" => {
                     let clamped = value.clamp(0.0, 1.0);
                     for layer in &mut self.layer_stack.layers {
                         layer.opacity = clamped;
                     }
                 }
-            }
             "scene" => {
                 // scene.transport.go / scene.transport.prev / scene.transport.stop
                 if let Some(action) = rest.strip_prefix("transport.") {
@@ -2135,9 +2134,9 @@ impl App {
                     }
                 }
             }
-            "postfx" => {
+            "postfx"
                 // postfx.bloom_threshold, postfx.bloom_intensity, etc.
-                if !rest.is_empty() {
+                if !rest.is_empty() => {
                     if let Some(layer) = self.layer_stack.active_mut() {
                         match rest {
                             "bloom_threshold" => {
@@ -2159,10 +2158,9 @@ impl App {
                         }
                     }
                 }
-            }
-            "particle" => {
+            "particle"
                 // particle.{setting_name} — applies to all layers' particle systems
-                if !rest.is_empty() {
+                if !rest.is_empty() => {
                     let v = value.clamp(0.0, 1.0);
                     for layer in &mut self.layer_stack.layers {
                         if let Some(effect) = layer.as_effect_mut() {
@@ -2200,10 +2198,9 @@ impl App {
                         }
                     }
                 }
-            }
-            "uniform" => {
+            "uniform"
                 // Direct shader uniform override: uniform.{field_name}
-                if !rest.is_empty() {
+                if !rest.is_empty() => {
                     let v = value.clamp(0.0, 1.0);
                     match rest {
                         "sub_bass" => self.uniforms.sub_bass = v,
@@ -2232,7 +2229,6 @@ impl App {
                         _ => {}
                     }
                 }
-            }
             _ => {}
         }
     }

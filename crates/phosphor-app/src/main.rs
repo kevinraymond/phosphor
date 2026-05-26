@@ -158,27 +158,24 @@ impl ApplicationHandler for PhosphorApp {
                     KeyCode::KeyD => {
                         app.egui_overlay.toggle_visible();
                     }
-                    KeyCode::Space => {
+                    KeyCode::Space
                         // Scene: go to next cue (when timeline has cues)
-                        if !app.timeline.cues.is_empty() {
+                        if !app.timeline.cues.is_empty() => {
                             app.egui_overlay.context().data_mut(|d| {
                                 d.insert_temp(egui::Id::new("scene_go_next"), true);
                             });
                         }
-                    }
-                    KeyCode::KeyT => {
+                    KeyCode::KeyT
                         // Toggle timeline active (when cues loaded)
-                        if !app.timeline.cues.is_empty() {
+                        if !app.timeline.cues.is_empty() => {
                             app.egui_overlay.context().data_mut(|d| {
                                 d.insert_temp(egui::Id::new("scene_toggle_play"), true);
                             });
                         }
-                    }
-                    KeyCode::KeyB => {
-                        if !app.shader_editor.open {
+                    KeyCode::KeyB
+                        if !app.shader_editor.open => {
                             app.binding_matrix.open = !app.binding_matrix.open;
                         }
-                    }
                     KeyCode::BracketLeft => {
                         // Previous layer
                         let num = app.layer_stack.layers.len();
