@@ -5,7 +5,11 @@
 
 ## Unreleased
 
+### Security
+- **Dependency advisories** — bumped `rustls-webpki` 0.103.9 → 0.103.13 (RUSTSEC-2026-0049, RUSTSEC-2026-0098) and `tar` 0.4.44 → 0.4.46 (RUSTSEC-2026-0067, RUSTSEC-2026-0068) to clear the cargo-deny audit
+
 ### Fixed
+- **Clippy warnings** — cleared 13 default-feature clippy lints (collapsible match guards in `app.rs`/`main.rs`/`web/state.rs`, derivable `Default` for `ParticleQuality`, redundant `String` clones in UI panels)
 - **Depth feature** — `depth` feature now depends on `webcam` (depth estimation requires webcam input), eliminating dead-code warnings when building with `--features depth` alone
 - **Windows CI warnings** — removed unused import, allowed dead code on `wasapi_available()`, fixed unreachable expression in `create_audio_fifo()`, fixed function pointer cast in midir patch
 
@@ -14,6 +18,7 @@
 
 ### Changed
 - **README** — expanded build-from-source section with per-feature prerequisites; added Binding Matrix section and `B` keyboard shortcut
+- **NDI docs** — clarified that NDI output is built into official release downloads (only the NDI runtime needs installing); the `--features ndi` flag now framed as a from-source-only step in README and TUTORIALS
 
 ## v1.7.1 — 2026-03-12
 

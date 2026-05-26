@@ -315,13 +315,7 @@ fn build_params(store: &ParamStore) -> Vec<ParamInfo> {
                 }
                 ParamDef::Bool { name, .. } => {
                     let v = match value {
-                        Some(ParamValue::Bool(b)) => {
-                            if *b {
-                                1.0
-                            } else {
-                                0.0
-                            }
-                        }
+                        Some(ParamValue::Bool(b)) if *b => 1.0,
                         _ => 0.0,
                     };
                     ParamInfo {

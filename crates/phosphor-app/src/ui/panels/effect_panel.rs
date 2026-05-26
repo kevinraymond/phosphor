@@ -387,7 +387,7 @@ fn draw_effect_grid(
                     } else {
                         &effect.description
                     };
-                    let mut text = base.to_string();
+                    let mut text = base.clone();
                     if let Some(s) = &particle_suffix {
                         text.push_str(s);
                     }
