@@ -28,7 +28,8 @@ pub struct PassDef {
     #[serde(default)]
     pub inputs: Vec<String>,
     /// Whether this pass reads its own previous frame (ping-pong feedback).
-    #[serde(default)]
+    /// Defaults to true (matches legacy single-shader behavior); set false to disable.
+    #[serde(default = "default_true")]
     pub feedback: bool,
 }
 
@@ -320,11 +321,11 @@ mod tests {
 
     #[test]
     fn pfx_effect_serde_with_passes() {
-        let json = r#"{"name":"multi","shader":"","passes":[{"name":"p1","shader":"a.wgsl"},{"name":"p2","shader":"b.wgsl","feedback":true}]}"#;
+        let json = r#"{"name":"multi","shader":"","passes":[{"name":"p1","shader":"a.wgsl"},{"name":"p2","shader":"b.wgsl","feedback":false}]}"#;
         let effect: PfxEffect = serde_json::from_str(json).unwrap();
         assert_eq!(effect.passes.len(), 2);
-        assert!(!effect.passes[0].feedback);
-        assert!(effect.passes[1].feedback);
+        assert!(effect.passes[0].feedback);
+        assert!(!effect.passes[1].feedback);
     }
 
     #[test]
@@ -332,8 +333,27 @@ mod tests {
         let json = r#"{"name":"test","shader":"t.wgsl"}"#;
         let pass: PassDef = serde_json::from_str(json).unwrap();
         assert!(approx_eq(pass.scale, 1.0, 1e-6));
-        assert!(!pass.feedback);
+        assert!(pass.feedback);
         assert!(pass.inputs.is_empty());
+    }
+
+    #[test]
+    fn feedback_defaults_true_for_legacy_and_passes() {
+        // Legacy single-shader effect: normalized pass gets feedback=true.
+        let legacy: PfxEffect =
+            serde_json::from_str(r#"{"name":"legacy","shader":"x.wgsl"}"#).unwrap();
+        let legacy_passes = legacy.normalized_passes();
+        assert_eq!(legacy_passes.len(), 1);
+        assert!(legacy_passes[0].feedback);
+
+        // Equivalent passes-array effect omitting `feedback`: same result.
+        let multi: PfxEffect = serde_json::from_str(
+            r#"{"name":"multi","passes":[{"name":"main","shader":"x.wgsl"}]}"#,
+        )
+        .unwrap();
+        let multi_passes = multi.normalized_passes();
+        assert_eq!(multi_passes.len(), 1);
+        assert!(multi_passes[0].feedback);
     }
 
     fn make_effect(name: &str, shader: &str) -> PfxEffect {
