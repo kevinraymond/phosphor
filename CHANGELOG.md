@@ -9,6 +9,8 @@
 - **Dependency advisories** — bumped `rustls-webpki` 0.103.9 → 0.103.13 (RUSTSEC-2026-0049, RUSTSEC-2026-0098) and `tar` 0.4.44 → 0.4.46 (RUSTSEC-2026-0067, RUSTSEC-2026-0068) to clear the cargo-deny audit
 
 ### Fixed
+- **Recording A/V sync** — audio recording now starts from the moment recording begins instead of draining minutes of stale ring-buffer history into the encoder; ring-buffer reads are also clamped to capacity so a lapped consumer recovers with the newest window
+- **Save errors surfaced** — effect saves (particle definition and debounced parameter saves) and recording-start failures now show a status-bar error toast instead of failing silently; a failed parameter save no longer marks the shader editor's paired `.pfx` as clean
 - **Clippy warnings** — cleared 13 default-feature clippy lints (collapsible match guards in `app.rs`/`main.rs`/`web/state.rs`, derivable `Default` for `ParticleQuality`, redundant `String` clones in UI panels)
 - **Depth feature** — `depth` feature now depends on `webcam` (depth estimation requires webcam input), eliminating dead-code warnings when building with `--features depth` alone
 - **Windows CI warnings** — removed unused import, allowed dead code on `wasapi_available()`, fixed unreachable expression in `create_audio_fifo()`, fixed function pointer cast in midir patch

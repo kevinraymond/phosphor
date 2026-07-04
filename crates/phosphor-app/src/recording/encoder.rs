@@ -381,6 +381,10 @@ pub fn spawn_audio_writer_thread(
     std::thread::Builder::new()
         .name("recording-audio".into())
         .spawn(move || {
+            // The recording ring has been filling since app start; discard that
+            // history so encoded audio begins at record start (keeps A/V in sync).
+            audio_ring.skip_to_write_pos();
+
             // Open the FIFO for writing (blocks until ffmpeg opens it for reading)
             let file = match std::fs::OpenOptions::new().write(true).open(&fifo_path) {
                 Ok(f) => f,

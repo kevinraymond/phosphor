@@ -1154,6 +1154,10 @@ impl ApplicationHandler for PhosphorApp {
                                 audio_source,
                             ) {
                                 log::error!("Failed to start recording: {e}");
+                                app.status_error = Some((
+                                    format!("Recording failed to start: {e}"),
+                                    std::time::Instant::now(),
+                                ));
                             }
                         }
                     }
@@ -2121,15 +2125,27 @@ impl ApplicationHandler for PhosphorApp {
                     // Built-in effects are runtime-only; users should create a
                     // preset or copy the effect to persist changes.
                     if let Some((idx, updated_def)) = particle_save_info {
+                        // Capture failures locally; can't touch app.status_error
+                        // while effect_loader is mutably borrowed.
+                        let mut save_err: Option<String> = None;
                         if let Some(effect) = app.effect_loader.effects.get_mut(idx) {
                             if !EffectLoader::is_builtin(effect) {
                                 effect.particles = Some(updated_def);
                                 if let Some(ref path) = effect.source_path {
                                     if let Ok(json) = serde_json::to_string_pretty(effect) {
-                                        let _ = std::fs::write(path, json);
+                                        if let Err(e) = std::fs::write(path, json) {
+                                            save_err = Some(e.to_string());
+                                        }
                                     }
                                 }
                             }
+                        }
+                        if let Some(e) = save_err {
+                            log::error!("Effect save failed: {e}");
+                            app.status_error = Some((
+                                format!("Effect save failed: {e}"),
+                                std::time::Instant::now(),
+                            ));
                         }
                     }
                 }
@@ -2901,6 +2917,9 @@ impl ApplicationHandler for PhosphorApp {
                                 None
                             }
                         });
+                        // Capture failures locally; can't touch app.status_error
+                        // while effect_loader is mutably borrowed.
+                        let mut save_err: Option<String> = None;
                         if let (Some(values), Some(effect)) =
                             (values, app.effect_loader.effects.get_mut(eidx))
                         {
@@ -2911,7 +2930,9 @@ impl ApplicationHandler for PhosphorApp {
                             }
                             if let Some(ref path) = effect.source_path {
                                 if let Ok(json) = serde_json::to_string_pretty(effect) {
-                                    let _ = std::fs::write(path, &json);
+                                    if let Err(e) = std::fs::write(path, &json) {
+                                        save_err = Some(e.to_string());
+                                    }
                                     // Update editor paired content if showing this .pfx
                                     if app.shader_editor.open {
                                         let pfx_canonical =
@@ -2922,12 +2943,24 @@ impl ApplicationHandler for PhosphorApp {
                                                 .unwrap_or_else(|_| paired.clone());
                                             if paired_canonical == pfx_canonical {
                                                 app.shader_editor.paired_content = json.clone();
-                                                app.shader_editor.paired_disk_content = json;
+                                                // Only mirror disk content on a successful
+                                                // write, so the editor keeps showing unsaved
+                                                // state (and Ctrl+S retries) after a failure.
+                                                if save_err.is_none() {
+                                                    app.shader_editor.paired_disk_content = json;
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
+                        }
+                        if let Some(e) = save_err {
+                            log::error!("Effect save failed: {e}");
+                            app.status_error = Some((
+                                format!("Effect save failed: {e}"),
+                                std::time::Instant::now(),
+                            ));
                         }
                     }
                 }
