@@ -131,8 +131,15 @@ impl RingBuffer {
     /// Read available samples into dst. Returns number of samples read.
     pub fn read(&self, dst: &mut [f32]) -> usize {
         let wp = self.write_pos.load(Ordering::Acquire);
-        let rp = self.read_pos.load(Ordering::Relaxed);
-        let available = wp.wrapping_sub(rp) as usize;
+        let mut rp = self.read_pos.load(Ordering::Relaxed);
+        let raw = wp.wrapping_sub(rp) as usize;
+        // Consumer overrun: the producer lapped us, so anything older than the
+        // newest RING_SIZE samples has been overwritten. Skip ahead to the newest
+        // full window (read_pos is consumer-owned, so this is race-free).
+        if raw > RING_SIZE {
+            rp = wp.wrapping_sub(RING_SIZE as u32);
+        }
+        let available = raw.min(RING_SIZE);
         let to_read = available.min(dst.len());
 
         for i in 0..to_read {
@@ -145,11 +152,19 @@ impl RingBuffer {
         to_read
     }
 
-    /// Number of samples available to read.
+    /// Number of samples available to read, capped at the ring capacity
+    /// (anything older has already been overwritten by the producer).
     pub fn available(&self) -> usize {
         let wp = self.write_pos.load(Ordering::Acquire);
         let rp = self.read_pos.load(Ordering::Relaxed);
-        wp.wrapping_sub(rp) as usize
+        (wp.wrapping_sub(rp) as usize).min(RING_SIZE)
+    }
+
+    /// Skip the read position to the current write position, discarding history.
+    /// Consumer-side call; safe while the producer is pushing (SPSC).
+    pub fn skip_to_write_pos(&self) {
+        let wp = self.write_pos.load(Ordering::Acquire);
+        self.read_pos.store(wp, Ordering::Release);
     }
 }
 
@@ -328,5 +343,47 @@ fn push_samples<T: Sample>(
             })
             .collect();
         ring.push(&mono);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skip_to_write_pos_discards_history() {
+        let ring = RingBuffer::new();
+        // Fill with more than a full ring of history (wraps the buffer)
+        let junk = vec![1.0f32; 70_000];
+        ring.push(&junk);
+        ring.skip_to_write_pos();
+        assert_eq!(ring.available(), 0);
+
+        // Only samples pushed after the skip should be readable
+        let fresh: Vec<f32> = (0..10).map(|i| i as f32).collect();
+        ring.push(&fresh);
+        assert_eq!(ring.available(), 10);
+        let mut dst = [0.0f32; 16];
+        let n = ring.read(&mut dst);
+        assert_eq!(n, 10);
+        assert_eq!(&dst[..10], fresh.as_slice());
+    }
+
+    #[test]
+    fn overrun_clamps_to_newest_window() {
+        let ring = RingBuffer::new();
+        // Push two full rings without reading: values 0..2*RING_SIZE
+        let samples: Vec<f32> = (0..2 * RING_SIZE).map(|i| i as f32).collect();
+        ring.push(&samples);
+        assert_eq!(ring.available(), RING_SIZE);
+
+        // read() must clamp to the newest full window: RING_SIZE..2*RING_SIZE
+        let mut dst = vec![0.0f32; RING_SIZE];
+        let n = ring.read(&mut dst);
+        assert_eq!(n, RING_SIZE);
+        assert_eq!(dst[0], RING_SIZE as f32);
+        assert_eq!(dst[RING_SIZE - 1], (2 * RING_SIZE - 1) as f32);
+        // Everything consumed
+        assert_eq!(ring.available(), 0);
     }
 }
