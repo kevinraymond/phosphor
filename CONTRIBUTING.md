@@ -59,6 +59,16 @@ Please include:
 - No new `unsafe` without justification
 - Prefer dedicated wgpu abstractions over raw API calls
 
+The pre-commit hook and the CI `lint` job run clippy on the **host** target only, so
+`#[cfg(target_os = "…")]` code for other platforms is not linted locally. CI's `build`
+matrix runs clippy per native target to cover it. If you touch Windows/macOS-gated code,
+lint it yourself by cross-compiling clippy (targets install via `rustup target add`):
+
+```sh
+cargo clippy --target x86_64-pc-windows-gnu -- -D warnings   # Windows-gated code
+cargo clippy --target aarch64-apple-darwin  -- -D warnings   # macOS-gated code
+```
+
 ## Pull Requests
 
 - One feature or fix per PR

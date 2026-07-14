@@ -51,13 +51,13 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets -- -D warnings
       - name: Clippy (video feature)
-        run: cargo clippy --all-targets --features video
+        run: cargo clippy --all-targets --features video -- -D warnings
       - name: Clippy (webcam feature)
-        run: cargo clippy --all-targets --features webcam
+        run: cargo clippy --all-targets --features webcam -- -D warnings
       - name: Clippy (depth feature)
-        run: cargo clippy --all-targets --features depth
+        run: cargo clippy --all-targets --features depth -- -D warnings
 
   test:
     name: Test
@@ -104,9 +104,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.os }}-${{ matrix.target }}-v2
+      # Clippy per native target so cfg-gated Windows/macOS code is actually linted
+      # (the host-only lint job and pre-commit hook never see it). See board #1500.
+      - name: Clippy (cross-target)
+        run: cargo clippy --target ${{ matrix.target }} -- -D warnings
+      - name: Clippy (all features)
+        run: cargo clippy --target ${{ matrix.target }} --features "video,webcam,ndi" -- -D warnings
       - name: Build
         run: cargo build --target ${{ matrix.target }}
       - name: Build (video feature)
