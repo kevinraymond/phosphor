@@ -107,7 +107,9 @@ fn query_device_info() -> Result<(String, u32, u16, u16, u16)> {
 
         log::info!("WASAPI loopback: {name} ({sr}Hz, {ch}ch, {bps}bit, block_align={ba})");
 
-        CoTaskMemFree(Some(mix_format_ptr as *const _ as *const _));
+        CoTaskMemFree(Some(
+            mix_format_ptr.cast::<core::ffi::c_void>().cast_const(),
+        ));
         Ok((name, sr, ch, bps, ba))
     }
 }

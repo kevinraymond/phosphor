@@ -19,12 +19,14 @@
 - **Clippy warnings** — cleared 13 default-feature clippy lints (collapsible match guards in `app.rs`/`main.rs`/`web/state.rs`, derivable `Default` for `ParticleQuality`, redundant `String` clones in UI panels)
 - **Depth feature** — `depth` feature now depends on `webcam` (depth estimation requires webcam input), eliminating dead-code warnings when building with `--features depth` alone
 - **Windows CI warnings** — removed unused import, allowed dead code on `wasapi_available()`, fixed unreachable expression in `create_audio_fifo()`, fixed function pointer cast in midir patch
+- **Cross-target clippy debt** — fixed a Windows-only `ptr_as_ptr`/`ptr_cast_constness` violation in `wasapi_capture.rs` and a `webcam`/`depth`-feature `implicit_clone` in `webcam.rs`, both previously invisible to the host-only clippy runs (board #1500)
 
 ### Added
 - **Pre-commit hook** — `.githooks/pre-commit` runs `cargo fmt --check` and `cargo clippy -D warnings`
 - **Reduced-motion detection (macOS/Windows)** — implemented the platform detection that was previously stubbed to always return `false`: macOS via `NSWorkspace.accessibilityDisplayShouldReduceMotion` (objc2-app-kit), Windows via `SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION)`. Linux (gsettings) already worked. This is the detection backend only — `ReducedMotion` is not yet consumed by any effect/animation, so there is no user-visible behavior change until it is wired in
 
 ### Changed
+- **CI lints cfg-gated platform code** — the cross-OS `build` matrix now runs `cargo clippy -D warnings` per native target (Linux/macOS/Windows), so `#[cfg(target_os = …)]` code that host-only clippy never compiled is finally linted; the Linux `lint` job now denies warnings too (matching the pre-commit hook). The pre-commit hook stays host-only for fast commits — see CONTRIBUTING.md for the manual cross-target command. (board #1500)
 - **README** — expanded build-from-source section with per-feature prerequisites; added Binding Matrix section and `B` keyboard shortcut
 - **NDI docs** — clarified that NDI output is built into official release downloads (only the NDI runtime needs installing); the `--features ndi` flag now framed as a from-source-only step in README and TUTORIALS
 

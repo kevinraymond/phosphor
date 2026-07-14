@@ -9,7 +9,9 @@ if ! cargo fmt --all -- --check 2>/dev/null; then
     exit 1
 fi
 
-# Check clippy (default features only — cross-platform gated code checked in CI)
+# Check clippy (host target, default features only — fast).
+# Windows/macOS cfg-gated code and non-default features are linted per-target in
+# CI's build matrix, not here. To lint platform code locally, see CONTRIBUTING.md.
 if ! cargo clippy -- -D warnings 2>/dev/null; then
     echo "ERROR: cargo clippy found warnings. Fix them before committing."
     exit 1

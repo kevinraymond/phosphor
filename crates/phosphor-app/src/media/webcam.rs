@@ -170,7 +170,7 @@ pub fn list_devices() -> Result<Vec<(u32, String)>, String> {
             CameraIndex::Index(i) => *i,
             CameraIndex::String(_) => 0,
         };
-        let name = info.human_name().to_string();
+        let name = info.human_name().clone();
         seen.entry(name)
             .and_modify(|existing| *existing = (*existing).min(idx))
             .or_insert(idx);
