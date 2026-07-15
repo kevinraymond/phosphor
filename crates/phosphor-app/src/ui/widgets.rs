@@ -11,7 +11,7 @@ pub fn card_frame(ui: &Ui) -> Frame {
     let tc = theme_colors(ui.ctx());
     Frame {
         fill: tc.card_bg,
-        stroke: Stroke::new(1.0, tc.card_border),
+        stroke: Stroke::new(1.0_f32, tc.card_border),
         corner_radius: CornerRadius::same(CARD_ROUNDING),
         inner_margin: Margin::same(CARD_PADDING as i8),
         outer_margin: Margin::symmetric(0, CARD_MARGIN as i8),
@@ -226,7 +226,7 @@ pub fn draw_diagonal_stripes(
     spacing: f32,
 ) {
     let clipped = painter.with_clip_rect(rect);
-    let stroke = Stroke::new(1.5, color);
+    let stroke = Stroke::new(1.5_f32, color);
     let h = rect.height();
     let mut offset = -h;
     while offset < rect.width() {

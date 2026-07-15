@@ -62,7 +62,7 @@ fn drag_handle(ui: &mut Ui, color: Color32) -> egui::Response {
     let painter = ui.painter();
     let cx = rect.center().x;
     let cy = rect.center().y;
-    let stroke = Stroke::new(1.2, c);
+    let stroke = Stroke::new(1.2_f32, c);
     for dy in [-3.0_f32, 0.0, 3.0] {
         painter.line_segment(
             [egui::pos2(cx - 3.5, cy + dy), egui::pos2(cx + 3.5, cy + dy)],
@@ -82,7 +82,7 @@ fn lock_button(ui: &mut Ui, id: &str, locked: bool, color: Color32) -> egui::Res
     icon_button(ui, id, color, |painter, rect, c| {
         let cx = rect.center().x;
         let cy = rect.center().y;
-        let stroke = Stroke::new(1.2, c);
+        let stroke = Stroke::new(1.2_f32, c);
         // Body (rectangle)
         let body = Rect::from_center_size(egui::pos2(cx, cy + 1.5), Vec2::new(8.0, 6.0));
         if locked {
@@ -147,7 +147,7 @@ fn pin_button(ui: &mut Ui, id: &str, pinned: bool, color: Color32) -> egui::Resp
     icon_button(ui, id, color, |painter, rect, c| {
         let cx = rect.center().x;
         let cy = rect.center().y;
-        let stroke = Stroke::new(1.2, c);
+        let stroke = Stroke::new(1.2_f32, c);
         if pinned {
             painter.circle_filled(egui::pos2(cx, cy - 2.0), 3.5, c);
         } else {
@@ -259,9 +259,9 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
             let outer_stroke = {
                 let base_color = if is_active { tc.accent } else { tc.card_border };
                 if alpha < 1.0 {
-                    Stroke::new(1.0, with_alpha(base_color, alpha))
+                    Stroke::new(1.0_f32, with_alpha(base_color, alpha))
                 } else {
-                    Stroke::new(1.0, base_color)
+                    Stroke::new(1.0_f32, base_color)
                 }
             };
 
@@ -605,7 +605,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                                             ui.painter().circle_stroke(
                                                 center,
                                                 radius,
-                                                Stroke::new(1.0, color),
+                                                Stroke::new(1.0_f32, color),
                                             );
                                             ui.painter().text(
                                                 center,
@@ -731,7 +731,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                 } else {
                     ctrl_color
                 };
-                let stroke = Stroke::new(1.5, del_color);
+                let stroke = Stroke::new(1.5_f32, del_color);
                 ui.painter().line_segment(
                     [
                         egui::pos2(center.x - s, center.y - s),
@@ -787,7 +787,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
                 // Line
                 painter.line_segment(
                     [egui::pos2(left, line_y), egui::pos2(right, line_y)],
-                    Stroke::new(2.5, tc.accent),
+                    Stroke::new(2.5_f32, tc.accent),
                 );
                 // Endpoint dots
                 painter.circle_filled(egui::pos2(left, line_y), 3.0, tc.accent);
@@ -847,7 +847,7 @@ pub fn draw_layer_panel(ui: &mut Ui, layers: &[LayerInfo], active_layer: usize) 
             can_add,
             egui::Button::new(RichText::new(label).size(SMALL_SIZE).color(text_color))
                 .fill(fill)
-                .stroke(Stroke::new(1.0, stroke_color))
+                .stroke(Stroke::new(1.0_f32, stroke_color))
                 .corner_radius(CornerRadius::same(4))
                 .min_size(Vec2::new(width, MIN_INTERACT_HEIGHT)),
         )

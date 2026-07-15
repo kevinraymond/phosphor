@@ -67,7 +67,7 @@ pub fn draw_preset_section(ui: &mut Ui, store: &PresetStore) {
         let pulse = ((time * std::f64::consts::TAU / 1.6).sin() * 0.5 + 0.5) as f32;
         let alpha = (pulse * 0.35 + 0.15) * 255.0; // 15%–50%
         frame.stroke = Stroke::new(
-            1.0,
+            1.0_f32,
             Color32::from_rgba_unmultiplied(AMBER.r(), AMBER.g(), AMBER.b(), alpha as u8),
         );
     }
@@ -158,7 +158,7 @@ fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
                 Frame {
                     fill: Color32::from_rgba_unmultiplied(AMBER.r(), AMBER.g(), AMBER.b(), 26), // ~10%
                     stroke: Stroke::new(
-                        1.0,
+                        1.0_f32,
                         Color32::from_rgba_unmultiplied(AMBER.r(), AMBER.g(), AMBER.b(), 77), // ~30%
                     ),
                     corner_radius: CornerRadius::same(4),
@@ -183,7 +183,7 @@ fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
                                 )
                                 .fill(Color32::from_rgba_unmultiplied(255, 255, 255, 13)) // ~5%
                                 .stroke(Stroke::new(
-                                    1.0,
+                                    1.0_f32,
                                     Color32::from_rgba_unmultiplied(255, 255, 255, 31), // ~12%
                                 ))
                                 .corner_radius(CornerRadius::same(3)),
@@ -212,7 +212,7 @@ fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
                                         64, // ~25%
                                     ))
                                     .stroke(Stroke::new(
-                                        1.0,
+                                        1.0_f32,
                                         Color32::from_rgba_unmultiplied(
                                             AMBER.r(),
                                             AMBER.g(),
@@ -409,7 +409,7 @@ fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
                             .color(tc.text_primary),
                     )
                     .fill(tc.card_bg)
-                    .stroke(Stroke::new(1.0, tc.card_border))
+                    .stroke(Stroke::new(1.0_f32, tc.card_border))
                     .corner_radius(CornerRadius::same(4)),
                 )
                 .on_hover_text("Copy built-in to a new editable user preset")
@@ -444,7 +444,7 @@ fn draw_preset_panel(ui: &mut Ui, store: &PresetStore) {
             .add(
                 egui::Button::new(RichText::new(label).size(SMALL_SIZE).color(tc.text_primary))
                     .fill(fill)
-                    .stroke(Stroke::new(1.0, stroke_color))
+                    .stroke(Stroke::new(1.0_f32, stroke_color))
                     .corner_radius(CornerRadius::same(4)),
             )
             .on_hover_text("Clear all layers and start fresh")
@@ -506,7 +506,7 @@ fn draw_preset_grid(
                         tc.card_bg,
                         tc.accent,
                         Stroke::new(
-                            2.0,
+                            2.0_f32,
                             Color32::from_rgba_unmultiplied(
                                 tc.accent.r(),
                                 tc.accent.g(),
@@ -521,7 +521,7 @@ fn draw_preset_grid(
                         Color32::from_rgba_unmultiplied(AMBER.r(), AMBER.g(), AMBER.b(), 46), // ~18%
                         AMBER_TEXT,
                         Stroke::new(
-                            1.0,
+                            1.0_f32,
                             Color32::from_rgba_unmultiplied(
                                 AMBER.r(),
                                 AMBER.g(),
@@ -541,7 +541,7 @@ fn draw_preset_grid(
                         ),
                         Color32::from_rgba_unmultiplied(255, 255, 255, 242), // near-white
                         Stroke::new(
-                            1.0,
+                            1.0_f32,
                             Color32::from_rgba_unmultiplied(
                                 tc.accent.r(),
                                 tc.accent.g(),
@@ -554,7 +554,7 @@ fn draw_preset_grid(
                     (
                         tc.card_bg,
                         tc.text_primary,
-                        Stroke::new(1.0, tc.card_border),
+                        Stroke::new(1.0_f32, tc.card_border),
                     )
                 };
 

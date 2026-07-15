@@ -83,25 +83,25 @@ fn midnight_visuals() -> Visuals {
     v.extreme_bg_color = Color32::from_rgb(0x08, 0x0C, 0x14);
 
     v.widgets.noninteractive.bg_fill = Color32::from_rgb(0x14, 0x1A, 0x28);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xB0, 0xC0, 0xD0));
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x2A, 0x38, 0x50));
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0xB0, 0xC0, 0xD0));
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x2A, 0x38, 0x50));
 
     v.widgets.inactive.bg_fill = Color32::from_rgb(0x1A, 0x24, 0x36);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xC0, 0xD0, 0xE0));
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x30, 0x40, 0x58));
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0xC0, 0xD0, 0xE0));
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x30, 0x40, 0x58));
 
     v.widgets.hovered.bg_fill = Color32::from_rgb(0x22, 0x30, 0x48);
-    v.widgets.hovered.fg_stroke = Stroke::new(1.5, Color32::from_rgb(0xD0, 0xE0, 0xF0));
-    v.widgets.hovered.bg_stroke = Stroke::new(1.5, Color32::from_rgb(0x50, 0x90, 0xD0));
+    v.widgets.hovered.fg_stroke = Stroke::new(1.5_f32, Color32::from_rgb(0xD0, 0xE0, 0xF0));
+    v.widgets.hovered.bg_stroke = Stroke::new(1.5_f32, Color32::from_rgb(0x50, 0x90, 0xD0));
 
     v.widgets.active.bg_fill = Color32::from_rgb(0x28, 0x3A, 0x54);
-    v.widgets.active.fg_stroke = Stroke::new(1.5, Color32::from_rgb(0xE0, 0xF0, 0xFF));
-    v.widgets.active.bg_stroke = Stroke::new(2.0, Color32::from_rgb(0x50, 0x90, 0xD0));
+    v.widgets.active.fg_stroke = Stroke::new(1.5_f32, Color32::from_rgb(0xE0, 0xF0, 0xFF));
+    v.widgets.active.bg_stroke = Stroke::new(2.0_f32, Color32::from_rgb(0x50, 0x90, 0xD0));
 
     v.selection.bg_fill = Color32::from_rgb(0x50, 0x90, 0xD0).gamma_multiply(0.4);
-    v.selection.stroke = Stroke::new(1.5, Color32::from_rgb(0x50, 0x90, 0xD0));
+    v.selection.stroke = Stroke::new(1.5_f32, Color32::from_rgb(0x50, 0x90, 0xD0));
 
-    v.window_stroke = Stroke::new(1.0, Color32::from_rgb(0x2A, 0x38, 0x50));
+    v.window_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x2A, 0x38, 0x50));
 
     v
 }
@@ -117,25 +117,25 @@ fn ember_visuals() -> Visuals {
     v.extreme_bg_color = Color32::from_rgb(0x10, 0x0C, 0x08);
 
     v.widgets.noninteractive.bg_fill = Color32::from_rgb(0x24, 0x1C, 0x16);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xD0, 0xC0, 0xB0));
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x40, 0x30, 0x20));
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0xD0, 0xC0, 0xB0));
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x40, 0x30, 0x20));
 
     v.widgets.inactive.bg_fill = Color32::from_rgb(0x2C, 0x22, 0x1A);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xE0, 0xD0, 0xC0));
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x50, 0x38, 0x28));
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0xE0, 0xD0, 0xC0));
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x50, 0x38, 0x28));
 
     v.widgets.hovered.bg_fill = Color32::from_rgb(0x38, 0x2A, 0x20);
-    v.widgets.hovered.fg_stroke = Stroke::new(1.5, Color32::from_rgb(0xF0, 0xE0, 0xD0));
-    v.widgets.hovered.bg_stroke = Stroke::new(1.5, Color32::from_rgb(0xE0, 0x90, 0x30));
+    v.widgets.hovered.fg_stroke = Stroke::new(1.5_f32, Color32::from_rgb(0xF0, 0xE0, 0xD0));
+    v.widgets.hovered.bg_stroke = Stroke::new(1.5_f32, Color32::from_rgb(0xE0, 0x90, 0x30));
 
     v.widgets.active.bg_fill = Color32::from_rgb(0x44, 0x30, 0x22);
-    v.widgets.active.fg_stroke = Stroke::new(1.5, Color32::from_rgb(0xFF, 0xF0, 0xE0));
-    v.widgets.active.bg_stroke = Stroke::new(2.0, Color32::from_rgb(0xE0, 0x90, 0x30));
+    v.widgets.active.fg_stroke = Stroke::new(1.5_f32, Color32::from_rgb(0xFF, 0xF0, 0xE0));
+    v.widgets.active.bg_stroke = Stroke::new(2.0_f32, Color32::from_rgb(0xE0, 0x90, 0x30));
 
     v.selection.bg_fill = Color32::from_rgb(0xE0, 0x90, 0x30).gamma_multiply(0.4);
-    v.selection.stroke = Stroke::new(1.5, Color32::from_rgb(0xE0, 0x90, 0x30));
+    v.selection.stroke = Stroke::new(1.5_f32, Color32::from_rgb(0xE0, 0x90, 0x30));
 
-    v.window_stroke = Stroke::new(1.0, Color32::from_rgb(0x40, 0x30, 0x20));
+    v.window_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x40, 0x30, 0x20));
 
     v
 }
@@ -151,25 +151,25 @@ fn neon_visuals() -> Visuals {
     v.extreme_bg_color = Color32::from_rgb(0x06, 0x04, 0x0C);
 
     v.widgets.noninteractive.bg_fill = Color32::from_rgb(0x14, 0x10, 0x20);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xC0, 0xB0, 0xD0));
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x30, 0x20, 0x44));
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0xC0, 0xB0, 0xD0));
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x30, 0x20, 0x44));
 
     v.widgets.inactive.bg_fill = Color32::from_rgb(0x1A, 0x14, 0x2A);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xD0, 0xC0, 0xE0));
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x3A, 0x28, 0x50));
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0xD0, 0xC0, 0xE0));
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x3A, 0x28, 0x50));
 
     v.widgets.hovered.bg_fill = Color32::from_rgb(0x24, 0x1C, 0x38);
-    v.widgets.hovered.fg_stroke = Stroke::new(1.5, Color32::from_rgb(0xE0, 0xD0, 0xF0));
-    v.widgets.hovered.bg_stroke = Stroke::new(1.5, Color32::from_rgb(0xFF, 0x50, 0xC0));
+    v.widgets.hovered.fg_stroke = Stroke::new(1.5_f32, Color32::from_rgb(0xE0, 0xD0, 0xF0));
+    v.widgets.hovered.bg_stroke = Stroke::new(1.5_f32, Color32::from_rgb(0xFF, 0x50, 0xC0));
 
     v.widgets.active.bg_fill = Color32::from_rgb(0x2C, 0x22, 0x44);
-    v.widgets.active.fg_stroke = Stroke::new(1.5, Color32::from_rgb(0xF0, 0xE0, 0xFF));
-    v.widgets.active.bg_stroke = Stroke::new(2.0, Color32::from_rgb(0xFF, 0x50, 0xC0));
+    v.widgets.active.fg_stroke = Stroke::new(1.5_f32, Color32::from_rgb(0xF0, 0xE0, 0xFF));
+    v.widgets.active.bg_stroke = Stroke::new(2.0_f32, Color32::from_rgb(0xFF, 0x50, 0xC0));
 
     v.selection.bg_fill = Color32::from_rgb(0xFF, 0x50, 0xC0).gamma_multiply(0.35);
-    v.selection.stroke = Stroke::new(1.5, Color32::from_rgb(0xFF, 0x50, 0xC0));
+    v.selection.stroke = Stroke::new(1.5_f32, Color32::from_rgb(0xFF, 0x50, 0xC0));
 
-    v.window_stroke = Stroke::new(1.0, Color32::from_rgb(0x30, 0x20, 0x44));
+    v.window_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x30, 0x20, 0x44));
 
     v
 }
@@ -186,25 +186,25 @@ fn high_contrast_visuals() -> Visuals {
     v.override_text_color = Some(Color32::WHITE);
 
     v.widgets.noninteractive.bg_fill = Color32::from_rgb(0x11, 0x11, 0x11);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(0xCC, 0xCC, 0xCC));
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x66, 0x66, 0x66));
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0xCC, 0xCC, 0xCC));
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x66, 0x66, 0x66));
 
     v.widgets.inactive.bg_fill = Color32::from_rgb(0x1A, 0x1A, 0x1A);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, Color32::WHITE);
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x66, 0x66, 0x66));
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x66, 0x66, 0x66));
 
     v.widgets.hovered.bg_fill = Color32::from_rgb(0x28, 0x28, 0x28);
-    v.widgets.hovered.fg_stroke = Stroke::new(1.5, Color32::WHITE);
-    v.widgets.hovered.bg_stroke = Stroke::new(2.0, Color32::from_rgb(0x55, 0xAA, 0xFF));
+    v.widgets.hovered.fg_stroke = Stroke::new(1.5_f32, Color32::WHITE);
+    v.widgets.hovered.bg_stroke = Stroke::new(2.0_f32, Color32::from_rgb(0x55, 0xAA, 0xFF));
 
     v.widgets.active.bg_fill = Color32::from_rgb(0x33, 0x33, 0x33);
-    v.widgets.active.fg_stroke = Stroke::new(1.5, Color32::WHITE);
-    v.widgets.active.bg_stroke = Stroke::new(2.0, Color32::from_rgb(0x55, 0xAA, 0xFF));
+    v.widgets.active.fg_stroke = Stroke::new(1.5_f32, Color32::WHITE);
+    v.widgets.active.bg_stroke = Stroke::new(2.0_f32, Color32::from_rgb(0x55, 0xAA, 0xFF));
 
     v.selection.bg_fill = Color32::from_rgb(0x55, 0xAA, 0xFF).gamma_multiply(0.5);
-    v.selection.stroke = Stroke::new(2.0, Color32::from_rgb(0x55, 0xAA, 0xFF));
+    v.selection.stroke = Stroke::new(2.0_f32, Color32::from_rgb(0x55, 0xAA, 0xFF));
 
-    v.window_stroke = Stroke::new(2.0, Color32::from_rgb(0x66, 0x66, 0x66));
+    v.window_stroke = Stroke::new(2.0_f32, Color32::from_rgb(0x66, 0x66, 0x66));
 
     v
 }

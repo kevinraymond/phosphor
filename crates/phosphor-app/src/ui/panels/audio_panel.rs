@@ -234,7 +234,7 @@ fn draw_bpm_ring(ui: &mut Ui, uniforms: &ShaderUniforms) -> egui::Response {
     let phase = uniforms.beat_phase;
 
     // Dim background ring
-    painter.circle_stroke(center, r, Stroke::new(2.0, tc.widget_bg));
+    painter.circle_stroke(center, r, Stroke::new(2.0_f32, tc.widget_bg));
 
     if bpm > 1.0 {
         // Arc: generate points from -PI/2 clockwise by phase * TAU
@@ -248,7 +248,7 @@ fn draw_bpm_ring(ui: &mut Ui, uniforms: &ShaderUniforms) -> egui::Response {
                     pos2(center.x + r * angle.cos(), center.y + r * angle.sin())
                 })
                 .collect();
-            painter.add(Shape::line(points, Stroke::new(2.5, tc.accent)));
+            painter.add(Shape::line(points, Stroke::new(2.5_f32, tc.accent)));
         }
 
         // Orbiting dot at current phase
@@ -339,7 +339,7 @@ fn draw_spectrum_bars(ui: &mut Ui, bands: &[f32; 7]) {
         let y = rect.bottom() - height * frac;
         painter.line_segment(
             [pos2(rect.left(), y), pos2(rect.right(), y)],
-            Stroke::new(0.5, grid_color),
+            Stroke::new(0.5_f32, grid_color),
         );
     }
 
@@ -377,7 +377,7 @@ fn draw_spectrum_bars(ui: &mut Ui, bands: &[f32; 7]) {
         if peaks[i] > 0.01 {
             painter.line_segment(
                 [pos2(x, peak_y), pos2(x + bar_width, peak_y)],
-                Stroke::new(1.0, color),
+                Stroke::new(1.0_f32, color),
             );
         }
     }

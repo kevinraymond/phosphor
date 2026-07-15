@@ -152,7 +152,7 @@ fn close_icon(ui: &mut egui::Ui, id: &str, color: Color32) -> egui::Response {
     icon_button(ui, id, color, |painter, rect, c| {
         let center = rect.center();
         let s = 3.5;
-        let stroke = Stroke::new(1.5, c);
+        let stroke = Stroke::new(1.5_f32, c);
         painter.line_segment(
             [
                 egui::pos2(center.x - s, center.y - s),
@@ -174,7 +174,7 @@ fn minimize_icon(ui: &mut egui::Ui, id: &str, color: Color32) -> egui::Response 
     icon_button(ui, id, color, |painter, rect, c| {
         let center = rect.center();
         let s = 4.0;
-        let stroke = Stroke::new(1.5, c);
+        let stroke = Stroke::new(1.5_f32, c);
         let y = center.y + 3.0;
         painter.line_segment(
             [egui::pos2(center.x - s, y), egui::pos2(center.x + s, y)],
@@ -187,7 +187,7 @@ fn restore_icon(ui: &mut egui::Ui, id: &str, color: Color32) -> egui::Response {
     icon_button(ui, id, color, |painter, rect, c| {
         let center = rect.center();
         let s = 4.0;
-        let stroke = Stroke::new(1.5, c);
+        let stroke = Stroke::new(1.5_f32, c);
         let r = Rect::from_center_size(center, Vec2::splat(s * 2.0));
         painter.rect_stroke(r, 1.0, stroke, StrokeKind::Outside);
     })
@@ -331,7 +331,7 @@ pub fn draw_shader_editor(
             Frame {
                 fill: tc.panel,
                 inner_margin: Margin::same(0),
-                stroke: Stroke::new(1.0, tc.card_border),
+                stroke: Stroke::new(1.0_f32, tc.card_border),
                 corner_radius: CornerRadius {
                     nw: 8,
                     ne: 8,
@@ -378,7 +378,7 @@ pub fn draw_shader_editor(
                                 Color32::TRANSPARENT
                             })
                             .stroke(if shader_active {
-                                Stroke::new(1.0, tc.accent)
+                                Stroke::new(1.0_f32, tc.accent)
                             } else {
                                 Stroke::NONE
                             })
@@ -409,7 +409,7 @@ pub fn draw_shader_editor(
                                 Color32::TRANSPARENT
                             })
                             .stroke(if pfx_active {
-                                Stroke::new(1.0, tc.accent)
+                                Stroke::new(1.0_f32, tc.accent)
                             } else {
                                 Stroke::NONE
                             })
@@ -478,7 +478,7 @@ pub fn draw_shader_editor(
                             },
                         ))
                         .fill(tc.card_bg)
-                        .stroke(Stroke::new(1.0, tc.card_border))
+                        .stroke(Stroke::new(1.0_f32, tc.card_border))
                         .corner_radius(CornerRadius::same(3)),
                     );
                     if save_btn.clicked() {
@@ -525,7 +525,7 @@ pub fn draw_shader_editor(
             Frame {
                 fill: code_bg,
                 inner_margin: Margin::same(0),
-                stroke: Stroke::new(1.0, tc.card_border),
+                stroke: Stroke::new(1.0_f32, tc.card_border),
                 corner_radius: CornerRadius {
                     nw: 0,
                     ne: 0,
