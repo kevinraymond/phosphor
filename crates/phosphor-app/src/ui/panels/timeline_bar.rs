@@ -66,7 +66,7 @@ pub fn draw_timeline_bar(ui: &mut Ui, timeline: &TimelineInfo, cue_names: &[Stri
             // Draw border — green for current cue
             let border_color = if is_current && transition_state.is_none() {
                 egui::Stroke::new(
-                    1.0,
+                    1.0_f32,
                     Color32::from_rgba_unmultiplied(
                         tc.accent.r(),
                         tc.accent.g(),
@@ -75,7 +75,7 @@ pub fn draw_timeline_bar(ui: &mut Ui, timeline: &TimelineInfo, cue_names: &[Stri
                     ),
                 )
             } else {
-                egui::Stroke::new(1.0, tc.card_border)
+                egui::Stroke::new(1.0_f32, tc.card_border)
             };
             painter.rect_stroke(
                 rect,
@@ -209,7 +209,7 @@ pub fn draw_timeline_bar(ui: &mut Ui, timeline: &TimelineInfo, cue_names: &[Stri
                     TransitionType::Cut => tc.accent,
                 };
                 ui.painter()
-                    .line_segment([top, bottom], egui::Stroke::new(2.0, playhead_color));
+                    .line_segment([top, bottom], egui::Stroke::new(2.0_f32, playhead_color));
             }
             TimelineInfoState::Holding { elapsed, hold_secs } => {
                 let cue_x = timeline.current_cue as f32 * block_width;
@@ -222,7 +222,7 @@ pub fn draw_timeline_bar(ui: &mut Ui, timeline: &TimelineInfo, cue_names: &[Stri
                 let top = egui::pos2(playhead_x, base_y);
                 let bottom = egui::pos2(playhead_x, base_y + bar_height);
                 ui.painter()
-                    .line_segment([top, bottom], egui::Stroke::new(2.0, tc.accent));
+                    .line_segment([top, bottom], egui::Stroke::new(2.0_f32, tc.accent));
             }
             _ => {}
         }

@@ -164,7 +164,7 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
                     tc.text_secondary
                 }))
                 .fill(tc.card_bg)
-                .stroke(Stroke::new(1.0, tc.card_border))
+                .stroke(Stroke::new(1.0_f32, tc.card_border))
                 .corner_radius(CornerRadius::same(4)),
             )
             .on_hover_text("Copy to a new editable effect")
@@ -184,7 +184,7 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
                     tc.text_secondary
                 }))
                 .fill(tc.card_bg)
-                .stroke(Stroke::new(1.0, tc.card_border))
+                .stroke(Stroke::new(1.0_f32, tc.card_border))
                 .corner_radius(CornerRadius::same(4)),
             )
             .on_hover_text("Open effect in editor")
@@ -202,7 +202,7 @@ pub fn draw_effect_panel(ui: &mut Ui, loader: &EffectLoader) {
                         .color(tc.text_primary),
                 )
                 .fill(tc.card_bg)
-                .stroke(Stroke::new(1.0, tc.card_border))
+                .stroke(Stroke::new(1.0_f32, tc.card_border))
                 .corner_radius(CornerRadius::same(4)),
             )
             .on_hover_text("Create a new effect from template")
@@ -296,7 +296,7 @@ fn draw_effect_grid(
                     (
                         tc.card_bg,
                         tc.text_primary,
-                        Stroke::new(1.0, tc.card_border),
+                        Stroke::new(1.0_f32, tc.card_border),
                     )
                 };
 

@@ -53,7 +53,7 @@ pub fn draw_osc_panel(ui: &mut Ui, osc: &mut OscSystem) {
     // TX settings in a subtle framed container (matches JSX)
     egui::Frame {
         fill: Color32::from_white_alpha(2),
-        stroke: egui::Stroke::new(1.0, Color32::from_white_alpha(13)),
+        stroke: egui::Stroke::new(1.0_f32, Color32::from_white_alpha(13)),
         corner_radius: egui::CornerRadius::same(4),
         inner_margin: egui::Margin::symmetric(8, 6),
         ..Default::default()

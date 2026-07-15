@@ -189,7 +189,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                         .strong(),
                 )
                 .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(1.0, tc.success))
+                .stroke(Stroke::new(1.0_f32, tc.success))
                 .corner_radius(CornerRadius::same(WIDGET_ROUNDING));
                 if ui
                     .add_sized(
@@ -208,7 +208,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                     let stop_btn =
                         egui::Button::new(RichText::new("STOP").size(SMALL_SIZE).color(tc.error))
                             .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::new(1.0, tc.error))
+                            .stroke(Stroke::new(1.0_f32, tc.error))
                             .corner_radius(CornerRadius::same(WIDGET_ROUNDING));
                     if ui
                         .add_sized(Vec2::new(60.0, MIN_INTERACT_HEIGHT), stop_btn)
@@ -225,7 +225,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                             .color(tc.text_primary),
                     )
                     .fill(Color32::TRANSPARENT)
-                    .stroke(Stroke::new(1.0, tc.card_border))
+                    .stroke(Stroke::new(1.0_f32, tc.card_border))
                     .corner_radius(CornerRadius::same(WIDGET_ROUNDING));
                     if ui
                         .add_sized(Vec2::new(50.0, MIN_INTERACT_HEIGHT), prev_btn)
@@ -342,7 +342,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
         if info.cue_list.is_empty() {
             egui::Frame::new()
                 .fill(tc.card_bg)
-                .stroke(Stroke::new(1.0, tc.card_border))
+                .stroke(Stroke::new(1.0_f32, tc.card_border))
                 .corner_radius(CornerRadius::same(WIDGET_ROUNDING))
                 .inner_margin(egui::Margin::symmetric(6, 4))
                 .show(ui, |ui| {
@@ -421,7 +421,7 @@ pub fn draw_scene_panel(ui: &mut Ui, info: &SceneInfo) {
                 let add_btn =
                     egui::Button::new(RichText::new("+ Cue").size(SMALL_SIZE).color(tc.accent))
                         .fill(Color32::TRANSPARENT)
-                        .stroke(Stroke::new(1.0, tc.card_border))
+                        .stroke(Stroke::new(1.0_f32, tc.card_border))
                         .corner_radius(CornerRadius::same(WIDGET_ROUNDING))
                         .min_size(Vec2::new(btn_width, MIN_INTERACT_HEIGHT));
                 if ui.add(add_btn).clicked() {
@@ -463,9 +463,9 @@ fn draw_scene_tile(
         tc.card_bg
     };
     let border = if is_current {
-        Stroke::new(1.0, tc.accent)
+        Stroke::new(1.0_f32, tc.accent)
     } else {
-        Stroke::new(1.0, tc.card_border)
+        Stroke::new(1.0_f32, tc.card_border)
     };
 
     let frame_resp = egui::Frame::new()
@@ -564,7 +564,7 @@ fn draw_cue_row(
     };
     let border_color = if is_current {
         Stroke::new(
-            1.0,
+            1.0_f32,
             Color32::from_rgba_unmultiplied(
                 tc.accent.r(),
                 tc.accent.g(),
@@ -574,11 +574,11 @@ fn draw_cue_row(
         )
     } else if is_target {
         Stroke::new(
-            1.0,
+            1.0_f32,
             Color32::from_rgba_unmultiplied(tc.accent.r(), tc.accent.g(), tc.accent.b(), 40),
         )
     } else {
-        Stroke::new(1.0, tc.card_border)
+        Stroke::new(1.0_f32, tc.card_border)
     };
 
     let frame_resp = egui::Frame::new()
@@ -669,7 +669,7 @@ fn draw_cue_row(
                             .color(trans_color),
                     )
                     .fill(Color32::TRANSPARENT)
-                    .stroke(Stroke::new(1.0, trans_color))
+                    .stroke(Stroke::new(1.0_f32, trans_color))
                     .corner_radius(CornerRadius::same(WIDGET_ROUNDING));
                     if ui
                         .add_sized(Vec2::new(48.0, MIN_INTERACT_HEIGHT), trans_btn)

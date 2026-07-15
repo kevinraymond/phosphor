@@ -683,7 +683,7 @@ fn draw_source_group(
         3.0,
         bg,
         Stroke::new(
-            1.0,
+            1.0_f32,
             if hovered {
                 tc.card_border
             } else {
@@ -1016,7 +1016,7 @@ fn draw_target_column(
                         3.0,
                         bg,
                         Stroke::new(
-                            1.0,
+                            1.0_f32,
                             if hovered {
                                 tc.card_border
                             } else {
@@ -1266,7 +1266,7 @@ fn draw_center_column(
                 6.0,
                 btn_fill,
                 Stroke::new(
-                    1.0,
+                    1.0_f32,
                     if btn_resp.hovered() {
                         tc.card_border
                     } else {
@@ -1425,7 +1425,7 @@ fn draw_binding_card(
     let frame = egui::Frame::new()
         .fill(Color32::TRANSPARENT)
         .corner_radius(6.0)
-        .stroke(Stroke::new(1.0, border_color))
+        .stroke(Stroke::new(1.0_f32, border_color))
         .inner_margin(egui::Margin::ZERO);
 
     // Paint card background before frame content
@@ -1454,11 +1454,14 @@ fn draw_binding_card(
                 ui.painter().circle_stroke(
                     dot_rect.center(),
                     4.0,
-                    Stroke::new(1.0, src_rgba(src_color, 100)),
+                    Stroke::new(1.0_f32, src_rgba(src_color, 100)),
                 );
             } else {
-                ui.painter()
-                    .circle_stroke(dot_rect.center(), 3.5, Stroke::new(1.0, tc.text_dim));
+                ui.painter().circle_stroke(
+                    dot_rect.center(),
+                    3.5,
+                    Stroke::new(1.0_f32, tc.text_dim),
+                );
             }
             if dot_resp.clicked() {
                 if let Some(b) = bus.get_binding_mut(id) {
@@ -1560,7 +1563,7 @@ fn draw_binding_card(
                     pos2(sep_rect.min.x + 10.0, sep_y),
                     pos2(sep_rect.max.x - 10.0, sep_y),
                 ],
-                Stroke::new(1.0, src_rgba(src_color, 32)),
+                Stroke::new(1.0_f32, src_rgba(src_color, 32)),
             );
 
             ui.add_space(4.0);
@@ -2466,9 +2469,9 @@ fn draw_connections(ctx: &Context, state: &BindingMatrixState, bus: &BindingBus)
 
         let src_color = source_color(&binding.source);
         let (stroke_width, alpha) = if binding.enabled {
-            (1.5, 0.6_f32)
+            (1.5_f32, 0.6_f32)
         } else {
-            (1.0, 0.12)
+            (1.0_f32, 0.12)
         };
 
         let stroke_color = if binding.enabled {

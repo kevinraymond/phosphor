@@ -169,7 +169,7 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
                 tc.widget_bg
             })
             .stroke(egui::Stroke::new(
-                1.0,
+                1.0_f32,
                 if is_active {
                     egui::Color32::from_rgba_unmultiplied(0x3b, 0x82, 0xf6, 100)
                 } else {
