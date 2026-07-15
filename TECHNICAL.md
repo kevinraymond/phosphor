@@ -1,10 +1,10 @@
-# Phosphor Technical Reference
+# Fosfora Technical Reference
 
-Developer and contributor reference for the Phosphor engine internals.
+Developer and contributor reference for the Fosfora engine internals.
 
 ## Architecture
 
-Phosphor runs on multiple threads with no mutexes in the hot rendering path:
+Fosfora runs on multiple threads with no mutexes in the hot rendering path:
 
 ```
 Main Thread        winit event loop → drain channels → update uniforms
@@ -274,7 +274,7 @@ All fields with types and defaults:
         {
             "name": string,            // Pass name
             "shader": string,          // WGSL filename
-            "feedback": bool           // Enable feedback(uv) for this pass (default: false)
+            "feedback": bool           // Enable feedback(uv) for this pass (default: true)
         }
     ],
 

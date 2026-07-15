@@ -19,7 +19,7 @@ pub struct NdiConfig {
 }
 
 fn default_source_name() -> String {
-    "Phosphor".to_string()
+    "Fosfora".to_string()
 }
 
 impl Default for NdiConfig {
@@ -88,7 +88,7 @@ mod tests {
     fn ndi_config_defaults() {
         let c = NdiConfig::default();
         assert!(!c.enabled);
-        assert_eq!(c.source_name, "Phosphor");
+        assert_eq!(c.source_name, "Fosfora");
         assert_eq!(c.resolution, OutputResolution::Match);
     }
 
@@ -97,7 +97,7 @@ mod tests {
         let c = NdiConfig::default();
         let json = serde_json::to_string(&c).unwrap();
         let c2: NdiConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(c2.source_name, "Phosphor");
+        assert_eq!(c2.source_name, "Fosfora");
         assert!(!c2.enabled);
         assert!(!c2.alpha_from_luma);
     }

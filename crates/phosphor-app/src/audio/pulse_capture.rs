@@ -474,7 +474,7 @@ impl PulseCapture {
     /// No GPU needed; works over SSH.
     pub fn run_diagnostic(duration_secs: u32) {
         let sample_rate = 44100u32;
-        println!("=== Phosphor Audio Diagnostic ===");
+        println!("=== Fosfora Audio Diagnostic ===");
         println!("Opening PulseAudio capture...");
 
         let lib = match PulseLib::load() {

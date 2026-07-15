@@ -51,9 +51,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          STAGING="phosphor-${TAG}-${{ matrix.target }}"
+          STAGING="fosfora-${TAG}-${{ matrix.target }}"
           mkdir -p "$STAGING"
-          cp "target/${{ matrix.target }}/release/phosphor-app" "$STAGING/phosphor"
+          cp "target/${{ matrix.target }}/release/phosphor-app" "$STAGING/fosfora"
           cp -r assets "$STAGING/assets"
           [ -f README.md ] && cp README.md "$STAGING/"
           [ -f LICENSE-MIT ] && cp LICENSE-MIT "$STAGING/"
@@ -67,9 +67,9 @@ jobs:
         shell: pwsh
         run: |
           $tag = $env:GITHUB_REF -replace '^refs/tags/', ''
-          $staging = "phosphor-${tag}-${{ matrix.target }}"
+          $staging = "fosfora-${tag}-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $staging
-          Copy-Item "target/${{ matrix.target }}/release/phosphor-app.exe" "$staging/phosphor.exe"
+          Copy-Item "target/${{ matrix.target }}/release/phosphor-app.exe" "$staging/fosfora.exe"
           Copy-Item -Recurse "assets" "$staging/assets"
           if (Test-Path "README.md") { Copy-Item "README.md" "$staging/" }
           if (Test-Path "LICENSE-MIT") { Copy-Item "LICENSE-MIT" "$staging/" }
@@ -82,14 +82,14 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: phosphor-${{ matrix.target }}
+          name: fosfora-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/phosphor-app
 
       - name: Upload artifact
         if: runner.os != 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: phosphor-${{ matrix.target }}
+          name: fosfora-${{ matrix.target }}
           path: ${{ env.ASSET }}
 
   universal-macos:
@@ -102,13 +102,13 @@ jobs:
       - name: Download arm64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: phosphor-aarch64-apple-darwin
+          name: fosfora-aarch64-apple-darwin
           path: artifacts/arm64
 
       - name: Download x86_64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: phosphor-x86_64-apple-darwin
+          name: fosfora-x86_64-apple-darwin
           path: artifacts/x86_64
 
       - name: Create universal .app, sign, notarize, and staple
@@ -137,16 +137,16 @@ jobs:
           brew install create-dmg
 
           # Create universal binary from per-arch builds
-          APP="Phosphor.app"
+          APP="Fosfora.app"
           mkdir -p "$APP/Contents/MacOS"
           mkdir -p "$APP/Contents/Resources"
-          lipo -create artifacts/arm64/phosphor-app artifacts/x86_64/phosphor-app -output "$APP/Contents/MacOS/Phosphor"
-          chmod +x "$APP/Contents/MacOS/Phosphor"
+          lipo -create artifacts/arm64/phosphor-app artifacts/x86_64/phosphor-app -output "$APP/Contents/MacOS/Fosfora"
+          chmod +x "$APP/Contents/MacOS/Fosfora"
           cp -r assets "$APP/Contents/Resources/assets"
           sed "s/__VERSION__/$VERSION/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
 
           # Generate .icns from source PNG
-          ICONSET="Phosphor.iconset"
+          ICONSET="Fosfora.iconset"
           mkdir -p "$ICONSET"
           for size in 16 32 64 128 256 512 1024; do
             sips -z $size $size packaging/icon/icon_1024x1024.png --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
@@ -157,7 +157,7 @@ jobs:
           cp "$ICONSET/icon_512x512.png"   "$ICONSET/icon_256x256@2x.png"
           cp "$ICONSET/icon_1024x1024.png" "$ICONSET/icon_512x512@2x.png"
           rm "$ICONSET/icon_64x64.png" "$ICONSET/icon_1024x1024.png"
-          iconutil --convert icns "$ICONSET" --output "$APP/Contents/Resources/Phosphor.icns"
+          iconutil --convert icns "$ICONSET" --output "$APP/Contents/Resources/Fosfora.icns"
           rm -rf "$ICONSET"
 
           # Codesign the bundle
@@ -167,24 +167,24 @@ jobs:
           codesign --verify --verbose "$APP"
 
           # Create polished DMG with drag-to-Applications
-          DMG="phosphor-${TAG}-universal-apple-darwin.dmg"
-          VOLICON="$APP/Contents/Resources/Phosphor.icns"
+          DMG="fosfora-${TAG}-universal-apple-darwin.dmg"
+          VOLICON="$APP/Contents/Resources/Fosfora.icns"
           mkdir -p dmg_staging
           mv "$APP" dmg_staging/
           create-dmg \
-            --volname "Phosphor" \
+            --volname "Fosfora" \
             --volicon "dmg_staging/$VOLICON" \
             --background "packaging/macos/dmg_background.png" \
             --window-pos 200 120 \
             --window-size 660 400 \
             --icon-size 128 \
-            --icon "Phosphor.app" 180 190 \
-            --hide-extension "Phosphor.app" \
+            --icon "Fosfora.app" 180 190 \
+            --hide-extension "Fosfora.app" \
             --app-drop-link 480 190 \
             --no-internet-enable \
             "$DMG" \
             "dmg_staging/" \
-          || hdiutil create -volname "Phosphor" -srcfolder "dmg_staging" -ov -format UDZO "$DMG"
+          || hdiutil create -volname "Fosfora" -srcfolder "dmg_staging" -ov -format UDZO "$DMG"
           xcrun notarytool submit "$DMG" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_ID_PASSWORD" \
@@ -197,7 +197,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: phosphor-universal-apple-darwin
+          name: fosfora-universal-apple-darwin
           path: ${{ env.ASSET }}
 
   release:
@@ -210,19 +210,19 @@ jobs:
       - name: Download macOS universal artifact
         uses: actions/download-artifact@v4
         with:
-          name: phosphor-universal-apple-darwin
+          name: fosfora-universal-apple-darwin
           path: artifacts/macos
 
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: phosphor-x86_64-unknown-linux-gnu
+          name: fosfora-x86_64-unknown-linux-gnu
           path: artifacts/linux
 
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
-          name: phosphor-x86_64-pc-windows-msvc
+          name: fosfora-x86_64-pc-windows-msvc
           path: artifacts/windows
 
       - name: List artifacts

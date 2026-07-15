@@ -1,6 +1,6 @@
-# Phosphor
+# Fosfora
 
-![CI](https://github.com/kevinraymond/phosphor/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/kevinraymond/fosfora/actions/workflows/ci.yml/badge.svg)
 
 **Cross-platform real-time particle and shader engine for live performance. Welcome to the light.**
 
@@ -8,14 +8,14 @@
 |---|---|
 | **Rendering** | Native GPU app (Vulkan/Metal via wgpu) · Compute rasterizer for million-particle effects · Shader hot-reload (edit WGSL live) |
 | **Audio** | BPM detection · 7-band spectrum · 13 MFCC timbral features · 12 chroma pitch classes · Beat sync |
-| **Effects** | 23 built-in effects (particle sims, feedback shaders, reaction-diffusion, flocking, strange attractors, morphing) |
+| **Effects** | 24 built-in effects (particle sims, feedback shaders, reaction-diffusion, flocking, strange attractors, morphing) |
 | **Compositing** | 8-layer stack · 10 blend modes · Media layers (GIF/PNG/MP4) · Webcam layers · Monocular depth (MiDaS) |
 | **Control** | Binding matrix (flow editor) · MIDI learn + auto-connect · OSC in/out with learn · Web touch surface (phone/tablet) |
 | **Output** | NDI® (built in, runtime-loaded) · Presets · Scene cues with timeline morphing |
 
 ## Note from Dev
 
-Thanks for checking this project out! I've gone through a couple experimental projects recently - [EASE](https://github.com/kevinraymond/ease) and [EASEy-GLYPH](https://github.com/kevinraymond/easey-glyph) - and with Phosphor I'm trying to put it all together.
+Thanks for checking this project out! I've gone through a couple experimental projects recently - [EASE](https://github.com/kevinraymond/ease) and [EASEy-GLYPH](https://github.com/kevinraymond/easey-glyph) - and with Fosfora I'm trying to put it all together.
 
 I hope this project is genuinely useful. I've tried to make it as easy to use as possible, but I'm no kind of performer so I'm open to suggestions for improvements (drop an issue)!
 
@@ -23,14 +23,12 @@ Everything below here is AI-assisted, like this entire project, except for this 
 
 Give it a try! Let me know how I can make it better for you.
 
-_NOTE: Everything below here is AI-assisted content. I keep involved 100% of the time, though I AM human so sometimes I don't catch every dumb thing it does. Please drop an issue if you see something!_
-
 ---
 
-Phosphor turns your audio input into layered, beat-synced visuals using GPU shaders, particles, and compositing — all driven by WGSL and controlled via MIDI, OSC, or a phone browser.
+Fosfora turns your audio input into layered, beat-synced visuals using GPU shaders, particles, and compositing — all driven by WGSL and controlled via MIDI, OSC, or a phone browser.
 
 <p align="center">
-  <img width="1518" height="1222" alt="phosphor UI" src="https://github.com/user-attachments/assets/3072dd58-17d4-4ce4-8166-429bee57f780" />
+  <img width="1518" height="1222" alt="Fosfora UI" src="https://github.com/user-attachments/assets/3072dd58-17d4-4ce4-8166-429bee57f780" />
 </p>
 
 
@@ -38,11 +36,11 @@ Phosphor turns your audio input into layered, beat-synced visuals using GPU shad
 
 ### Download
 
-Grab the latest release for your platform from [**GitHub Releases**](https://github.com/kevinraymond/phosphor/releases/latest):
+Grab the latest release for your platform from [**GitHub Releases**](https://github.com/kevinraymond/fosfora/releases/latest):
 
-- **macOS** — download the `.dmg`, open it, drag Phosphor to Applications (signed & notarized)
-- **Windows** — download the `.zip`, extract, run `phosphor.exe`
-- **Linux** — download the `.tar.gz`, extract, run `./phosphor`
+- **macOS** — download the `.dmg`, open it, drag Fosfora to Applications (signed & notarized)
+- **Windows** — download the `.zip`, extract, run `fosfora.exe`
+- **Linux** — download the `.tar.gz`, extract, run `./fosfora`
 
 NDI® output is built into the official downloads — to use it, install the [NDI® runtime](https://ndi.video) (the only extra step needed).
 
@@ -52,8 +50,8 @@ NDI® output is built into the official downloads — to use it, install the [ND
 **Prerequisites:** Rust 1.90+, a Vulkan-capable GPU.
 
 ```bash
-git clone https://github.com/kevinraymond/phosphor.git
-cd phosphor
+git clone https://github.com/kevinraymond/fosfora.git
+cd fosfora
 cargo run --release                    # no extra deps
 cargo run --release --features video   # requires: ffmpeg on PATH
 cargo run --release --features webcam  # requires: libclang-dev, v4l-utils (Linux)
@@ -65,7 +63,7 @@ cargo run --release --features depth   # requires: libssl-dev, libclang-dev (inc
 
 On first launch: the UI fades in automatically after a couple seconds (or press **D** to show it immediately). Pick an effect from the browser and press **F** for fullscreen. Audio reactivity works immediately from your default input device.
 
-**New to Phosphor?** Check out the [Tutorials](TUTORIALS.md) for in-depth guides on every feature — effects, audio, layers, MIDI, OSC, and more.
+**New to Fosfora?** Check out the [Tutorials](TUTORIALS.md) for in-depth guides on every feature — effects, audio, layers, MIDI, OSC, and more.
 
 ## Controls
 
@@ -126,7 +124,6 @@ Open it on a phone or tablet on the same network. Supports multiple simultaneous
 | **Shards** | Animated Voronoi cells with stained-glass fill | |
 | **Pulse** | Beat-synced concentric rings with trails | Feedback |
 | **Iris** | Spinning dot with fading feedback trails | Feedback |
-| **Swarm** | Orbital particle cloud with custom compute shader | Feedback, Particles |
 | **Storm** | Volumetric clouds with beat-triggered lightning | Feedback |
 
 All effects are audio-reactive out of the box. Parameters are exposed as sliders in the UI and mappable to MIDI/OSC.
@@ -162,7 +159,7 @@ All config is stored in `~/.config/phosphor/`:
 
 ## Writing Effects
 
-Effects are WGSL fragment shaders paired with a JSON `.pfx` definition. Shaders have access to time, resolution, 20 audio features (7 frequency bands, beat detection, spectral shape), up to 16 parameters, feedback from the previous frame, and a built-in library (noise, palette, SDF, tonemap).
+Effects are WGSL fragment shaders paired with a JSON `.pfx` definition. Shaders have access to time, resolution, 46 audio features (7 frequency bands, beat detection, spectral shape, 13 MFCC timbral coefficients, 12 chroma pitch classes), up to 16 parameters, feedback from the previous frame, and a built-in library (noise, palette, SDF, tonemap).
 
 Edit a shader while running — it hot-reloads on save with error recovery.
 

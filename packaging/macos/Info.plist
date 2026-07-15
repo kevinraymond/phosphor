@@ -4,11 +4,11 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>Phosphor</string>
+    <string>Fosfora</string>
     <key>CFBundleIdentifier</key>
     <string>com.kevinraymond.phosphor</string>
     <key>CFBundleName</key>
-    <string>Phosphor</string>
+    <string>Fosfora</string>
     <key>CFBundleVersion</key>
     <string>__VERSION__</string>
     <key>CFBundleShortVersionString</key>
@@ -20,10 +20,10 @@
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>CFBundleIconFile</key>
-    <string>Phosphor</string>
+    <string>Fosfora</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Phosphor uses your microphone for audio-reactive visuals.</string>
+    <string>Fosfora uses your microphone for audio-reactive visuals.</string>
 </dict>
 </plist>

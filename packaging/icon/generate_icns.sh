@@ -1,12 +1,12 @@
 #!/bin/bash
-# Generate Phosphor.icns from the master 1024x1024 PNG.
+# Generate Fosfora.icns from the master 1024x1024 PNG.
 # Requires macOS (uses sips + iconutil).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$SCRIPT_DIR/icon_1024x1024.png"
-ICONSET="$SCRIPT_DIR/Phosphor.iconset"
-OUT="$SCRIPT_DIR/Phosphor.icns"
+ICONSET="$SCRIPT_DIR/Fosfora.iconset"
+OUT="$SCRIPT_DIR/Fosfora.icns"
 
 if [ ! -f "$SRC" ]; then
   echo "Error: $SRC not found" >&2

@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### Changed
+- **Rebranded to Fosfora** — the project, app, window title, NDI source name, macOS bundle, release binaries (`fosfora` / `Fosfora.app`), and documentation are now "Fosfora" (Northern Sami for phosphorus). The signature **Phosphor** effect keeps its name as a heritage nod. Two runtime surfaces are intentionally unchanged this release to avoid breaking existing setups and will migrate later: the config directory (`~/.config/phosphor/`) and the OSC namespace (`/phosphor/*`), along with the Python `bridges/` tooling that targets it. The macOS bundle identifier (`com.kevinraymond.phosphor`) is also unchanged so existing microphone permissions are preserved.
+
+### Fixed (docs)
+- **Doc accuracy** — corrected the built-in effect count (23 → 24) and removed the non-existent "Swarm" effect from the README table; corrected the audio-feature count (20 → 46) in the README and tutorials; de-duplicated the AI-assist disclaimer in the README "Note from Dev"; fixed the `.pfx` `passes[].feedback` default in TECHNICAL.md (documented as `false`, actually `true`).
+
 ### Security
 - **Dependency advisories** — bumped `anyhow` 1.0.102 → 1.0.103 (RUSTSEC-2026-0190, unsound `Error::downcast_mut`) and updated `wayland-scanner`/`uds_windows` patch versions; added documented deny.toml ignores for quick-xml RUSTSEC-2026-0194/0195 (DoS via untrusted XML — only reachable through `wayland-scanner`, a build-time proc-macro parsing trusted bundled protocol XML; remove once the Wayland stack allows quick-xml ≥ 0.41)
 - **Dependency advisories** — bumped `rustls-webpki` 0.103.9 → 0.103.13 (RUSTSEC-2026-0049, RUSTSEC-2026-0098) and `tar` 0.4.44 → 0.4.46 (RUSTSEC-2026-0067, RUSTSEC-2026-0068) to clear the cargo-deny audit

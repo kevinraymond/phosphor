@@ -22,7 +22,7 @@ body:
       label: Steps to Reproduce
       description: Numbered steps to reproduce the issue.
       placeholder: |
-        1. Launch Phosphor
+        1. Launch Fosfora
         2. Select the "Storm" effect
         3. Switch to "Murmur" effect
         4. Observe crash
@@ -43,7 +43,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Phosphor Version
+      label: Fosfora Version
       description: Version number, commit hash, or "latest release".
       placeholder: "v0.8.0"
     validations:

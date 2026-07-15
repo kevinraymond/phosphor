@@ -8,9 +8,9 @@
 
 ## Getting started
 
-**macOS**: Open the DMG, drag Phosphor.app to Applications (or run directly). Signed and notarized.
+**macOS**: Open the DMG, drag Fosfora.app to Applications (or run directly). Signed and notarized.
 
-**Linux / Windows**: Extract, run `phosphor` from the extracted directory. The `assets/` folder must be next to the binary.
+**Linux / Windows**: Extract, run `fosfora` from the extracted directory. The `assets/` folder must be next to the binary.
 
 ## Requirements
 

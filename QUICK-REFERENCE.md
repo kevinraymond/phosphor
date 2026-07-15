@@ -1,4 +1,4 @@
-# Phosphor Quick Reference
+# Fosfora Quick Reference
 
 ```
 +--[ Left Panel (315px) ]--+-----[ Canvas ]-----+--[ Right Panel (315px) ]-+
@@ -157,7 +157,7 @@ Mappings support: CC or Note messages, per-channel or omni, custom min/max range
 
 Default ports: **RX 9000**, **TX 9001**
 
-### Receive (control Phosphor)
+### Receive (control Fosfora)
 
 | Address                             | Type  | Description                  |
 |-------------------------------------|-------|------------------------------|

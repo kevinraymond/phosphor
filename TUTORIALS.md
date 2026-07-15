@@ -1,6 +1,6 @@
-# Phosphor Tutorials
+# Fosfora Tutorials
 
-A comprehensive guide to using Phosphor — a real-time particle and shader engine for live VJ performance.
+A comprehensive guide to using Fosfora — a real-time particle and shader engine for live VJ performance.
 
 ---
 
@@ -24,7 +24,7 @@ A comprehensive guide to using Phosphor — a real-time particle and shader engi
 
 ## Effects
 
-Effects are the core visual building blocks of Phosphor. Each effect is a WGSL shader (or set of shaders) that generates audio-reactive visuals in real time.
+Effects are the core visual building blocks of Fosfora. Each effect is a WGSL shader (or set of shaders) that generates audio-reactive visuals in real time.
 
 ### Quick Start
 
@@ -35,7 +35,7 @@ Effects are the core visual building blocks of Phosphor. Each effect is a WGSL s
 
 ### Built-In Effects
 
-Phosphor ships with 12 curated effects:
+Fosfora ships with 12 curated effects:
 
 | Effect | Description | Uses Feedback | Uses Particles |
 |--------|-------------|:---:|:---:|
@@ -59,13 +59,13 @@ Effects are defined by `.pfx` files — JSON manifests that reference WGSL shade
 **Create from scratch:**
 1. In the Effects panel, click the **+ New** button
 2. Enter a name for your effect
-3. Phosphor creates a `.pfx` file and starter `.wgsl` shader in `~/.config/phosphor/effects/`
+3. Fosfora creates a `.pfx` file and starter `.wgsl` shader in `~/.config/phosphor/effects/`
 4. The shader editor opens automatically
 
 **Copy a built-in effect:**
 1. Select a built-in effect
 2. Click **Copy Shader** in the Effects panel
-3. Enter a name — Phosphor copies the shader files to your user effects directory
+3. Enter a name — Fosfora copies the shader files to your user effects directory
 4. Edit the copy freely without affecting the original
 
 ### The .pfx Format
@@ -121,7 +121,7 @@ A `.pfx` file is JSON describing an effect:
 
 ### Shader Editor
 
-Phosphor includes a built-in WGSL shader editor with live hot-reload:
+Fosfora includes a built-in WGSL shader editor with live hot-reload:
 
 1. Click the **Edit** button next to the active effect name (only available for user effects)
 2. The editor opens as a full-screen overlay
@@ -134,7 +134,7 @@ The editor supports syntax highlighting and shows compilation errors inline.
 
 ### Shader Authoring
 
-Phosphor auto-prepends a WGSL shader library to every effect. You can use these functions without any imports:
+Fosfora auto-prepends a WGSL shader library to every effect. You can use these functions without any imports:
 
 **Noise:**
 - `phosphor_noise2(p)` / `phosphor_noise3(p)` — Perlin gradient noise (0–1)
@@ -170,12 +170,12 @@ Phosphor auto-prepends a WGSL shader library to every effect. You can use these 
 
 ## Audio
 
-Phosphor analyzes your system's audio input in real time and passes the results to every shader as uniform values.
+Fosfora analyzes your system's audio input in real time and passes the results to every shader as uniform values.
 
 ### Quick Start
 
 1. Make sure audio is playing on your system (music, microphone, etc.)
-2. Phosphor automatically captures from the default audio device
+2. Fosfora automatically captures from the default audio device
 3. The **Audio** panel in the UI shows a 7-band frequency spectrum
 4. BPM and beat detection appear in the status bar
 
@@ -188,11 +188,11 @@ To change the audio input device:
 3. The change takes effect immediately
 4. Your selection is saved to `~/.config/phosphor/settings.json`
 
-On Linux, Phosphor uses PulseAudio/PipeWire for monitor capture (loopback of system audio). Run `cargo run -- --audio-test` for standalone audio diagnostics.
+On Linux, Fosfora uses PulseAudio/PipeWire for monitor capture (loopback of system audio). Run `cargo run -- --audio-test` for standalone audio diagnostics.
 
 ### What Gets Detected
 
-Phosphor extracts 20 audio features from multi-resolution FFT analysis:
+Fosfora extracts 46 audio features from multi-resolution FFT analysis:
 
 **7 Frequency Bands** (normalized 0–1):
 | Band | Range | Typical Content |
@@ -239,7 +239,7 @@ This is where the magic happens — audio features drive every aspect of the vis
 
 ### How It Works
 
-Every frame, Phosphor packs all 20 audio features into the shader uniform buffer. Your shaders read these values and use them to modulate anything: color, position, size, speed, distortion, brightness.
+Every frame, Fosfora packs all 46 audio features into the shader uniform buffer. Your shaders read these values and use them to modulate anything: color, position, size, speed, distortion, brightness.
 
 ### Available Uniforms in Shaders
 
@@ -344,7 +344,7 @@ Parameters can be mapped to external controllers:
 
 ## Layers
 
-Phosphor supports up to 8 layers, each running its own effect (or media), composited together with blend modes.
+Fosfora supports up to 8 layers, each running its own effect (or media), composited together with blend modes.
 
 ### Quick Start
 
@@ -501,7 +501,7 @@ Set the advance mode in the scene panel. In Beat Sync mode, you can configure th
 
 ### MIDI Clock Sync
 
-When a MIDI controller or DAW sends MIDI clock, Phosphor follows the external transport automatically:
+When a MIDI controller or DAW sends MIDI clock, Fosfora follows the external transport automatically:
 
 - **Start/Continue** (MIDI 0xFA/0xFB) — starts the timeline if it has cues but is idle
 - **Stop** (MIDI 0xFC) — stops the timeline if it is active
@@ -647,7 +647,7 @@ Triggers use rising-edge detection (CC crosses from < 64 to ≥ 64) to fire once
 
 ### Hot-Plug
 
-Phosphor polls for MIDI devices every 2 seconds:
+Fosfora polls for MIDI devices every 2 seconds:
 - Disconnected controllers are detected automatically
 - Reconnected controllers re-bind automatically
 - Your saved port preference is restored when the device reappears
@@ -663,7 +663,7 @@ Open Sound Control (OSC) enables communication with other software — DAWs, lig
 1. Open the **OSC** panel in the left sidebar
 2. OSC receive (RX) is on by default on port **9000**
 3. OSC transmit (TX) is off by default — enable it and set port **9001** if needed
-4. Send OSC messages to control Phosphor from external software
+4. Send OSC messages to control Fosfora from external software
 
 ### Receiving OSC (RX)
 
@@ -697,12 +697,12 @@ Trigger action names: `next_effect`, `prev_effect`, `toggle_postprocess`, `toggl
 Similar to MIDI learn:
 1. Click the **O** button next to any parameter or trigger
 2. Send any OSC message from your controller
-3. Phosphor binds that address to the parameter
+3. Fosfora binds that address to the parameter
 4. Mappings are saved to `~/.config/phosphor/osc.json`
 
 ### Sending OSC (TX)
 
-When TX is enabled, Phosphor broadcasts at 30 Hz (configurable):
+When TX is enabled, Fosfora broadcasts at 30 Hz (configurable):
 - Audio features: all 7 bands, RMS, kick, onset, beat, etc.
 - State: active layer index, current effect name
 - Timeline state (when a scene is active):
@@ -714,7 +714,7 @@ When TX is enabled, Phosphor broadcasts at 30 Hz (configurable):
 | `/phosphor/state/timeline/cue_count` | int | Total number of cues |
 | `/phosphor/state/timeline/transition_progress` | float (0–1) | Transition progress (0.0 when idle) |
 
-This is useful for driving other software (lighting, video) from Phosphor's audio analysis and timeline state.
+This is useful for driving other software (lighting, video) from Fosfora's audio analysis and timeline state.
 
 ### Testing with Command Line
 
@@ -730,7 +730,7 @@ oscsend localhost 9000 /phosphor/trigger/next_effect f 1.0
 # Set layer opacity
 oscsend localhost 9000 /phosphor/layer/0/opacity f 0.5
 
-# Monitor Phosphor's outbound OSC
+# Monitor Fosfora's outbound OSC
 oscdump 9001
 ```
 
@@ -738,7 +738,7 @@ oscdump 9001
 
 ## Web Control Surface
 
-Phosphor includes a built-in web-based touch control surface — perfect for controlling visuals from a phone or tablet.
+Fosfora includes a built-in web-based touch control surface — perfect for controlling visuals from a phone or tablet.
 
 ### Quick Start
 
@@ -778,17 +778,17 @@ Multiple devices can connect simultaneously. All clients receive real-time state
 
 ### NDI Output
 
-NDI (Network Device Interface) lets you send Phosphor's output to other software over the network — OBS, vMix, Resolume, TouchDesigner, and any NDI-compatible receiver.
+NDI (Network Device Interface) lets you send Fosfora's output to other software over the network — OBS, vMix, Resolume, TouchDesigner, and any NDI-compatible receiver.
 
 **Requirements:**
 - **Official release downloads** (macOS/Windows/Linux): NDI is already built in — you only need the NDI runtime.
 - **Building from source:** add `--features ndi` (e.g. `cargo run --release --features ndi`).
-- Install the NDI runtime from [ndi.video](https://ndi.video). Phosphor loads it dynamically at startup; if it's missing, the NDI panel lists the locations it searched and a download link.
+- Install the NDI runtime from [ndi.video](https://ndi.video). Fosfora loads it dynamically at startup; if it's missing, the NDI panel lists the locations it searched and a download link.
 
 **Setup:**
 1. Open the **Outputs** section in the left sidebar
 2. Enable NDI output
-3. Set a source name (default: "Phosphor")
+3. Set a source name (default: "Fosfora")
 4. Choose output resolution: Match Window, 720p, 1080p, or 4K
 5. In your NDI receiver, look for the source name you configured
 
@@ -815,7 +815,7 @@ NDI (Network Device Interface) lets you send Phosphor's output to other software
 
 ### Themes
 
-Phosphor supports multiple UI themes. Change the theme in the settings area of the UI. Available themes follow WCAG 2.2 AA contrast standards for accessibility.
+Fosfora supports multiple UI themes. Change the theme in the settings area of the UI. Available themes follow WCAG 2.2 AA contrast standards for accessibility.
 
 ### Configuration Files
 

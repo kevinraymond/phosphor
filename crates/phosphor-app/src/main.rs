@@ -62,7 +62,7 @@ impl ApplicationHandler for PhosphorApp {
         }
 
         let mut attrs = WindowAttributes::default()
-            .with_title("Phosphor")
+            .with_title("Fosfora")
             .with_inner_size(winit::dpi::LogicalSize::new(1920, 1080));
 
         // Center window on primary monitor via initial position hint.
@@ -100,7 +100,7 @@ impl ApplicationHandler for PhosphorApp {
         match App::new(window) {
             Ok(app) => {
                 self.app = Some(app);
-                log::info!("Phosphor initialized");
+                log::info!("Fosfora initialized");
             }
             Err(e) => {
                 log::error!("Failed to initialize app: {e}");
@@ -750,7 +750,7 @@ impl ApplicationHandler for PhosphorApp {
 
                         let tc = crate::ui::theme::colors::theme_colors(&ctx);
 
-                        egui::Window::new("Quit Phosphor?")
+                        egui::Window::new("Quit Fosfora?")
                             .collapsible(false)
                             .resizable(false)
                             .fixed_size(egui::Vec2::new(280.0, 0.0))

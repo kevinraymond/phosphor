@@ -276,7 +276,7 @@ impl EffectLoader {
 
     /// Returns true if the effect is a built-in (shipped) effect.
     pub fn is_builtin(effect: &PfxEffect) -> bool {
-        effect.author == "Phosphor"
+        effect.author == "Fosfora"
     }
 
     /// Create an EffectLoader with pre-supplied library source (for tests).
@@ -504,8 +504,8 @@ mod tests {
     }
 
     #[test]
-    fn is_builtin_true_for_phosphor_author() {
-        assert!(EffectLoader::is_builtin(&make_effect("Phosphor")));
+    fn is_builtin_true_for_fosfora_author() {
+        assert!(EffectLoader::is_builtin(&make_effect("Fosfora")));
     }
 
     #[test]

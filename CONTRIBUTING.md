@@ -1,6 +1,6 @@
-# Contributing to Phosphor
+# Contributing to Fosfora
 
-Thanks for your interest in contributing! Phosphor is a live VJ engine built with Rust, wgpu, and WGSL shaders. Whether you're adding effects, fixing bugs, or improving docs, contributions are welcome.
+Thanks for your interest in contributing! Fosfora is a live VJ engine built with Rust, wgpu, and WGSL shaders. Whether you're adding effects, fixing bugs, or improving docs, contributions are welcome.
 
 ## Building
 
