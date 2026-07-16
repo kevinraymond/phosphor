@@ -339,7 +339,7 @@ mod tests {
         let period = 60.0 / bpm as f64;
         let mut out = Vec::new();
         for i in 0..count {
-            let accent = i % meter == 0;
+            let accent = i.is_multiple_of(meter);
             let flux = if accent {
                 [1.0, 0.2, 0.1]
             } else {
@@ -347,7 +347,7 @@ mod tests {
             };
             let rms = if accent { 0.9 } else { 0.5 };
             // Chord changes land on the downbeat.
-            let chroma = if (i / meter) % 2 == 0 {
+            let chroma = if (i / meter).is_multiple_of(2) {
                 [1.0, 0.0, 0.5, 0.0, 0.7, 0.0, 0.0, 0.6, 0.0, 0.0, 0.0, 0.0]
             } else {
                 [0.0, 0.6, 0.0, 0.8, 0.0, 0.5, 0.0, 0.0, 1.0, 0.0, 0.4, 0.0]
