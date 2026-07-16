@@ -65,3 +65,19 @@ fn phosphor_op_twist(p: vec3f, k: f32) -> vec3f {
     let xz = vec2f(c * p.x - s * p.z, s * p.x + c * p.z);
     return vec3f(xz.x, p.y, xz.y);
 }
+
+// --- 2D primitives (screen-space; used by line/beam effects) ---
+
+// Distance from point p to the line segment a->b. Endpoints must be distinct;
+// callers (e.g. the Beam scope trace) always pass neighboring samples that differ.
+fn phosphor_sd_segment2(p: vec2f, a: vec2f, b: vec2f) -> f32 {
+    let pa = p - a;
+    let ba = b - a;
+    let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h);
+}
+
+// Signed distance to a circle of radius r centered at the origin.
+fn phosphor_sd_circle2(p: vec2f, r: f32) -> f32 {
+    return length(p) - r;
+}
