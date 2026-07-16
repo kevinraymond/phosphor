@@ -3,6 +3,11 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## Unreleased
+
+### Added
+- **Community health files** — added `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1), `SECURITY.md` (private disclosure via GitHub security advisories), and a `.github/pull_request_template.md`, completing GitHub's recommended community standards checklist.
+
 ## v1.8.0 — 2026-07-15
 
 ### Changed
