@@ -32,7 +32,7 @@ struct PhosphorUniforms {
     frame_index: f32,
 
     dominant_chroma: f32,
-    _pad_align: f32,
+    scroll_phase: f32,
     mfcc: array<vec4f, 4>,
     chroma: array<vec4f, 3>,
 

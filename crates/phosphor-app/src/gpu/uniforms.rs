@@ -52,8 +52,9 @@ pub struct ShaderUniforms {
 
     // Derived audio features
     pub dominant_chroma: f32,
-    // Align to 16-byte boundary for GPU array types
-    pub _pad_align: f32,
+    // Fractional mel-spectrogram scroll phase (0..1) for continuous terrain motion
+    // (#1508 Strata). Repurposed from a 16-byte alignment pad — same slot/offset.
+    pub scroll_phase: f32,
     // 8 bytes (176 total)
 
     // MFCC: 13 coefficients + 3 padding (array<vec4f, 4> on GPU)
