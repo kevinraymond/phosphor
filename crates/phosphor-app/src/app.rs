@@ -77,6 +77,11 @@ pub struct App {
     /// A17 audio textures (waveform / spectrum / spectrogram) filling the reserved
     /// bind-group slots; refreshed each frame in `update` (#1468).
     pub audio_textures: AudioTextures,
+    /// Wall-clock of the last mel-column commit, and the EMA of the inter-commit
+    /// interval — used to extrapolate a fractional scroll phase (0..1) between
+    /// commits so the spectrogram terrain scrolls continuously (#1508 Strata Phase 1b).
+    mel_last_commit: Option<Instant>,
+    mel_commit_interval: f32,
     // Global uniforms template (time, audio, etc. — params overwritten per-layer)
     pub uniforms: ShaderUniforms,
     // NDI output (feature-gated)
@@ -377,6 +382,8 @@ impl App {
         let now = Instant::now();
         Ok(Self {
             gpu,
+            mel_last_commit: None,
+            mel_commit_interval: 1.0 / 43.0, // ~43 Hz audio-hop column rate
             uniforms: ShaderUniforms::zeroed(),
             start_time: now,
             last_frame: now,
@@ -548,8 +555,26 @@ impl App {
         self.audio_textures
             .upload_spectrum(&self.gpu.queue, self.audio.latest_spectrum());
         let mel_columns = self.audio.take_mel_columns();
+        let n_cols = mel_columns.len();
         self.audio_textures
             .upload_spectrogram(&self.gpu.queue, &mel_columns);
+        // Fractional scroll phase (0..1) so the spectrogram terrain scrolls
+        // continuously instead of snapping one texel per commit (#1508 Strata).
+        // Extrapolate from the last commit using an EMA of the inter-commit interval.
+        let now = Instant::now();
+        if n_cols > 0 {
+            if let Some(last) = self.mel_last_commit {
+                let per_col = (now - last).as_secs_f32() / n_cols as f32;
+                if per_col > 1e-4 && per_col < 0.5 {
+                    self.mel_commit_interval = self.mel_commit_interval * 0.9 + per_col * 0.1;
+                }
+            }
+            self.mel_last_commit = Some(now);
+        }
+        self.uniforms.scroll_phase = match self.mel_last_commit {
+            Some(last) => ((now - last).as_secs_f32() / self.mel_commit_interval).clamp(0.0, 1.0),
+            None => 0.0,
+        };
 
         // Watchdog: if the device stopped delivering data mid-session, surface
         // it (once per stall episode). Detection only — auto-reconnect would

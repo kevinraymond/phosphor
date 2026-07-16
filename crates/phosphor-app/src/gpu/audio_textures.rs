@@ -42,9 +42,24 @@ pub struct AudioTextures {
     pub sampler: Sampler,
     /// Mel-spectrogram history in mel-major, time-ordered layout: row `m` occupies
     /// `[m*HISTORY_FRAMES .. m*HISTORY_FRAMES + HISTORY_FRAMES]`, time increasing left to
-    /// right (index 0 = oldest, HISTORY_FRAMES-1 = newest). Matches the R8Unorm upload.
-    mel_history: Vec<u8>,
+    /// right (index 0 = oldest, HISTORY_FRAMES-1 = newest). Held as f32 magnitude and
+    /// converted to f16 on upload — the texture is **R16Float** (#1508): 8-bit R8Unorm
+    /// quantized the height to 256 levels, and with the shader's `pow(0.55)` perceptual
+    /// lift (whose derivative explodes near 0) each LSB became a visible terrace ledge.
+    /// f16's fine precision removes those steps.
+    mel_history: Vec<f32>,
+    /// Reused f16 (little-endian) byte scratch for the R16Float upload (2 bytes/texel).
+    mel_upload: Vec<u8>,
+    /// Per-band running EMA of the incoming mel column. Each new column is low-passed
+    /// against this before being committed, so terrain ridges rise/fall smoothly instead
+    /// of snapping per column (#1508). Strata is the sole real `spectrogram()` consumer.
+    mel_smoothed: [f32; SPECTROGRAM_MELS],
 }
+
+/// Per-column low-pass weight for the mel EMA (columns arrive at the fixed audio hop rate,
+/// ~43 Hz, so a constant weight is frame-rate stable). ~0.4 gives a ~80–100 ms time constant:
+/// fast enough to keep transients legible, slow enough to kill per-frame terrain snap.
+const MEL_EMA_ALPHA: f32 = 0.4;
 
 impl AudioTextures {
     pub fn new(device: &Device, queue: &Queue) -> Self {
@@ -67,7 +82,7 @@ impl AudioTextures {
             "audio-spectrogram",
             HISTORY_FRAMES as u32,
             SPECTROGRAM_MELS as u32,
-            wgpu::TextureFormat::R8Unorm,
+            wgpu::TextureFormat::R16Float,
         );
 
         let waveform_view = waveform_tex.create_view(&Default::default());
@@ -98,11 +113,12 @@ impl AudioTextures {
             row_layout(SPECTRUM_BINS as u32 * 2, 1),
             extent(SPECTRUM_BINS as u32, 1),
         );
-        let mel_history = vec![0u8; HISTORY_FRAMES * SPECTROGRAM_MELS];
+        let mel_history = vec![0.0f32; HISTORY_FRAMES * SPECTROGRAM_MELS];
+        let mel_upload = vec![0u8; HISTORY_FRAMES * SPECTROGRAM_MELS * 2]; // f16 = 2 bytes/texel
         queue.write_texture(
             tex_copy(&spectrogram_tex),
-            &mel_history,
-            row_layout(HISTORY_FRAMES as u32, SPECTROGRAM_MELS as u32),
+            &mel_upload,
+            row_layout(HISTORY_FRAMES as u32 * 2, SPECTROGRAM_MELS as u32),
             extent(HISTORY_FRAMES as u32, SPECTROGRAM_MELS as u32),
         );
 
@@ -115,6 +131,8 @@ impl AudioTextures {
             spectrogram_view,
             sampler,
             mel_history,
+            mel_upload,
+            mel_smoothed: [0.0; SPECTROGRAM_MELS],
         }
     }
 
@@ -174,19 +192,29 @@ impl AudioTextures {
             return;
         }
         for col in columns {
-            // Shift every mel row left by one (drop oldest) and append the newest sample
+            // Temporally low-pass each band before committing (#1508): ridges rise/fall
+            // smoothly instead of snapping per column. The EMA state advances once per
+            // incoming column (fixed audio hop rate), so the weight is frame-rate stable.
+            // Shift every mel row left by one (drop oldest) and append the smoothed sample
             // at the right edge, keeping the buffer in linear time order for raw-uv sampling.
             for m in 0..SPECTROGRAM_MELS {
+                let raw = col.get(m).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+                self.mel_smoothed[m] += MEL_EMA_ALPHA * (raw - self.mel_smoothed[m]);
                 let row = &mut self.mel_history[m * HISTORY_FRAMES..(m + 1) * HISTORY_FRAMES];
                 row.copy_within(1.., 0);
-                let v = col.get(m).copied().unwrap_or(0.0).clamp(0.0, 1.0);
-                row[HISTORY_FRAMES - 1] = (v * 255.0 + 0.5) as u8;
+                row[HISTORY_FRAMES - 1] = self.mel_smoothed[m];
             }
+        }
+        // Convert the f32 history to f16 (little-endian) and upload as R16Float.
+        for (i, &v) in self.mel_history.iter().enumerate() {
+            let bytes = f32_to_f16(v).to_le_bytes();
+            self.mel_upload[i * 2] = bytes[0];
+            self.mel_upload[i * 2 + 1] = bytes[1];
         }
         queue.write_texture(
             tex_copy(&self.spectrogram_tex),
-            &self.mel_history,
-            row_layout(HISTORY_FRAMES as u32, SPECTROGRAM_MELS as u32),
+            &self.mel_upload,
+            row_layout(HISTORY_FRAMES as u32 * 2, SPECTROGRAM_MELS as u32),
             extent(HISTORY_FRAMES as u32, SPECTROGRAM_MELS as u32),
         );
     }
