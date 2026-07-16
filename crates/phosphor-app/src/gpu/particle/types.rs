@@ -147,9 +147,14 @@ pub struct ParticleUniforms {
     pub morph_dest: u32,
     pub morph_flags: u32, // bit 0 = transitioning, bits 1-3 = transition_style
 
-    // Zero-crossing rate (32 bytes: f32 + 12 pad to align vec3f + vec3f pad)
+    // Zero-crossing rate + spectral shape + tempo (32 bytes = 8 floats) [800..831]
     pub zcr: f32,
-    pub _pad_zcr: [f32; 7],
+    pub flatness: f32,      // Noise vs tone (Wiener entropy)
+    pub rolloff: f32,       // 85% energy frequency (normalized)
+    pub bandwidth: f32,     // Spectral spread
+    pub bpm: f32,           // BPM / 300 (normalized 0-1)
+    pub beat_strength: f32, // Strength of the detected beat
+    pub _pad_zcr: [f32; 2],
     // Total = 832 bytes
 }
 

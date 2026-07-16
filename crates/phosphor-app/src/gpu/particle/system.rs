@@ -1225,6 +1225,11 @@ impl ParticleSystem {
         self.uniforms.chroma.copy_from_slice(&features.chroma);
         self.uniforms.dominant_chroma = features.dominant_chroma;
         self.uniforms.zcr = features.zcr;
+        self.uniforms.flatness = features.flatness;
+        self.uniforms.rolloff = features.rolloff;
+        self.uniforms.bandwidth = features.bandwidth;
+        self.uniforms.bpm = features.bpm;
+        self.uniforms.beat_strength = features.beat_strength;
     }
 
     /// Run the compute dispatch (particle simulation + prepare indirect args).

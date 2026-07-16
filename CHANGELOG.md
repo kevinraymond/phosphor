@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### Added
+- **Particle shaders gain 5 more audio features** — `flatness`, `rolloff`, `bandwidth`, `bpm`, and `beat_strength` are now forwarded into `ParticleUniforms` (and mirrored in `particle_lib.wgsl`), filling previously reserved padding with zero layout change (still 832 bytes). Compute/particle shaders can now react to spectral shape and tempo strength, matching what fragment shaders already receive. (board #1474)
 - **Community health files** — added `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1), `SECURITY.md` (private disclosure via GitHub security advisories), and a `.github/pull_request_template.md`, completing GitHub's recommended community standards checklist.
 
 ### Changed (docs)
