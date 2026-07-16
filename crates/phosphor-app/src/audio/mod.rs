@@ -2,6 +2,7 @@ pub mod analyzer;
 pub mod beat;
 pub mod capture;
 pub mod chroma;
+pub mod downbeat;
 pub mod features;
 pub mod key;
 pub mod normalizer;
@@ -39,6 +40,7 @@ use crossbeam_channel::{Receiver, Sender};
 use self::analyzer::FftAnalyzer;
 use self::beat::BeatDetector;
 use self::capture::{AudioCapture, RingBuffer};
+use self::downbeat::DownbeatTracker;
 use self::key::KeyDetector;
 use self::normalizer::AdaptiveNormalizer;
 use self::smoother::FeatureSmoother;
@@ -157,6 +159,12 @@ pub struct AudioSystem {
     beat_counter: Arc<AtomicU32>,
     /// Value of `beat_counter` at the end of the previous `latest_features()` poll.
     beats_seen: u32,
+    /// Total downbeats detected (A12 #1463), counted by the audio thread. Same pattern as
+    /// `beat_counter`: the consumer compares against `downbeats_seen` so a 1-frame downbeat
+    /// pulse survives channel overflow and the drain-to-newest loop in `latest_features()`.
+    downbeat_counter: Arc<AtomicU32>,
+    /// Value of `downbeat_counter` at the end of the previous `latest_features()` poll.
+    downbeats_seen: u32,
     /// When the last frame arrived over the channel (for stale-feature decay).
     last_frame_at: Instant,
     /// When `latest_features()` was last polled (for frame-rate-independent decay).
@@ -181,6 +189,7 @@ impl AudioSystem {
         let shutdown = Arc::new(AtomicBool::new(false));
         let recording_ring = Arc::new(RingBuffer::new());
         let beat_counter = Arc::new(AtomicU32::new(0));
+        let downbeat_counter = Arc::new(AtomicU32::new(0));
 
         match open_backend(device_name) {
             Ok(opened) => {
@@ -189,11 +198,20 @@ impl AudioSystem {
                 let sample_rate = opened.sample_rate;
                 let rec_ring = recording_ring.clone();
                 let beats = beat_counter.clone();
+                let downbeats = downbeat_counter.clone();
 
                 let thread_handle = thread::Builder::new()
                     .name("phosphor-audio".into())
                     .spawn(move || {
-                        audio_thread(ring, sample_rate, tx, shutdown_flag, rec_ring, beats);
+                        audio_thread(
+                            ring,
+                            sample_rate,
+                            tx,
+                            shutdown_flag,
+                            rec_ring,
+                            beats,
+                            downbeats,
+                        );
                     })
                     .expect("Failed to spawn audio thread");
 
@@ -220,6 +238,8 @@ impl AudioSystem {
                     sample_rate: sample_rate as u32,
                     beat_counter,
                     beats_seen: 0,
+                    downbeat_counter,
+                    downbeats_seen: 0,
                     last_frame_at: Instant::now(),
                     last_poll_at: Instant::now(),
                     last_cb_count: 0,
@@ -252,6 +272,8 @@ impl AudioSystem {
                     sample_rate: 44100,
                     beat_counter,
                     beats_seen: 0,
+                    downbeat_counter,
+                    downbeats_seen: 0,
                     last_frame_at: Instant::now(),
                     last_poll_at: Instant::now(),
                     last_cb_count: 0,
@@ -296,6 +318,9 @@ impl AudioSystem {
         self.sample_rate = new.sample_rate;
         self.beat_counter = std::mem::replace(&mut new.beat_counter, Arc::new(AtomicU32::new(0)));
         self.beats_seen = self.beat_counter.load(Ordering::Relaxed);
+        self.downbeat_counter =
+            std::mem::replace(&mut new.downbeat_counter, Arc::new(AtomicU32::new(0)));
+        self.downbeats_seen = self.downbeat_counter.load(Ordering::Relaxed);
         // Reset stale-feature decay and watchdog state for the fresh backend.
         self.last_frame_at = Instant::now();
         self.last_poll_at = Instant::now();
@@ -378,8 +403,15 @@ impl AudioSystem {
         // beats in an atomic, so derive `beat` from the counter instead of the
         // channel's field: any advance since the last poll means a beat fired.
         let beats_now = self.beat_counter.load(Ordering::Relaxed);
+        let downbeats_now = self.downbeat_counter.load(Ordering::Relaxed);
         let result = self.latest.map(|mut features| {
             features.beat = if beats_now == self.beats_seen {
+                0.0
+            } else {
+                1.0
+            };
+            // Same latch for the A12 downbeat trigger (#1463).
+            features.downbeat = if downbeats_now == self.downbeats_seen {
                 0.0
             } else {
                 1.0
@@ -387,6 +419,7 @@ impl AudioSystem {
             features
         });
         self.beats_seen = beats_now;
+        self.downbeats_seen = downbeats_now;
 
         result
     }
@@ -472,11 +505,13 @@ fn audio_thread(
     shutdown: Arc<AtomicBool>,
     recording_ring: Arc<RingBuffer>,
     beat_counter: Arc<AtomicU32>,
+    downbeat_counter: Arc<AtomicU32>,
 ) {
     let mut analyzer = FftAnalyzer::new(sample_rate);
     let mut normalizer = AdaptiveNormalizer::new();
     let mut beat_detector = BeatDetector::new(sample_rate);
     let mut key_detector = KeyDetector::new(sample_rate);
+    let mut downbeat_tracker = DownbeatTracker::new();
     let mut smoother = FeatureSmoother::new();
     let mut read_buf = vec![0.0f32; 8192]; // larger for 4096-pt FFT
     let mut last_time = Instant::now();
@@ -520,6 +555,12 @@ fn audio_thread(
         raw.key_is_minor = key_result.is_minor;
         raw.key_confidence = key_result.confidence;
 
+        // A12 (#1463): capture pre-normalization chroma + per-band flux for the downbeat
+        // tracker. The adaptive normalizer rescales chroma per-bin, which would distort the
+        // inter-beat chord-change magnitude, so snapshot both before normalize().
+        let pre_norm_chroma = raw.chroma;
+        let band_flux = analyzer.band_flux_3();
+
         // Adaptive normalization (replaces fixed gains)
         raw = normalizer.normalize(&raw);
 
@@ -541,6 +582,23 @@ fn audio_thread(
         // when the channel overflows or it drains multiple frames at once.
         if beat_result.beat > 0.5 {
             beat_counter.fetch_add(1, Ordering::Relaxed);
+        }
+
+        // A12 (#1463): bar/downbeat/meter tracking. Runs every frame (advances bar_phase on
+        // the audio clock, integrates flux); heavy scoring gates on a fired beat internally.
+        let db = downbeat_tracker.process(
+            &beat_result,
+            band_flux,
+            raw.rms,
+            &pre_norm_chroma,
+            timestamp,
+        );
+        raw.downbeat = db.downbeat;
+        raw.bar_phase = db.bar_phase;
+        raw.beat_in_bar = db.beat_in_bar;
+        // Counter-back the downbeat trigger, same as `beat`, so a 1-frame pulse survives.
+        if db.downbeat > 0.5 {
+            downbeat_counter.fetch_add(1, Ordering::Relaxed);
         }
 
         // Smoothing (per-feature asymmetric EMA; beat/beat_phase pass through)
@@ -576,7 +634,8 @@ mod tests {
         decay_features(&mut f, 0.5);
         for (i, &v) in f.as_slice().iter().enumerate() {
             match i {
-                16 => assert!(approx_eq(v, 0.0, 1e-6), "beat (16) must be forced to 0"),
+                // The beat (16) and downbeat (52) triggers are forced to 0 on silence.
+                16 | 52 => assert!(approx_eq(v, 0.0, 1e-6), "trigger {i} must be forced to 0"),
                 // bpm (18) and the categorical key fields key_class (49) / key_is_minor
                 // (50) hold their last value rather than sweeping toward silence.
                 18 | 49 | 50 => assert!(approx_eq(v, 1.0, 1e-6), "index {i} must hold"),

@@ -331,6 +331,19 @@ impl FftAnalyzer {
         &self.small.magnitude
     }
 
+    /// Per-band half-wave-rectified spectral flux for the A12 downbeat tracker (#1463):
+    /// low (20-150 Hz), mid (150-2000 Hz), high (2000-20000 Hz), each from the resolution
+    /// that best covers it. Reuses the same `spectral_flux_range` the kick detector uses;
+    /// read-only (does not touch `prev_magnitude`), so it is safe to call once per frame
+    /// alongside feature extraction without disturbing the kick flux.
+    pub fn band_flux_3(&self) -> [f32; 3] {
+        [
+            self.large.spectral_flux_range(20.0, 150.0),
+            self.medium.spectral_flux_range(150.0, 2000.0),
+            self.small.spectral_flux_range(2000.0, 20000.0),
+        ]
+    }
+
     /// A17 (#1468): log-frequency-resampled magnitude spectrum for the `audio_spectrum`
     /// texture (R16Float 512x1). Each output bin takes the peak magnitude in its
     /// log-spaced frequency slice of the large (4096-pt) spectrum, dB-normalized to 0..1

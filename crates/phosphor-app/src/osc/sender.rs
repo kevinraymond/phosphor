@@ -61,6 +61,10 @@ impl OscSender {
         self.send_float("/phosphor/audio/key/class", f.key_class * 11.0);
         self.send_float("/phosphor/audio/key/is_minor", f.key_is_minor);
         self.send_float("/phosphor/audio/key/confidence", f.key_confidence);
+        // A12 downbeat (#1463): bar's "one" trigger, bar sawtooth, beat index in the bar.
+        self.send_float("/phosphor/audio/downbeat", f.downbeat);
+        self.send_float("/phosphor/audio/bar_phase", f.bar_phase);
+        self.send_float("/phosphor/audio/beat_in_bar", f.beat_in_bar);
     }
 
     /// Send current state (active layer, effect name).

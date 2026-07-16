@@ -177,10 +177,14 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
         SmoothParams::ar(0.1, 0.3),
         Scale,
     ),
-    // A12 downbeat (#1463)
-    def("downbeat", Adaptive, SmoothParams::ar(0.03, 0.15), Scale),
-    def("bar_phase", Adaptive, SmoothParams::ar(0.03, 0.15), Scale),
-    def("beat_in_bar", Adaptive, SmoothParams::ar(0.03, 0.15), Scale),
+    // A12 downbeat (#1463) — detector-owned, mirroring the beat block. `downbeat` is a
+    // 1-frame trigger (like `beat`: pass through, no EMA, ForceZero on silence). `bar_phase`
+    // is a 0-1 sawtooth (like `beat_phase`: pass through, no EMA, Scale). `beat_in_bar` is a
+    // normalized index, not an energy level — pass through so the normalizer doesn't
+    // percentile-rescale it.
+    def("downbeat", Passthrough, SmoothParams::bypass(), ForceZero),
+    def("bar_phase", Passthrough, SmoothParams::bypass(), Scale),
+    def("beat_in_bar", Passthrough, SmoothParams::bypass(), Scale),
     // A13 stereo (#1464)
     def("pan", Adaptive, SmoothParams::ar(0.03, 0.15), Scale),
     def(
@@ -268,12 +272,14 @@ mod tests {
     }
 
     /// The detector-owned fields are exactly the set the normalizer passes through:
-    /// the beat block (onset..beat_strength, 15..=19) plus the categorical key fields
-    /// (key_class/key_is_minor/key_confidence, 49..=51).
+    /// the beat block (onset..beat_strength, 15..=19), the categorical key fields
+    /// (key_class/key_is_minor/key_confidence, 49..=51), and the A12 bar clock
+    /// (downbeat/bar_phase/beat_in_bar, 52..=54 — a trigger, a sawtooth, and a normalized
+    /// index, all already 0..1).
     #[test]
     fn passthrough_is_detector_owned() {
         for (i, def) in FEATURES.iter().enumerate() {
-            let expected = if (15..=19).contains(&i) || (49..=51).contains(&i) {
+            let expected = if (15..=19).contains(&i) || (49..=54).contains(&i) {
                 Passthrough
             } else {
                 Adaptive
@@ -287,13 +293,14 @@ mod tests {
     }
 
     /// Decay exemptions: `bpm` and the categorical key fields hold their last value on
-    /// silence, only `beat` is forced to zero, everything else scales toward silence.
+    /// silence, the `beat` and `downbeat` triggers are forced to zero, everything else
+    /// scales toward silence.
     #[test]
     fn decay_exemptions() {
         for (i, def) in FEATURES.iter().enumerate() {
             let expected = match def.name {
                 "bpm" | "key_class" | "key_is_minor" => Hold,
-                "beat" => ForceZero,
+                "beat" | "downbeat" => ForceZero,
                 _ => Scale,
             };
             assert_eq!(
