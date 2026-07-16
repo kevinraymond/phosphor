@@ -91,23 +91,44 @@ impl GpuContext {
             log::error!("Uncaptured GPU error: {error}");
         }));
 
-        // Create pipeline cache (load from disk if available)
+        // Create pipeline cache (load from disk if available). A stale or foreign cache
+        // (GPU swap, driver update, corruption) must NOT be fatal. In wgpu 27, `fallback:
+        // true` does NOT quietly produce an empty cache on a device mismatch — it returns
+        // an *invalid* cache object, and the first `create_render_pipeline` that uses it
+        // then fails and aborts startup (finding #1507). So we validate the loaded blob
+        // under an error scope and, if wgpu rejects it, discard the stale file and rebuild
+        // an empty (valid) cache; the next `save_pipeline_cache()` writes a fresh blob.
         let pipeline_cache = if device.features().contains(wgpu::Features::PIPELINE_CACHE) {
             let cached_data = pipeline_cache_path().and_then(|p| std::fs::read(p).ok());
-            // SAFETY: create_pipeline_cache requires unsafe per wgpu API because loading
-            // cached data from disk could theoretically cause driver issues if corrupted.
-            // We set fallback=true so wgpu creates an empty cache if data is invalid.
-            let cache = unsafe {
+            let loaded_len = cached_data.as_ref().map_or(0, |d| d.len());
+
+            // SAFETY: create_pipeline_cache is unsafe because malformed cached data could
+            // in principle upset the driver. We only ever feed it bytes we wrote ourselves,
+            // and guard the load with the validation error scope below.
+            let make_cache = |data: Option<&[u8]>| unsafe {
                 device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor {
                     label: Some("phosphor-pipeline-cache"),
-                    data: cached_data.as_deref(),
+                    data,
                     fallback: true,
                 })
             };
-            log::info!(
-                "Pipeline cache created (loaded {} bytes from disk)",
-                cached_data.as_ref().map_or(0, |d| d.len())
-            );
+
+            device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let cache = make_cache(cached_data.as_deref());
+            let cache = if let Some(err) = pollster::block_on(device.pop_error_scope()) {
+                // Loaded cache was rejected (typically "created for a different device").
+                // Drop the stale file and rebuild empty so startup can't be poisoned.
+                log::warn!(
+                    "Pipeline cache data invalid ({err}); discarding stale cache and starting empty"
+                );
+                if let Some(path) = pipeline_cache_path() {
+                    let _ = std::fs::remove_file(path);
+                }
+                make_cache(None)
+            } else {
+                log::info!("Pipeline cache created (loaded {loaded_len} bytes from disk)");
+                cache
+            };
             Some(cache)
         } else {
             log::info!("Pipeline cache not supported by adapter");
