@@ -5,6 +5,7 @@ pub mod features;
 pub mod normalizer;
 #[cfg(target_os = "linux")]
 pub mod pulse_capture;
+pub mod schema;
 pub mod smoother;
 #[cfg(target_os = "windows")]
 pub mod wasapi_capture;
@@ -391,18 +392,19 @@ impl AudioSystem {
     }
 }
 
-/// Exponentially decay all features by `k`, except `bpm` (index 18 — a tempo
-/// estimate, not an energy level, so it should hold its last value). `beat` is
+/// Exponentially decay all features by `k`, per each feature's
+/// [`DecayPolicy`](schema::DecayPolicy): energy levels scale toward silence,
+/// `bpm` holds its last value (a tempo estimate, not a level), and `beat` is
 /// forced to 0 so a stalled device can never hold a beat pulse high.
 fn decay_features(features: &mut AudioFeatures, k: f32) {
-    /// Index of `bpm` in `AudioFeatures::as_slice()` order.
-    const BPM_INDEX: usize = 18;
+    use schema::DecayPolicy;
     for (i, v) in features.as_slice_mut().iter_mut().enumerate() {
-        if i != BPM_INDEX {
-            *v *= k;
+        match schema::FEATURES[i].decay {
+            DecayPolicy::Scale => *v *= k,
+            DecayPolicy::Hold => {}
+            DecayPolicy::ForceZero => *v = 0.0,
         }
     }
-    features.beat = 0.0;
 }
 
 impl Drop for AudioSystem {

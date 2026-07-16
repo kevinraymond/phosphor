@@ -1,4 +1,5 @@
 use super::features::{AudioFeatures, NUM_FEATURES};
+use super::schema::{FEATURES, NormPolicy};
 
 /// Per-feature running min/max for adaptive normalization.
 /// Replaces all fixed gain multipliers with auto-leveling.
@@ -19,8 +20,9 @@ impl AdaptiveNormalizer {
     }
 
     /// Normalize all features to 0-1 using adaptive running min/max.
-    /// Beat detection fields (indices 15-19: onset, beat, beat_phase, bpm, beat_strength)
-    /// are passed through unchanged — they're already normalized by the beat detector.
+    /// Features whose [`NormPolicy`] is `Passthrough` (the beat-detector-owned
+    /// fields: onset, beat, beat_phase, bpm, beat_strength) are copied through
+    /// unchanged — they're already normalized by the beat detector.
     pub fn normalize(&mut self, raw: &AudioFeatures) -> AudioFeatures {
         let raw_slice = raw.as_slice();
         let mut out = AudioFeatures::default();
@@ -29,11 +31,10 @@ impl AdaptiveNormalizer {
         for i in 0..NUM_FEATURES {
             let v = raw_slice[i];
 
-            // Pass through detector-owned fields unchanged:
-            // onset=15, beat=16, beat_phase=17, bpm=18, beat_strength=19.
-            // The beat detector already emits them normalized (or binary), so
-            // adaptive min/max scaling would only distort them.
-            if (15..=19).contains(&i) {
+            // Pass through detector-owned fields unchanged. The beat detector
+            // already emits them normalized (or binary), so adaptive min/max
+            // scaling would only distort them.
+            if FEATURES[i].norm == NormPolicy::Passthrough {
                 out_slice[i] = v;
                 continue;
             }
