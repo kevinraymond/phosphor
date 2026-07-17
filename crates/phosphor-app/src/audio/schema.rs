@@ -249,8 +249,10 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
     // normalized index, not an energy level — pass through so the normalizer doesn't
     // percentile-rescale it.
     // A8 (#1459) Holds all three: a trigger, a wrapping sawtooth, and a stepwise index.
-    // Unlike `beat_phase`, `bar_phase` is not yet locally advanced, so it keeps its 86 Hz
-    // stair-step — Hold merely stops the wrap being lerped backwards through 0.5 (A8b).
+    // `bar_phase` Holds for the same reasons as `beat_phase`: lerping its wrap would sweep
+    // backwards through 0.5, and since A8b (#1554) the render thread replaces the slot
+    // outright with a locally-advanced phase anyway — for which this Held value is the PLL's
+    // input, so it must not be a lerped wrap either.
     def_hold("downbeat", Passthrough, SmoothParams::bypass(), ForceZero),
     def_hold("bar_phase", Passthrough, SmoothParams::bypass(), Scale),
     def_hold("beat_in_bar", Passthrough, SmoothParams::bypass(), Scale),

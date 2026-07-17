@@ -36,11 +36,21 @@ pub struct AudioFrame {
     /// seconds. Frames are exactly [`ANALYSIS_HOP`] apart; the A8 render playhead (#1459)
     /// interpolates between frames on this clock.
     pub timestamp: f64,
-    /// The audio side froze `beat_phase` at 0 for this frame (`rms < 1e-4`, see
-    /// [`beat`]`::BeatDetector::process`). Carried explicitly because the render thread only
-    /// sees the *smoothed* rms, which lags the freeze by ~1s — long enough for A8's local
-    /// phase to free-run over the start of a silence.
+    /// The audio side froze `beat_phase` at 0 for this frame — the A10 perceptual silence
+    /// flag (`loudness_m < −55 LUFS`), see [`beat`]`::BeatDetector::process`. Carried
+    /// explicitly because the render thread only sees the *smoothed* rms, which lags the
+    /// freeze by ~1s — long enough for A8's local phase to free-run over the start of a
+    /// silence. (It cannot be re-derived from `rms` at all: the normalizer floors that at 0
+    /// in the trough between every hit on perfectly loud audio — finding #1551.)
     pub phase_frozen: bool,
+    /// Seconds per bar, the denominator the audio thread's `bar_phase` is running on, or 0.0
+    /// when there is no bar clock yet. Carried so the A8b render playhead (#1554) can advance
+    /// its own `bar_phase` at exactly this rate; see [`downbeat`]`::DownbeatTracker::bar_clock`.
+    ///
+    /// Refreshed *only on a downbeat*, in the same branch that zeroes `bar_phase` — which is
+    /// the property the render side leans on. It is deliberately not `meter`: that changes on
+    /// any beat, mid-bar, and re-deriving the rate from it would fight the phase it chases.
+    pub bar_duration: f64,
 }
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -531,8 +541,8 @@ impl AudioSystem {
     /// A8 (#1459): analysis runs at a fixed 86.1 Hz hop while the render loop may poll at
     /// 144 Hz, so rather than repeat the newest frame this interpolates the two frames
     /// bracketing a playhead held [`TARGET_DELAY_HOPS`] behind the audio clock, per each
-    /// slot's [`schema::InterpPolicy`], and advances `beat_phase` locally. `dt` is the
-    /// render frame time.
+    /// slot's [`schema::InterpPolicy`], and advances `beat_phase` — and `bar_phase` (A8b,
+    /// #1554) — locally. `dt` is the render frame time.
     pub fn latest_features(&mut self, dt: f32) -> Option<AudioFeatures> {
         let now = Instant::now();
         let poll_dt = now.duration_since(self.last_poll_at).as_secs_f32();
@@ -541,8 +551,12 @@ impl AudioSystem {
         let mut got_frame = false;
         while let Ok(frame) = self.receiver.try_recv() {
             self.latest = Some(frame.features);
-            self.interp
-                .push(frame.timestamp, frame.features, frame.phase_frozen);
+            self.interp.push(
+                frame.timestamp,
+                frame.features,
+                frame.phase_frozen,
+                frame.bar_duration,
+            );
             // Keep the newest spectrum; accumulate every mel column so the spectrogram
             // scrolls smoothly even when several audio frames arrive between polls.
             self.latest_spectrum.clear();
@@ -585,8 +599,9 @@ impl AudioSystem {
         }
 
         // A8 (#1459): blend the two frames bracketing the render playhead and advance
-        // `beat_phase` locally, falling back to the newest held frame when the ring can't
-        // bracket it (startup, stall, device switch) — the pre-A8 behaviour.
+        // `beat_phase` (and `bar_phase`, A8b #1554) locally, falling back to the newest held
+        // frame when the ring can't bracket it (startup, stall, device switch) — the pre-A8
+        // behaviour.
         let interpolated = self.interp.sample(dt, self.latest);
 
         // Beat pulses are 1-frame events that the drain-to-newest loop above (and
@@ -911,6 +926,9 @@ fn audio_thread(
                 // be wrong here, since it is post-normalization and hits 0 at the bottom of
                 // the adaptive range on loud audio.
                 phase_frozen: loud_silent,
+                // A8b (#1554): the tracker's own bar-clock denominator, so the render side
+                // advances `bar_phase` on the same rate that produced the phase above.
+                bar_duration: db.bar_duration,
             };
 
             // Non-blocking send; drop if main thread is behind

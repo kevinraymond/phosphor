@@ -2,14 +2,16 @@
 //!
 //! Analysis runs at a fixed 86.1 Hz hop ([`ANALYSIS_HOP`](super::ANALYSIS_HOP) @ 44.1 kHz)
 //! while the render loop polls at the display's refresh rate. On a 144 Hz panel that means
-//! ~28% of polls see a byte-identical frame: continuous features go slightly flat, and
-//! `beat_phase` — a sawtooth that only moves when a frame lands — visibly stair-steps.
-//! A dropped frame (the channel is `bounded(4)`, drop-on-full) shows up as a phase pop.
+//! ~28% of polls see a byte-identical frame: continuous features go slightly flat, and the
+//! two sawtooths — `beat_phase` and `bar_phase`, which only move when a frame lands —
+//! visibly stair-step. A dropped frame (the channel is `bounded(4)`, drop-on-full) shows up
+//! as a phase pop.
 //!
 //! This module keeps a short ring of timestamped frames and a playhead running
 //! [`TARGET_DELAY_HOPS`] behind the audio sample clock, blends the two frames bracketing
-//! it per each slot's [`InterpPolicy`], and advances `beat_phase` locally as a first-order
-//! PLL locked to the detector's phase.
+//! it per each slot's [`InterpPolicy`], and advances both sawtooths locally as first-order
+//! PLLs locked to the audio thread's phases (A8 #1459 for `beat_phase`, A8b #1554 for
+//! `bar_phase`) — see [`advance_phase`].
 
 use std::collections::VecDeque;
 
@@ -52,12 +54,18 @@ const PLAYHEAD_SNAP: f64 = 0.25;
 /// 0.15 s ≈ a fifth of a beat at 120 BPM: honours a re-locked grid within one beat, slow
 /// enough that per-hop phase noise doesn't jitter.
 const PHASE_RESYNC_TAU: f32 = 0.15;
-/// Backstop cap on phase correction per render frame (10% of a beat). NOT the primary
+/// Backstop cap on phase correction per render frame (10% of a cycle). NOT the primary
 /// mechanism — with [`PHASE_RESYNC_TAU`] the largest sub-snap correction only exceeds this
-/// below ~12 fps. The time constant does the work.
+/// below ~12 fps. The time constant does the work. (Provably unreachable for the bar
+/// sawtooth, whose snap threshold is below it at every musical tempo.)
 const PHASE_MAX_STEP: f32 = 0.10;
-/// Wrap-aware phase error beyond a quarter beat is genuine desync (a tempo octave jump,
-/// re-tracking on a new song) — snap rather than crawl there at ≤10%/frame.
+/// Ceiling on the snap threshold: a wrap-aware phase error beyond a quarter cycle is genuine
+/// desync (a tempo octave jump, re-tracking on a new song) — snap rather than crawl there at
+/// ≤10%/frame.
+///
+/// The threshold actually used is `(PHASE_RESYNC_TAU · rate).min(PHASE_SNAP)` — see
+/// [`advance_phase`], which derives why a flat quarter-cycle lets the *bar* sawtooth run
+/// backwards. This ceiling binds for beats at ≥100 BPM, i.e. it is the A8 behaviour.
 const PHASE_SNAP: f32 = 0.25;
 /// Below this the detector has no usable tempo (it reports 0 before lock) — hold the local
 /// phase rather than free-run it.
@@ -68,6 +76,7 @@ struct TimedFrame {
     ts: f64,
     features: AudioFeatures,
     phase_frozen: bool,
+    bar_duration: f64,
 }
 
 /// Render-side feature interpolator. Holds `AudioFeatures` only (244 B, `Copy`) — the
@@ -80,6 +89,7 @@ pub struct FeatureInterpolator {
     /// across an arbitrarily large error.
     playhead: Option<f64>,
     local_beat_phase: f32,
+    local_bar_phase: f32,
     /// One analysis hop in seconds, from the device's sample rate.
     hop_secs: f64,
 }
@@ -90,6 +100,7 @@ impl FeatureInterpolator {
             frames: VecDeque::with_capacity(FRAME_RING_CAP),
             playhead: None,
             local_beat_phase: 0.0,
+            local_bar_phase: 0.0,
             hop_secs: ANALYSIS_HOP as f64 / sample_rate.max(1) as f64,
         }
     }
@@ -102,10 +113,17 @@ impl FeatureInterpolator {
         self.frames.clear();
         self.playhead = None;
         self.local_beat_phase = 0.0;
+        self.local_bar_phase = 0.0;
     }
 
     /// Retain one freshly received frame.
-    pub fn push(&mut self, ts: f64, features: AudioFeatures, phase_frozen: bool) {
+    pub fn push(
+        &mut self,
+        ts: f64,
+        features: AudioFeatures,
+        phase_frozen: bool,
+        bar_duration: f64,
+    ) {
         // A non-monotonic timestamp means the sample clock restarted under us (a device
         // switch racing the drain) — drop the stale window rather than interpolate across
         // the discontinuity.
@@ -120,6 +138,7 @@ impl FeatureInterpolator {
             ts,
             features,
             phase_frozen,
+            bar_duration,
         });
     }
 
@@ -134,19 +153,27 @@ impl FeatureInterpolator {
     pub fn sample(&mut self, dt: f32, fallback: Option<AudioFeatures>) -> Option<AudioFeatures> {
         self.advance_playhead(dt);
 
-        let (mut features, phase_frozen) = self
+        let (mut features, phase_frozen, bar_duration) = self
             .playhead
             .and_then(|p| self.sample_at(p))
-            // Default to frozen when there's nothing retained, so a stalled device can't
-            // free-run the local phase.
-            .or_else(|| fallback.map(|f| (f, self.frames.back().is_none_or(|t| t.phase_frozen))))?;
+            // Nothing bracketing the playhead (startup, a stall, a device switch): serve the
+            // caller's held frame. With a frame retained, mirror *its* flags — it is what the
+            // fallback stands in for; with the ring empty, default to frozen / no bar clock,
+            // so a stalled device can't free-run either local phase.
+            .or_else(|| {
+                fallback.map(|f| match self.frames.back() {
+                    Some(t) => (f, t.phase_frozen, t.bar_duration),
+                    None => (f, true, 0.0),
+                })
+            })?;
 
         // The detector's phase only changes on frame arrival, so at 144 Hz it repeats ~28%
-        // of samples. Advance our own copy every render frame instead, resynced to the
-        // detector's — the sawtooth's *rate* is what must stay true, and `bpm` gives it
-        // exactly.
+        // of samples. Advance our own copies every render frame instead, resynced to the
+        // detector's — the sawtooth's *rate* is what must stay true, and `bpm` /
+        // `bar_duration` give it exactly.
         features.beat_phase =
             self.advance_beat_phase(dt, features.beat_phase, features.bpm, phase_frozen);
+        features.bar_phase = self.advance_bar_phase(dt, features.bar_phase, bar_duration);
         Some(features)
     }
 
@@ -173,9 +200,15 @@ impl FeatureInterpolator {
     }
 
     /// Interpolate the retained frames at `p` (sample-clock seconds). `None` if fewer than
-    /// two frames are retained. Also returns the `phase_frozen` flag of the older
-    /// bracketing frame, so the local phase follows the same silence gate the detector used.
-    fn sample_at(&self, p: f64) -> Option<(AudioFeatures, bool)> {
+    /// two frames are retained.
+    ///
+    /// Also returns the older bracketing frame's `phase_frozen` and `bar_duration` — the
+    /// same frame the Held slots (`beat_phase`, `bar_phase`) come from, so the phases, the
+    /// silence gate the detector used, and the rate the tracker's `bar_phase` was computed
+    /// on all describe one instant. Taking `bar_duration` from the *newer* frame instead
+    /// would pair a fresh bar length with a phase computed on the old one across any
+    /// playhead-straddled downbeat.
+    fn sample_at(&self, p: f64) -> Option<(AudioFeatures, bool, f64)> {
         if self.frames.len() < 2 {
             return None;
         }
@@ -201,16 +234,16 @@ impl FeatureInterpolator {
         Some((
             interp_features(&a.features, &b.features, alpha),
             a.phase_frozen,
+            a.bar_duration,
         ))
     }
 
     /// Advance the local beat phase by `dt` at the detected tempo, then wrap-aware
     /// soft-resync it toward the detector's `audio_phase`.
     ///
-    /// This is a first-order PLL. The local rate (`bpm/60`) and the detector's phase rate
-    /// (`1/period`) agree by construction — `period == 60/bpm` exactly — so a `bpm` that
-    /// lags during a tempo change yields a small standing phase offset, never cumulative
-    /// drift.
+    /// The local rate (`bpm/60`) and the detector's phase rate (`1/period`) agree by
+    /// construction — `period == 60/bpm` exactly — so a `bpm` that lags during a tempo
+    /// change yields a small standing phase offset, never cumulative drift.
     fn advance_beat_phase(
         &mut self,
         dt: f32,
@@ -225,28 +258,92 @@ impl FeatureInterpolator {
             self.local_beat_phase = audio_phase;
             return self.local_beat_phase;
         }
-        self.local_beat_phase = (self.local_beat_phase + dt * (bpm / 60.0)).fract();
-
-        // Wrap-aware shortest path: local 0.98 against audio 0.02 is +0.04 forward, not
-        // −0.96 backwards through the middle of the beat.
-        let mut err = audio_phase - self.local_beat_phase;
-        if err > 0.5 {
-            err -= 1.0;
-        } else if err < -0.5 {
-            err += 1.0;
-        }
-
-        if err.abs() > PHASE_SNAP {
-            // Genuine desync (tempo octave jump, re-track on a new song) — crawling there
-            // at ≤10%/frame would drag a visibly wrong phase across several beats.
-            self.local_beat_phase = audio_phase;
-        } else {
-            let corr = (err * (1.0 - (-dt / PHASE_RESYNC_TAU).exp()))
-                .clamp(-PHASE_MAX_STEP, PHASE_MAX_STEP);
-            self.local_beat_phase = (self.local_beat_phase + corr).rem_euclid(1.0);
-        }
-        self.local_beat_phase
+        advance_phase(&mut self.local_beat_phase, dt, audio_phase, bpm / 60.0)
     }
+
+    /// Advance the local bar phase by `dt` at `1/bar_duration`, then soft-resync it onto the
+    /// tracker's `bar_phase`.
+    ///
+    /// `bar_duration` is the tracker's own bar-clock denominator, carried on the frame rather
+    /// than re-derived here from `bpm` and `meter`. The tracker refreshes it *only on a
+    /// downbeat*, in the same branch that zeroes its bar phase, so a frame carrying a new
+    /// duration carries `bar_phase == 0` exactly; holding the pair together (see
+    /// [`Self::sample_at`]) means the rate and the wrap always change on the same render
+    /// frame, and the mid-bar rate change that deferred this task never happens. Re-deriving
+    /// the rate from a live `meter` would instead make it *more* current than the phase it
+    /// chases — and on a lost tempo lock (`bpm → 0`, `meter` still 4) it would freeze the
+    /// local phase while the tracker's kept ramping on its stale duration.
+    ///
+    /// No `frozen` gate, deliberately: unlike `BeatDetector`, `DownbeatTracker` has no
+    /// silence gate — with `beat` pinned low its `bar_phase` keeps free-running on the audio
+    /// clock — so freezing here would invent a policy the audio side does not have, and would
+    /// put the stair-step back for the length of every quiet passage. (Whether the tracker
+    /// *should* freeze it is a separate question, board #1598.)
+    fn advance_bar_phase(&mut self, dt: f32, audio_phase: f32, bar_duration: f64) -> f32 {
+        if bar_duration <= 0.0 {
+            // No bar clock yet (no downbeat locked, or the stall fallback): the tracker pins
+            // its bar phase at 0 under exactly this condition, so follow it. Also the guard
+            // against `1.0/0.0 = inf` — `(local + dt·inf).fract()` is NaN, which would poison
+            // the local phase *permanently*, since every later comparison against it is false.
+            self.local_bar_phase = audio_phase;
+            return self.local_bar_phase;
+        }
+        advance_phase(
+            &mut self.local_bar_phase,
+            dt,
+            audio_phase,
+            (1.0 / bar_duration) as f32, // reciprocal in f64, narrow once
+        )
+    }
+}
+
+/// Advance `local` by `dt` at `rate_hz` cycles/sec, then wrap-aware soft-resync it onto the
+/// detector's `audio_phase`. A first-order PLL, shared by the beat and bar sawtooths — they
+/// differ only in which state they carry and where the rate comes from (`bpm/60` for the
+/// beat, `1/bar_duration` for the bar).
+///
+/// `rate_hz` must be finite and > 0; each caller gates on its own "no usable clock yet"
+/// signal first (see [`MIN_TRACK_BPM`] and [`FeatureInterpolator::advance_bar_phase`]),
+/// because a rate of 0 freezes the oscillator and an infinite one poisons it with NaN —
+/// permanently, since every later comparison against a NaN is false.
+fn advance_phase(local: &mut f32, dt: f32, audio_phase: f32, rate_hz: f32) -> f32 {
+    *local = (*local + dt * rate_hz).fract();
+
+    // Wrap-aware shortest path: local 0.98 against audio 0.02 is +0.04 forward, not
+    // −0.96 backwards through the middle of the cycle.
+    let mut err = audio_phase - *local;
+    if err > 0.5 {
+        err -= 1.0;
+    } else if err < -0.5 {
+        err += 1.0;
+    }
+
+    // Snap threshold, as a fraction of one cycle. Solving the loop (`ė = −e/τ` against a
+    // constant advance) gives `dp/dt = rate + (err/τ)·e^(−t/τ)`, so a soft correction
+    // outruns the advance — running the sawtooth *backwards* — exactly when
+    // `|err| > τ·rate`; and since `1 − e^(−x) ≤ x`, that continuous bound is conservative at
+    // every `dt`. Snapping there makes "the phase only ever rises or wraps" a property of
+    // the loop rather than of the tempo. [`PHASE_SNAP`] caps it: past a quarter cycle the
+    // error is a genuine desync (a tempo octave jump, re-tracking on a new song, the tracker
+    // moving which beat is the "one") and crawling there at ≤10%/frame would drag a visibly
+    // wrong phase across several cycles.
+    //
+    // A beat at 120 BPM has τ·rate = 0.30, so the cap binds and this is exactly the A8
+    // behaviour; below 100 BPM it tightens, closing a reversal band A8 left open. A 2 s bar
+    // has τ·rate = 0.075 — it snaps past ~7% of a bar, far more drift than a Kalman-smoothed
+    // `bpm` leaves in one bar and far less than the ≥0.25 a re-assigned "one" produces.
+    // Sharing the flat 0.25 would instead sweep the bar phase *backwards* for ~180 ms and
+    // delay the visual "one" by a quarter bar.
+    let snap = (PHASE_RESYNC_TAU * rate_hz).min(PHASE_SNAP);
+
+    *local = if err.abs() > snap {
+        audio_phase
+    } else {
+        let corr =
+            (err * (1.0 - (-dt / PHASE_RESYNC_TAU).exp())).clamp(-PHASE_MAX_STEP, PHASE_MAX_STEP);
+        (*local + corr).rem_euclid(1.0)
+    };
+    *local
 }
 
 /// Blend `a` -> `b` by `alpha` per each slot's [`InterpPolicy`]: continuous quantities
@@ -288,11 +385,26 @@ mod tests {
         }
     }
 
+    /// A frame carrying only a bar sawtooth. `bpm` stays 0, so the beat PLL holds and these
+    /// tests exercise the bar path in isolation.
+    fn bar_feats(bar_phase: f32) -> AudioFeatures {
+        AudioFeatures {
+            rms: 0.5,
+            bar_phase,
+            ..Default::default()
+        }
+    }
+
+    /// One bar at 120 BPM in 4/4 — the tempo every other test in this file uses.
+    const BAR_2S: f64 = 2.0;
+
     /// Drive `n` render frames' worth of polls, feeding audio frames at the 86.1 Hz hop
-    /// clock as their timestamps come due. `f(elapsed)` supplies each audio frame.
+    /// clock as their timestamps come due. `f(elapsed)` supplies each audio frame, and
+    /// `bar_duration` the bar clock they carry (0.0 = no bar clock, for beat-only tests).
     fn run(
         interp: &mut FeatureInterpolator,
         n: usize,
+        bar_duration: f64,
         mut f: impl FnMut(f64) -> AudioFeatures,
     ) -> Vec<AudioFeatures> {
         let mut out = Vec::with_capacity(n);
@@ -300,7 +412,7 @@ mod tests {
         let mut next_hop = 0.0f64;
         for _ in 0..n {
             while next_hop <= clock {
-                interp.push(next_hop, f(next_hop), false);
+                interp.push(next_hop, f(next_hop), false, bar_duration);
                 next_hop += HOP;
             }
             if let Some(s) = interp.sample(RENDER_DT, None) {
@@ -314,10 +426,10 @@ mod tests {
     #[test]
     fn lerps_continuous_features() {
         let mut it = FeatureInterpolator::new(SR);
-        it.push(0.0, feats(0.0, 0.0, 120.0), false);
-        it.push(HOP, feats(1.0, 0.0, 120.0), false);
+        it.push(0.0, feats(0.0, 0.0, 120.0), false, 0.0);
+        it.push(HOP, feats(1.0, 0.0, 120.0), false, 0.0);
         // Sample the midpoint of the only bracketing pair directly.
-        let (f, _) = it
+        let (f, _, _) = it
             .sample_at(HOP / 2.0)
             .expect("two frames bracket the midpoint");
         assert!(
@@ -330,17 +442,17 @@ mod tests {
     #[test]
     fn never_extrapolates_past_the_ring() {
         let mut it = FeatureInterpolator::new(SR);
-        it.push(0.0, feats(0.0, 0.0, 120.0), false);
-        it.push(HOP, feats(1.0, 0.0, 120.0), false);
+        it.push(0.0, feats(0.0, 0.0, 120.0), false, 0.0);
+        it.push(HOP, feats(1.0, 0.0, 120.0), false, 0.0);
         // Well past the newest frame: must clamp to it, not extrapolate to rms > 1.
-        let (f, _) = it.sample_at(HOP * 5.0).expect("clamps to the last pair");
+        let (f, _, _) = it.sample_at(HOP * 5.0).expect("clamps to the last pair");
         assert!(
             (f.rms - 1.0).abs() < 1e-5,
             "rms must clamp to 1.0, got {}",
             f.rms
         );
         // Well before the oldest: must clamp to it, not run negative.
-        let (f, _) = it.sample_at(-HOP * 5.0).expect("clamps to the first pair");
+        let (f, _, _) = it.sample_at(-HOP * 5.0).expect("clamps to the first pair");
         assert!(
             (f.rms - 0.0).abs() < 1e-5,
             "rms must clamp to 0.0, got {}",
@@ -390,7 +502,7 @@ mod tests {
     fn beat_phase_has_no_stair_step_at_144hz() {
         let mut it = FeatureInterpolator::new(SR);
         // A detector phase that only moves on the 86.1 Hz hop clock — the stair-step source.
-        let out = run(&mut it, 600, |t| {
+        let out = run(&mut it, 600, 0.0, |t| {
             feats(0.5, ((t * 2.0) % 1.0) as f32, 120.0)
         });
         // Skip the seeding frames, then require every consecutive pair to differ.
@@ -411,7 +523,9 @@ mod tests {
         // 120 BPM = 2 beats/sec. 10 s of 144 Hz polls => expect ~20 wraps.
         let secs = 10.0;
         let n = (secs * 144.0) as usize;
-        let out = run(&mut it, n, |t| feats(0.5, ((t * 2.0) % 1.0) as f32, 120.0));
+        let out = run(&mut it, n, 0.0, |t| {
+            feats(0.5, ((t * 2.0) % 1.0) as f32, 120.0)
+        });
         let wraps = out
             .windows(2)
             .filter(|w| w[1].beat_phase < w[0].beat_phase)
@@ -485,7 +599,7 @@ mod tests {
         let mut last = None;
         for _ in 0..600 {
             while next_hop <= clock {
-                it.push(next_hop, feats(0.5, 0.0, 120.0), false);
+                it.push(next_hop, feats(0.5, 0.0, 120.0), false, 0.0);
                 next_hop += HOP;
             }
             it.sample(RENDER_DT, None);
@@ -510,7 +624,7 @@ mod tests {
         let mut next_hop = 0.0f64;
         for _ in 0..600 {
             while next_hop <= clock {
-                it.push(next_hop, feats(0.5, 0.0, 120.0), false);
+                it.push(next_hop, feats(0.5, 0.0, 120.0), false, 0.0);
                 next_hop += HOP;
             }
             it.sample(RENDER_DT, None);
@@ -531,18 +645,18 @@ mod tests {
         let mut it = FeatureInterpolator::new(SR);
         // Build up a session at t≈100s...
         for i in 0..4 {
-            it.push(100.0 + i as f64 * HOP, feats(0.5, 0.0, 120.0), false);
+            it.push(100.0 + i as f64 * HOP, feats(0.5, 0.0, 120.0), false, 0.0);
         }
         it.sample(RENDER_DT, None);
         assert!(it.playhead.expect("seeded") > 99.0);
         // ...then a device switch restarts `samples_consumed` at 0.
-        it.push(0.0, feats(0.5, 0.0, 120.0), false);
+        it.push(0.0, feats(0.5, 0.0, 120.0), false, 0.0);
         assert!(
             it.playhead.is_none(),
             "backwards clock must drop the playhead"
         );
         assert_eq!(it.frames.len(), 1, "stale window must be dropped");
-        it.push(HOP, feats(0.5, 0.0, 120.0), false);
+        it.push(HOP, feats(0.5, 0.0, 120.0), false, 0.0);
         it.sample(RENDER_DT, None);
         let p = it.playhead.expect("re-seeded on the new clock");
         assert!(p < 1.0, "playhead must re-seed near the new clock, got {p}");
@@ -573,7 +687,7 @@ mod tests {
     fn reset_makes_sample_serve_the_fallback() {
         let mut it = FeatureInterpolator::new(SR);
         for i in 0..4 {
-            it.push(i as f64 * HOP, feats(1.0, 0.0, 120.0), false);
+            it.push(i as f64 * HOP, feats(1.0, 0.0, 120.0), false, 0.0);
         }
         it.sample(RENDER_DT, None);
         it.reset();
@@ -594,12 +708,224 @@ mod tests {
     fn reset_clears_everything() {
         let mut it = FeatureInterpolator::new(SR);
         for i in 0..4 {
-            it.push(i as f64 * HOP, feats(0.5, 0.3, 120.0), false);
+            it.push(i as f64 * HOP, feats(0.5, 0.3, 120.0), false, 0.0);
         }
         it.sample(RENDER_DT, None);
         it.reset();
         assert!(it.frames.is_empty());
         assert!(it.playhead.is_none());
         assert_eq!(it.local_beat_phase, 0.0);
+        assert_eq!(it.local_bar_phase, 0.0);
+    }
+
+    // ---- A8b (#1554): the locally-advanced bar phase -------------------------------------
+
+    #[test]
+    fn bar_phase_has_no_stair_step_at_144hz() {
+        let mut it = FeatureInterpolator::new(SR);
+        // A tracker bar_phase that only moves on the 86.1 Hz hop clock — the stair-step source.
+        let out = run(&mut it, 600, BAR_2S, |t| {
+            bar_feats(((t / BAR_2S) % 1.0) as f32)
+        });
+        let tail = &out[out.len() - 400..];
+        let dupes = tail
+            .windows(2)
+            .filter(|w| w[0].bar_phase == w[1].bar_phase)
+            .count();
+        assert_eq!(
+            dupes, 0,
+            "bar_phase repeated on {dupes} consecutive render frames"
+        );
+    }
+
+    #[test]
+    fn bar_phase_rate_locks_without_drift() {
+        let mut it = FeatureInterpolator::new(SR);
+        // A 2 s bar over 10 s of 144 Hz polls => expect ~5 wraps.
+        let secs = 10.0;
+        let n = (secs * 144.0) as usize;
+        let out = run(&mut it, n, BAR_2S, |t| {
+            bar_feats(((t / BAR_2S) % 1.0) as f32)
+        });
+        let wraps = out
+            .windows(2)
+            .filter(|w| w[1].bar_phase < w[0].bar_phase)
+            .count();
+        assert!(
+            (wraps as i32 - 5).abs() <= 1,
+            "expected ~5 wraps in {secs}s of 2 s bars, got {wraps}"
+        );
+        // Between wraps the phase must climb, never sit still or reverse.
+        for w in out.windows(2) {
+            let d = w[1].bar_phase - w[0].bar_phase;
+            assert!(
+                !(-0.5..=0.0).contains(&d),
+                "bar_phase must rise or wrap, got delta {d}"
+            );
+        }
+    }
+
+    /// The test that pins the rate-derived snap threshold (see [`advance_phase`]).
+    ///
+    /// The tracker re-assigning which beat is the "one" lands a downbeat ~0.2 of a bar from
+    /// where the local oscillator sat. That error is *under* the flat `PHASE_SNAP` of 0.25,
+    /// so a shared quarter-cycle threshold takes the gentle path — where, at a bar's 0.5 Hz,
+    /// the correction outruns the advance and sweeps `bar_phase` **backwards** for ~180 ms
+    /// before converging a quarter-bar later. `τ·rate` (0.075 here) snaps instead.
+    #[test]
+    fn bar_phase_snaps_rather_than_sweeping_backwards() {
+        let mut it = FeatureInterpolator::new(SR);
+        it.local_bar_phase = 0.25;
+        let p = it.advance_bar_phase(RENDER_DT, 0.05, BAR_2S);
+        assert!(
+            (p - 0.05).abs() < 1e-5,
+            "must snap onto the tracker at 0.05, landed at {p} (a flat PHASE_SNAP crawls \
+             backwards from 0.25 instead)"
+        );
+    }
+
+    #[test]
+    fn bar_phase_holds_before_the_first_downbeat() {
+        let mut it = FeatureInterpolator::new(SR);
+        // No downbeat has landed: the tracker reports bar_phase 0 and no bar clock. Must not
+        // free-run — and must not divide by zero (a NaN would fail this `assert_eq!`, and
+        // would poison the local phase permanently).
+        for _ in 0..100 {
+            it.advance_bar_phase(RENDER_DT, 0.0, 0.0);
+        }
+        assert_eq!(it.local_bar_phase, 0.0);
+
+        // The gate is "follow the tracker", not "freeze at 0".
+        let p = it.advance_bar_phase(RENDER_DT, 0.37, 0.0);
+        assert!((p - 0.37).abs() < 1e-6, "must follow the tracker, got {p}");
+    }
+
+    /// The bar-side half of [`reset_makes_sample_serve_the_fallback`]: an emptied ring must
+    /// supply *no bar clock*, so the local phase follows the stall decay instead of
+    /// free-running a dead device's last bar around and around.
+    #[test]
+    fn bar_phase_follows_the_stall_fallback() {
+        let mut it = FeatureInterpolator::new(SR);
+        for i in 0..4 {
+            it.push(i as f64 * HOP, bar_feats(0.5), false, BAR_2S);
+        }
+        it.sample(RENDER_DT, None);
+        it.reset();
+
+        let decayed = bar_feats(0.02);
+        let f = it
+            .sample(RENDER_DT, Some(decayed))
+            .expect("serves the fallback");
+        assert!(
+            (f.bar_phase - 0.02).abs() < 1e-6,
+            "must follow the decayed fallback, not free-run from 0.5 (got {})",
+            f.bar_phase
+        );
+    }
+
+    /// Documents a deliberate asymmetry (board #1598): `DownbeatTracker` has no silence gate,
+    /// so its `bar_phase` keeps free-running on the audio clock while `BeatDetector` pins
+    /// `beat_phase` at 0. The interpolator reproduces the audio thread rather than inventing
+    /// a freeze of its own — so through a silence the bar sawtooth stays smooth.
+    #[test]
+    fn bar_phase_free_runs_through_silence() {
+        let mut it = FeatureInterpolator::new(SR);
+        let mut clock = 0.0f64;
+        let mut next_hop = 0.0f64;
+        let mut out = Vec::new();
+        for _ in 0..600 {
+            while next_hop <= clock {
+                // Silence: the detector pins beat_phase at 0 and flags the freeze; the
+                // tracker keeps ramping bar_phase on its last bar clock.
+                let mut f = bar_feats(((next_hop / BAR_2S) % 1.0) as f32);
+                f.beat_phase = 0.0;
+                it.push(next_hop, f, true, BAR_2S);
+                next_hop += HOP;
+            }
+            if let Some(s) = it.sample(RENDER_DT, None) {
+                out.push(s);
+            }
+            clock += RENDER_DT as f64;
+        }
+        let tail = &out[out.len() - 400..];
+        assert!(
+            tail.iter().all(|f| f.beat_phase == 0.0),
+            "beat_phase must follow the detector's freeze"
+        );
+        let dupes = tail
+            .windows(2)
+            .filter(|w| w[0].bar_phase == w[1].bar_phase)
+            .count();
+        assert_eq!(
+            dupes, 0,
+            "bar_phase must keep advancing through the silence"
+        );
+    }
+
+    /// The invariant the whole design rests on: `bar_duration` is held from the *older*
+    /// bracketing frame — the same one the Held `bar_phase` comes from — so the rate and the
+    /// phase always describe one instant. The tracker only ever rewrites `bar_duration` in
+    /// the same branch that zeroes `bar_phase`, so one playhead crossing swaps both at once
+    /// and the render never sees a mid-bar rate change either.
+    #[test]
+    fn bar_duration_holds_from_the_older_bracketing_frame() {
+        let mut it = FeatureInterpolator::new(SR);
+        // A 4/4 → 3/4 flip at 120 BPM: the downbeat at `b` resets the phase and re-sizes the
+        // bar in the same frame.
+        it.push(0.0, bar_feats(0.97), false, BAR_2S);
+        it.push(HOP, bar_feats(0.0), false, 1.5);
+
+        let (f, _, bar_duration) = it.sample_at(HOP / 2.0).expect("two frames bracket it");
+        assert_eq!(f.bar_phase, 0.97, "the wrapping sawtooth holds from `a`");
+        assert_eq!(
+            bar_duration, BAR_2S,
+            "the rate must hold from `a` too — pairing 1.5 with a phase computed at 2.0 \
+             would advance the local oscillator on a bar it isn't on"
+        );
+    }
+
+    #[test]
+    fn meter_flip_keeps_the_bar_sawtooth_continuous() {
+        let mut it = FeatureInterpolator::new(SR);
+        let mut clock = 0.0f64;
+        let mut next_hop = 0.0f64;
+        // Four 2 s bars, then a 4/4 → 3/4 flip: the "one" lands early and every later bar is
+        // 1.5 s. `t0` is the flip instant on the audio clock.
+        let t0 = 8.0f64;
+        let mut out = Vec::new();
+        for _ in 0..(14.0 * 144.0) as usize {
+            while next_hop <= clock {
+                let phase = if next_hop < t0 {
+                    (next_hop / BAR_2S) % 1.0
+                } else {
+                    ((next_hop - t0) / 1.5) % 1.0
+                };
+                let dur = if next_hop < t0 { BAR_2S } else { 1.5 };
+                it.push(next_hop, bar_feats(phase as f32), false, dur);
+                next_hop += HOP;
+            }
+            if let Some(s) = it.sample(RENDER_DT, None) {
+                out.push((clock, s.bar_phase));
+            }
+            clock += RENDER_DT as f64;
+        }
+        for &(t, p) in &out {
+            assert!(
+                (0.0..1.0).contains(&p),
+                "bar_phase left [0,1) at t={t}: {p}"
+            );
+        }
+        // After the flip has settled, the sawtooth must run on the *new* 1.5 s bar.
+        let tail: Vec<f32> = out
+            .iter()
+            .filter(|(t, _)| *t > 9.0)
+            .map(|(_, p)| *p)
+            .collect();
+        let wraps = tail.windows(2).filter(|w| w[1] < w[0]).count();
+        let expect = ((14.0 - 9.0) / 1.5) as i32;
+        assert!(
+            (wraps as i32 - expect).abs() <= 1,
+            "after the flip expected ~{expect} wraps on 1.5 s bars, got {wraps}"
+        );
     }
 }

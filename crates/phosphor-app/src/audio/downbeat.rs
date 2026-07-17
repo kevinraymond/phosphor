@@ -12,7 +12,9 @@
 //! Outputs fill the reserved shader fields (#1505, CPU-side only, no ABI churn):
 //! - `downbeat`    — 1.0 on the bar's "one" (a trigger, mirrors `beat`)
 //! - `bar_phase`   — 0→1 sawtooth over the bar, advanced on the audio clock between beats
-//!   (mirrors how `BeatScheduler::update_phase` advances `beat_phase`)
+//!   (mirrors how `BeatScheduler::update_phase` advances `beat_phase`). The bar length it
+//!   runs on is published alongside it (A8b, #1554) so the render thread can advance the
+//!   sawtooth at render rate on the same denominator — see [`DownbeatTracker::bar_clock`].
 //! - `beat_in_bar` — beat index within the bar, normalized 0..1
 //!
 //! DSP downbeat tracking is ~70-80% accurate on 4/4 electronic music and worse elsewhere;
@@ -60,6 +62,11 @@ pub struct DownbeatResult {
     pub bar_phase: f32,
     /// Beat index within the bar, normalized 0..1.
     pub beat_in_bar: f32,
+    /// Seconds per bar — the denominator `bar_phase` is running on, or 0.0 when there is no
+    /// bar clock yet. Published (A8b, #1554) so the render thread can advance its own copy
+    /// of `bar_phase` at this exact rate rather than re-deriving one from `bpm` and `meter`;
+    /// see `DownbeatTracker::bar_clock` and `interp::FeatureInterpolator::advance_bar_phase`.
+    pub bar_duration: f64,
 }
 
 pub struct DownbeatTracker {
@@ -79,7 +86,10 @@ pub struct DownbeatTracker {
     candidate: Option<(usize, usize)>,
     candidate_count: u32,
     /// Wall-clock (audio-thread timestamp) of the last detected downbeat, and the bar
-    /// duration estimate, for advancing `bar_phase` continuously between beats.
+    /// duration estimate, for advancing `bar_phase` continuously between beats. Both are
+    /// written only on a detected downbeat, in the same branch — so a refreshed
+    /// `bar_duration` always coincides with `bar_phase == 0`, which is what lets the render
+    /// thread share the rate without ever seeing it change mid-bar (A8b, #1554).
     last_downbeat_time: f64,
     bar_duration: f64,
     /// Held between beats (discrete per-beat value emitted every frame).
@@ -127,19 +137,32 @@ impl DownbeatTracker {
             downbeat = self.on_beat(beat, rms, chroma, timestamp);
         }
 
+        let (bar_phase, bar_duration) = self.bar_clock(timestamp);
+
         DownbeatResult {
             downbeat,
-            bar_phase: self.bar_phase(timestamp),
+            bar_phase,
             beat_in_bar: self.cur_beat_in_bar,
+            bar_duration,
         }
     }
 
-    /// Advance `bar_phase` on the audio clock (0 at the last downbeat, wrapping every bar).
-    fn bar_phase(&self, timestamp: f64) -> f32 {
+    /// The bar clock at `timestamp`: the 0→1 sawtooth (0 at the last downbeat, wrapping every
+    /// bar on the audio clock) and the bar length it is running on.
+    ///
+    /// Returned as a pair, from one gate, because the render thread advances its own copy of
+    /// the phase at `1/bar_duration` (A8b, #1554) — publishing them separately would let the
+    /// two threads disagree about whether the clock is live at all. A `bar_duration` of 0 is
+    /// the "no bar clock yet" sentinel, so `bar_duration > 0.0` ⟺ `bar_phase` is a live ramp
+    /// holds by construction rather than by the reader re-deriving this gate.
+    fn bar_clock(&self, timestamp: f64) -> (f32, f64) {
         if self.last_downbeat_time <= 0.0 || self.bar_duration <= 0.0 {
-            return 0.0;
+            return (0.0, 0.0);
         }
-        (((timestamp - self.last_downbeat_time) / self.bar_duration).rem_euclid(1.0)) as f32
+        (
+            (((timestamp - self.last_downbeat_time) / self.bar_duration).rem_euclid(1.0)) as f32,
+            self.bar_duration,
+        )
     }
 
     /// Snapshot the beat vector, re-score meter/phase, and decide if this beat is the "one".
@@ -416,6 +439,10 @@ mod tests {
             );
             assert!(r.bar_phase >= 0.0 && r.bar_phase < 1.0);
             assert!(r.beat_in_bar >= 0.0 && r.beat_in_bar < 1.0);
+            assert!(
+                r.bar_duration >= 0.0,
+                "bar_duration is a length or the 0 sentinel"
+            );
         }
         assert_eq!(t.meter(), 4, "ambiguous input falls back to 4/4");
     }
@@ -429,9 +456,14 @@ mod tests {
         // Sample bar_phase across one bar between beats: should rise monotonically toward 1.
         let base = 33.0 * period; // start after the driven beats
         // Fire a downbeat to seed last_downbeat_time cleanly.
-        let mut last = t
-            .process(&beat_result(120.0), [1.0, 0.2, 0.1], 0.9, &[0.4; 12], base)
-            .bar_phase;
+        let seed = t.process(&beat_result(120.0), [1.0, 0.2, 0.1], 0.9, &[0.4; 12], base);
+        // The bar clock the render thread will advance on (A8b #1554): 4 beats at 120 BPM.
+        assert!(
+            (seed.bar_duration - 2.0).abs() < 1e-9,
+            "4/4 at 120 BPM is a 2 s bar, got {}",
+            seed.bar_duration
+        );
+        let mut last = seed.bar_phase;
         let mut rose = false;
         for k in 1..8 {
             let bp = t
