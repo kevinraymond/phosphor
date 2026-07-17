@@ -1,5 +1,6 @@
 use egui::{Color32, RichText, Ui, Vec2};
 
+use crate::audio::AudioIndicator;
 use crate::gpu::ShaderUniforms;
 use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
@@ -58,6 +59,7 @@ pub fn draw_status_bar(
     scene_cue: Option<(usize, usize)>,
     status_error: &Option<(String, std::time::Instant)>,
     preset_loading: Option<&str>,
+    audio: AudioIndicator,
 ) {
     let tc = theme_colors(ui.ctx());
 
@@ -180,6 +182,32 @@ pub fn draw_status_bar(
                 ui.painter().circle_filled(rect.center(), 3.0, color);
             }
             label(ui, "MIDI");
+            ui.add_space(6.0);
+
+            // Audio capture health (A9 #1460) — the only dot here that can report a fault, so
+            // it shows an attempt counter rather than just a colour.
+            {
+                match audio {
+                    AudioIndicator::Reconnecting { attempt } => {
+                        // Pulse so a reconnect in progress reads as *activity*, not a dead
+                        // light. Same time-driven repaint the preset-loading branch uses.
+                        let t = ui.input(|i| i.time);
+                        let on = ((t * 3.0) as u64).is_multiple_of(2);
+                        fixed_value(
+                            ui,
+                            &format!("{attempt}/{}", crate::audio::reconnect::MAX_ATTEMPTS),
+                            22.0,
+                            tc.warning,
+                        );
+                        dot(ui, on, tc.warning);
+                        ui.ctx().request_repaint();
+                    }
+                    AudioIndicator::Failed => dot(ui, true, tc.error),
+                    AudioIndicator::Quiet => dot(ui, true, tc.warning),
+                    AudioIndicator::Live => dot(ui, true, tc.success),
+                }
+            }
+            label(ui, "AUD");
             ui.add_space(6.0);
 
             // Particles

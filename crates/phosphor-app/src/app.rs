@@ -355,7 +355,7 @@ impl App {
         let webcam_device_from_settings = settings.webcam_device.unwrap_or(0);
         #[cfg(feature = "webcam")]
         let use_ffmpeg_webcam = settings.use_ffmpeg_webcam;
-        let audio = AudioSystem::new_with_device(
+        let mut audio = AudioSystem::new_with_device(
             settings.audio_device.as_deref(),
             settings.band_scale,
             Arc::new(std::sync::Mutex::new(settings.structure_tuning)),
@@ -363,6 +363,10 @@ impl App {
                 settings.tempo,
             ))),
         );
+        // A9 (#1460): a setter rather than a 5th `new_with_device` param — the audio thread
+        // never sees this value, so threading it through construction would touch every
+        // caller for nothing.
+        audio.set_auto_reconnect(settings.auto_reconnect);
         let midi = MidiSystem::new();
         let osc = OscSystem::new();
         let web = WebSystem::new();
@@ -583,10 +587,10 @@ impl App {
             None => 0.0,
         };
 
-        // Watchdog: if the device stopped delivering data mid-session, surface
-        // it (once per stall episode). Detection only — auto-reconnect would
-        // drop the stalled backend, whose capture thread may be blocked in a
-        // timeout-less read; joining it would hang the render thread.
+        // Watchdog: if the device died or stopped delivering data mid-session, surface it and
+        // — when auto-reconnect is on (A9 #1460) — reopen it. Safe to drive from here because
+        // the teardown is detached: a stalled capture thread may be blocked in a timeout-less
+        // read, so joining it inline would hang the render thread.
         if let Some(msg) = self.audio.poll_health() {
             self.status_error = Some((msg, Instant::now()));
         }

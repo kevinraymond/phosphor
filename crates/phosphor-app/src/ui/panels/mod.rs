@@ -69,6 +69,7 @@ pub fn draw_panels(
     particle_quality: ParticleQuality,
     band_scale: BandScale,
     use_ffmpeg_webcam: bool,
+    auto_reconnect: bool,
 ) {
     if !visible {
         return;
@@ -123,6 +124,7 @@ pub fn draw_panels(
             scene_cue,
             status_error,
             preset_loading.as_deref(),
+            audio.indicator(),
         );
     });
 
@@ -423,6 +425,7 @@ pub fn draw_panels(
                                 particle_quality,
                                 band_scale,
                                 use_ffmpeg_webcam,
+                                auto_reconnect,
                             );
                         });
                     },

@@ -11,6 +11,7 @@ pub fn draw_settings_panel(
     current_quality: ParticleQuality,
     current_band_scale: BandScale,
     use_ffmpeg_webcam: bool,
+    auto_reconnect: bool,
 ) {
     let tc = theme_colors(ui.ctx());
 
@@ -110,6 +111,24 @@ pub fn draw_settings_panel(
         "How the 7 frequency bands are scaled. Unified dB makes all bands comparable \
          (recommended); Legacy is the old linear/dB split, for presets tuned to it.",
     );
+
+    // A9 (#1460): auto-reconnect the capture device after a confirmed loss.
+    let mut reconnect = auto_reconnect;
+    let resp = ui
+        .checkbox(
+            &mut reconnect,
+            RichText::new("Auto-reconnect audio").size(SMALL_SIZE),
+        )
+        .on_hover_text(
+            "Reopen the audio device automatically when it stops delivering data — an \
+             unplugged interface, a driver reset. Retries 5 times with backoff, then leaves \
+             it to you.",
+        );
+    if resp.changed() {
+        ui.ctx().data_mut(|d| {
+            d.insert_temp(egui::Id::new("set_auto_reconnect"), reconnect);
+        });
+    }
 
     // FFmpeg webcam backend (webcam feature only)
     #[cfg(feature = "webcam")]

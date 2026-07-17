@@ -88,6 +88,18 @@ pub struct SettingsConfig {
     /// load with the built-in defaults (the pre-A7 hardcoded 150 BPM / sigma 1.0).
     #[serde(default)]
     pub tempo: TempoConfig,
+    /// A9 (#1460): reopen the capture device automatically when the watchdog confirms it died.
+    ///
+    /// `default = "default_true"`, not the bare `#[serde(default)]` every field above uses:
+    /// `bool`'s `Default` is `false`, which would silently ship this off for every settings
+    /// file written before #1460 — a default the user never chose and no test would catch.
+    #[serde(default = "default_true")]
+    pub auto_reconnect: bool,
+}
+
+/// Serde default for [`SettingsConfig::auto_reconnect`] — see the note on that field.
+fn default_true() -> bool {
+    true
 }
 
 impl Default for SettingsConfig {
@@ -102,6 +114,7 @@ impl Default for SettingsConfig {
             use_ffmpeg_webcam: false,
             structure_tuning: StructureConfig::default(),
             tempo: TempoConfig::default(),
+            auto_reconnect: true,
         }
     }
 }
@@ -185,15 +198,8 @@ mod tests {
     fn settings_config_all_themes_roundtrip() {
         for mode in ThemeMode::ALL {
             let c = SettingsConfig {
-                version: 1,
                 theme: *mode,
-                audio_device: None,
-                band_scale: BandScale::default(),
-                particle_quality: ParticleQuality::default(),
-                webcam_device: None,
-                use_ffmpeg_webcam: false,
-                structure_tuning: StructureConfig::default(),
-                tempo: TempoConfig::default(),
+                ..Default::default()
             };
             let json = serde_json::to_string(&c).unwrap();
             let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
@@ -204,15 +210,8 @@ mod tests {
     #[test]
     fn settings_config_non_default_theme_persists() {
         let c = SettingsConfig {
-            version: 1,
             theme: ThemeMode::HighContrast,
-            audio_device: None,
-            band_scale: BandScale::default(),
-            particle_quality: ParticleQuality::default(),
-            webcam_device: None,
-            use_ffmpeg_webcam: false,
-            structure_tuning: StructureConfig::default(),
-            tempo: TempoConfig::default(),
+            ..Default::default()
         };
         let json = serde_json::to_string(&c).unwrap();
         let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
@@ -235,6 +234,29 @@ mod tests {
         let json = serde_json::to_string(&c).unwrap();
         let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(c2.structure_tuning, c.structure_tuning);
+    }
+
+    #[test]
+    fn auto_reconnect_defaults_on_when_missing() {
+        // A settings.json written before #1460 has no key. It must load as ON — a bare
+        // #[serde(default)] would give bool::default() == false and silently disable it.
+        let json = r#"{"version":1,"theme":"Dark"}"#;
+        let c: SettingsConfig = serde_json::from_str(json).unwrap();
+        assert!(c.auto_reconnect);
+    }
+
+    #[test]
+    fn auto_reconnect_off_roundtrips() {
+        let c = SettingsConfig {
+            auto_reconnect: false,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
+        assert!(
+            !c2.auto_reconnect,
+            "an explicit opt-out must survive a reload"
+        );
     }
 
     #[test]

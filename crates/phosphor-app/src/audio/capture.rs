@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -203,6 +203,29 @@ pub struct AudioCapture {
     pub device_name: String,
     #[allow(dead_code)]
     pub callback_count: Arc<AtomicU64>,
+    /// A9 (#1460): set by cpal's error callback when the device goes away. See
+    /// [`err_callback`].
+    pub capture_failed: Arc<AtomicBool>,
+}
+
+/// A9 (#1460): build cpal's stream error callback, publishing device loss to the watchdog.
+///
+/// `DeviceNotAvailable`/`StreamInvalidated` mean the device is gone, so the watchdog can
+/// reconnect at once instead of waiting out the 10s stall window. `BufferUnderrun` is
+/// deliberately excluded — it is a glitch on a live device, not a death.
+///
+/// A factory rather than a plain closure because each `sample_format` arm below builds its own
+/// stream and so needs its own `Arc` clone.
+fn err_callback(capture_failed: Arc<AtomicBool>) -> impl FnMut(cpal::StreamError) + Send + 'static {
+    move |err: cpal::StreamError| {
+        log::error!("Audio stream error: {err}");
+        if matches!(
+            err,
+            cpal::StreamError::DeviceNotAvailable | cpal::StreamError::StreamInvalidated
+        ) {
+            capture_failed.store(true, Ordering::Release);
+        }
+    }
 }
 
 impl AudioCapture {
@@ -252,13 +275,10 @@ impl AudioCapture {
 
         let ring = Arc::new(RingBuffer::new());
         let callback_count = Arc::new(AtomicU64::new(0));
+        let capture_failed = Arc::new(AtomicBool::new(false));
 
         let sample_format = config.sample_format();
         let stream_config: cpal::StreamConfig = config.into();
-
-        let err_callback = |err: cpal::StreamError| {
-            log::error!("Audio stream error: {err}");
-        };
 
         let stream = match sample_format {
             SampleFormat::I16 => {
@@ -269,7 +289,7 @@ impl AudioCapture {
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
                         push_samples(&ring_clone, &cb_clone, data, channels);
                     },
-                    err_callback,
+                    err_callback(capture_failed.clone()),
                     None,
                 )?
             }
@@ -281,7 +301,7 @@ impl AudioCapture {
                     move |data: &[i32], _: &cpal::InputCallbackInfo| {
                         push_samples(&ring_clone, &cb_clone, data, channels);
                     },
-                    err_callback,
+                    err_callback(capture_failed.clone()),
                     None,
                 )?
             }
@@ -293,7 +313,7 @@ impl AudioCapture {
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
                         push_samples(&ring_clone, &cb_clone, data, channels);
                     },
-                    err_callback,
+                    err_callback(capture_failed.clone()),
                     None,
                 )?
             }
@@ -308,6 +328,7 @@ impl AudioCapture {
             sample_rate,
             device_name,
             callback_count,
+            capture_failed,
         })
     }
 

@@ -58,6 +58,10 @@ pub struct WasapiCapture {
     pub sample_rate: u32,
     pub device_name: String,
     pub callback_count: Arc<AtomicU64>,
+    /// A9 (#1460): set by the capture thread when the COM loop bails out. A positive death
+    /// signal — the watchdog cannot infer death from a frozen `callback_count` here, because
+    /// loopback delivers no packets at all while nothing is playing.
+    pub capture_failed: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     thread_handle: Option<thread::JoinHandle<()>>,
 }
@@ -152,6 +156,8 @@ impl WasapiCapture {
         let callback_count_clone = callback_count.clone();
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = shutdown.clone();
+        let capture_failed = Arc::new(AtomicBool::new(false));
+        let capture_failed_clone = capture_failed.clone();
 
         let thread_handle = thread::Builder::new()
             .name("phosphor-wasapi".into())
@@ -160,6 +166,7 @@ impl WasapiCapture {
                     ring_clone,
                     callback_count_clone,
                     shutdown_clone,
+                    capture_failed_clone,
                     channels as usize,
                     bits_per_sample,
                     block_align as usize,
@@ -171,6 +178,7 @@ impl WasapiCapture {
             sample_rate,
             device_name,
             callback_count,
+            capture_failed,
             shutdown,
             thread_handle: Some(thread_handle),
         })
@@ -190,6 +198,7 @@ fn wasapi_capture_thread(
     ring: Arc<RingBuffer>,
     callback_count: Arc<AtomicU64>,
     shutdown: Arc<AtomicBool>,
+    capture_failed: Arc<AtomicBool>,
     channels: usize,
     bits_per_sample: u16,
     block_align: usize,
@@ -213,6 +222,16 @@ fn wasapi_capture_thread(
         );
         if let Err(e) = result {
             log::error!("WASAPI capture error: {e}");
+            // A9 (#1460): the loop only returns Err on a COM failure — a clean shutdown
+            // returns Ok — so this is a positive "the endpoint is gone" signal. The watchdog
+            // needs it because a frozen callback_count cannot mean death here: loopback
+            // delivers no packets at all while nothing is playing.
+            //
+            // Guarded on !shutdown so a failing `audio_client.Stop()` during a normal
+            // teardown does not report a death that never happened.
+            if !shutdown.load(Ordering::Acquire) {
+                capture_failed.store(true, Ordering::Release);
+            }
         }
 
         CoUninitialize();

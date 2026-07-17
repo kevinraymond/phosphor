@@ -160,6 +160,11 @@ const FRAG_BYTES: u32 = (FRAG_SAMPLES * std::mem::size_of::<f32>()) as u32;
 /// How often to log health stats (seconds).
 const HEALTH_LOG_INTERVAL: f64 = 30.0;
 
+/// A9 (#1460): consecutive `pa_simple_read` failures before the thread declares the stream
+/// dead and exits. `pa_simple` has no recovery — once the server kills the stream every read
+/// fails — so retrying past this is just log spam. ~1s at the 100ms retry cadence.
+const MAX_CONSECUTIVE_ERRORS: u32 = 10;
+
 // --- PulseCapture ---
 
 pub struct PulseCapture {
@@ -167,6 +172,10 @@ pub struct PulseCapture {
     pub sample_rate: u32,
     pub device_name: String,
     pub callback_count: Arc<AtomicU64>,
+    /// A9 (#1460): set by the read thread when it gives up on a stream the server has killed.
+    /// A positive death signal — unlike a frozen `callback_count`, which on a monitor source
+    /// only means the sink is idle.
+    pub capture_failed: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     thread_handle: Option<thread::JoinHandle<()>>,
 }
@@ -375,6 +384,8 @@ impl PulseCapture {
         let callback_count_clone = callback_count.clone();
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = shutdown.clone();
+        let capture_failed = Arc::new(AtomicBool::new(false));
+        let capture_failed_clone = capture_failed.clone();
 
         let verbose = std::env::var("PHOSPHOR_AUDIO_DEBUG").map_or(false, |v| v == "1");
 
@@ -393,6 +404,7 @@ impl PulseCapture {
                     let mut buf = vec![0u8; FRAG_BYTES as usize];
                     let mut stats = ReadStats::new();
                     let start = Instant::now();
+                    let mut consecutive_errors: u32 = 0;
 
                     loop {
                         if shutdown_clone.load(Ordering::Acquire) {
@@ -425,9 +437,24 @@ impl PulseCapture {
                                 }
                             };
                             log::error!("PulseAudio read error: {msg}");
+                            consecutive_errors += 1;
+                            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                // A9 (#1460): pa_simple cannot recover a stream the server has
+                                // killed, so every subsequent read fails too — this loop used
+                                // to spin here at 10Hz forever. Publish the death and exit:
+                                // the watchdog reconnects, and the reaper's join returns at
+                                // once instead of parking a thread.
+                                log::error!(
+                                    "PulseAudio: {consecutive_errors} consecutive read errors, \
+                                     giving up on this stream"
+                                );
+                                capture_failed_clone.store(true, Ordering::Release);
+                                break;
+                            }
                             thread::sleep(Duration::from_millis(100));
                             continue;
                         }
+                        consecutive_errors = 0;
 
                         let read_dur = t0.elapsed();
                         let samples: &[f32] = bytemuck::cast_slice(&buf);
@@ -465,6 +492,7 @@ impl PulseCapture {
             sample_rate,
             device_name,
             callback_count,
+            capture_failed,
             shutdown,
             thread_handle: Some(thread_handle),
         })

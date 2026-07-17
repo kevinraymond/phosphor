@@ -11,6 +11,7 @@ pub mod normalizer;
 #[cfg(target_os = "linux")]
 pub mod pulse_capture;
 pub mod ranging;
+pub mod reconnect;
 pub mod schema;
 pub mod smoother;
 pub mod structure;
@@ -94,6 +95,43 @@ struct OpenedBackend {
     callback_count: Arc<AtomicU64>,
     backend: CaptureBackend,
     using_native_backend: bool,
+    /// A9 (#1460): set by the capture thread when it dies of its own accord. The watchdog's
+    /// only unambiguous death signal — see [`reconnect::Health`].
+    capture_failed: Arc<AtomicBool>,
+    /// A9 (#1460): whether this backend keeps delivering data (zeros) while nothing is
+    /// playing. Only then does a frozen `callback_count` mean the device is gone rather than
+    /// merely idle. This is where the per-backend policy lives, so nothing downstream of
+    /// `open_backend` has to know which platform it is on.
+    silence_delivers_data: bool,
+}
+
+/// How long `callback_count` may stay frozen before the watchdog calls it a stall.
+const STALL_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A9 (#1460): what the status bar's AUD dot shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioIndicator {
+    Live,
+    /// Stalled, but not being acted on — an idle loopback backend, or auto-reconnect off.
+    Quiet,
+    Reconnecting {
+        attempt: u32,
+    },
+    /// Attempts exhausted, or no backend open at all.
+    Failed,
+}
+
+/// A9 (#1460): how [`AudioSystem::adopt`] disposes of the outgoing capture backend.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Teardown {
+    /// Join on the calling thread. Releases the device *before* the reopen, which an
+    /// exclusive ALSA `hw:` device needs in order to open again. Correct for a user-initiated
+    /// switch: the backend is healthy, so its capture thread exits within one read period.
+    Blocking,
+    /// Hand the backend to a detached reaper and return at once. A stalled backend's capture
+    /// thread may be blocked in a timeout-less `pa_simple_read`; joining it here would freeze
+    /// the render thread for as long as the stall lasts.
+    Reap,
 }
 
 /// Try native loopback first (PulseAudio on Linux, WASAPI on Windows), then cpal.
@@ -109,8 +147,13 @@ fn open_backend(device_name: Option<&str>) -> Result<OpenedBackend, String> {
                         sample_rate: pulse.sample_rate as f32,
                         device_name: pulse.device_name.clone(),
                         callback_count: pulse.callback_count.clone(),
+                        capture_failed: pulse.capture_failed.clone(),
                         backend: CaptureBackend::Pulse(pulse),
                         using_native_backend: true,
+                        // A monitor source of a suspended sink stops delivering, which is
+                        // indistinguishable from death by callback count alone. Read errors
+                        // are this backend's real death signal.
+                        silence_delivers_data: false,
                     });
                 }
                 Err(e) => {
@@ -128,8 +171,13 @@ fn open_backend(device_name: Option<&str>) -> Result<OpenedBackend, String> {
                         sample_rate: wasapi.sample_rate as f32,
                         device_name: wasapi.device_name.clone(),
                         callback_count: wasapi.callback_count.clone(),
+                        capture_failed: wasapi.capture_failed.clone(),
                         backend: CaptureBackend::Wasapi(wasapi),
                         using_native_backend: true,
+                        // Loopback delivers no packets at all while nothing is playing, so a
+                        // frozen callback count is just as likely to be a quiet passage as a
+                        // dead endpoint. COM errors are this backend's real death signal.
+                        silence_delivers_data: false,
                     });
                 }
                 Err(e) => {
@@ -145,8 +193,12 @@ fn open_backend(device_name: Option<&str>) -> Result<OpenedBackend, String> {
             sample_rate: capture.sample_rate as f32,
             device_name: capture.device_name.clone(),
             callback_count: capture.callback_count.clone(),
+            capture_failed: capture.capture_failed.clone(),
             backend: CaptureBackend::Cpal(capture),
             using_native_backend: false,
+            // An input stream's callbacks run on the device clock and deliver zeros through
+            // silence, so here — and only here — a frozen callback count does mean death.
+            silence_delivers_data: true,
         }),
         Err(e) => Err(format!("{e}")),
     }
@@ -232,6 +284,23 @@ pub struct AudioSystem {
     cb_changed_at: Instant,
     /// Whether the current stall episode has already been reported.
     stall_reported: bool,
+    /// A9 (#1460): set by the capture thread when it dies of its own accord — the watchdog's
+    /// unambiguous death signal. Belongs to the backend, so `adopt` swaps it.
+    capture_failed: Arc<AtomicBool>,
+    /// A9 (#1460): whether a frozen `callback_count` means death on this backend. See
+    /// [`OpenedBackend::silence_delivers_data`]. Belongs to the backend, so `adopt` swaps it.
+    silence_delivers_data: bool,
+    /// A9 (#1460): backoff and attempt bookkeeping for the current stall episode. Deliberately
+    /// *not* swapped by `adopt` — like `band_scale`, it belongs to the system rather than to
+    /// any one backend, and an episode outlives the backends it cycles through.
+    reconnect: reconnect::ReconnectState,
+    /// A9 (#1460): an `open_backend` call in flight on a worker thread. `None` when no reopen
+    /// is pending. Sole owner of the receiver, so dropping it orphans the worker — which is
+    /// how a manual switch cancels a reconnect.
+    pending_open: Option<Receiver<Result<OpenedBackend, String>>>,
+    /// A9 (#1460): what `pending_open` is trying to reopen, so the landing `adopt` can name it
+    /// (a cpal open silently falls back to the default device, so the result cannot say).
+    reopen_target: Option<String>,
 }
 
 impl AudioSystem {
@@ -251,15 +320,43 @@ impl AudioSystem {
         tuning: Arc<Mutex<StructureConfig>>,
         tempo: Arc<Mutex<TempoControl>>,
     ) -> Self {
+        Self::from_opened(
+            open_backend(device_name),
+            device_name,
+            band_scale,
+            tuning,
+            tempo,
+            Arc::new(RingBuffer::new()),
+        )
+    }
+
+    /// Build the analysis pipeline and all render-facing state around an already-opened
+    /// backend.
+    ///
+    /// Split out of `new_with_device` at the `open_backend` seam (A9 #1460) so the reconnect
+    /// path can run that call — which forks a `pactl` subprocess and blocks on the PulseAudio
+    /// server — on a worker thread and hand the result in here. See `start_reopen`.
+    ///
+    /// `requested` is what the caller asked for, needed only to name the device on the error
+    /// path (where nothing opened, so `opened` cannot say). `recording_ring` is threaded in
+    /// rather than created here so a reopen can keep the *same* ring: an in-progress recording
+    /// holds a clone of it, and handing it a fresh one would silently strand its writer.
+    fn from_opened(
+        opened: Result<OpenedBackend, String>,
+        requested: Option<&str>,
+        band_scale: BandScale,
+        tuning: Arc<Mutex<StructureConfig>>,
+        tempo: Arc<Mutex<TempoControl>>,
+        recording_ring: Arc<RingBuffer>,
+    ) -> Self {
         let (tx, rx): (Sender<AudioFrame>, Receiver<AudioFrame>) = crossbeam_channel::bounded(4);
 
         let shutdown = Arc::new(AtomicBool::new(false));
-        let recording_ring = Arc::new(RingBuffer::new());
         let beat_counter = Arc::new(AtomicU32::new(0));
         let downbeat_counter = Arc::new(AtomicU32::new(0));
         let drop_counter = Arc::new(AtomicU32::new(0));
 
-        match open_backend(device_name) {
+        match opened {
             Ok(opened) => {
                 let shutdown_flag = shutdown.clone();
                 let ring = opened.ring.clone();
@@ -304,6 +401,8 @@ impl AudioSystem {
                     thread_handle: Some(thread_handle),
                     callback_count: opened.callback_count,
                     started_at: Instant::now(),
+                    capture_failed: opened.capture_failed,
+                    silence_delivers_data: opened.silence_delivers_data,
                     _capture: Some(opened.backend),
                     using_native_backend: opened.using_native_backend,
                     cached_devices: Arc::new(Mutex::new(Vec::new())),
@@ -328,6 +427,9 @@ impl AudioSystem {
                     last_cb_count: 0,
                     cb_changed_at: Instant::now(),
                     stall_reported: false,
+                    reconnect: reconnect::ReconnectState::new(true),
+                    pending_open: None,
+                    reopen_target: None,
                 }
             }
             Err(e) => {
@@ -341,13 +443,17 @@ impl AudioSystem {
                     latest_spectrum: vec![0.0; analyzer::SPECTRUM_BINS],
                     pending_mel: Vec::new(),
                     latest_mel: Vec::new(),
-                    device_name: device_name.unwrap_or("Default").to_string(),
+                    device_name: requested.unwrap_or("Default").to_string(),
                     active: false,
                     last_error: Some(e),
                     shutdown,
                     thread_handle: None,
                     callback_count: Arc::new(AtomicU64::new(0)),
                     started_at: Instant::now(),
+                    capture_failed: Arc::new(AtomicBool::new(false)),
+                    // Nothing is open, so nothing can freeze; `poll_health` gates the whole
+                    // watchdog on `active` anyway.
+                    silence_delivers_data: false,
                     _capture: None,
                     using_native_backend: false,
                     cached_devices: Arc::new(Mutex::new(Vec::new())),
@@ -372,34 +478,66 @@ impl AudioSystem {
                     last_cb_count: 0,
                     cb_changed_at: Instant::now(),
                     stall_reported: false,
+                    reconnect: reconnect::ReconnectState::new(true),
+                    pending_open: None,
+                    reopen_target: None,
                 }
             }
         }
     }
 
-    /// Switch to a different audio device at runtime.
+    /// Switch to a different audio device at runtime (user-initiated).
     pub fn switch_device(&mut self, device_name: Option<&str>) {
+        // A9 (#1460): a manual pick supersedes any reconnect episode — drop the receiver to
+        // orphan an in-flight worker (its send then fails harmlessly, and it drops the
+        // backend it opened on its own thread), and forget the backoff.
+        self.pending_open = None;
+        self.reopen_target = None;
+        self.adopt(device_name, open_backend(device_name), Teardown::Blocking);
+        self.reconnect.reset();
+    }
+
+    /// Replace the live capture pipeline with `opened`, disposing of the old one per
+    /// `teardown` (A9 #1460). Everything below the teardown block is the pre-A9
+    /// `switch_device` body.
+    fn adopt(
+        &mut self,
+        requested: Option<&str>,
+        opened: Result<OpenedBackend, String>,
+        teardown: Teardown,
+    ) {
         // Signal the old audio thread to stop
         self.shutdown.store(true, Ordering::Release);
 
-        // Wait for the old thread to finish so the device is fully released
+        // The analysis thread only ever polls this flag and sleeps 10ms — it never blocks on
+        // the device — so joining it is bounded even mid-stall, and only `_capture` can hang.
+        // Joining it *here* is load-bearing for `recording_ring` below: `RingBuffer::push` is
+        // single-producer, so the old thread must be gone before the new one can share it.
         if let Some(handle) = self.thread_handle.take() {
             let _ = handle.join();
         }
 
         // Drop old capture backend before creating new one
-        self._capture = None;
+        let old_capture = self._capture.take();
+        match teardown {
+            Teardown::Blocking => drop(old_capture),
+            Teardown::Reap => reconnect::reap("phosphor-audio-reaper", old_capture),
+        }
 
         // Create new system and swap all fields (mem::replace avoids move-out-of-Drop).
         // Preserve the current band scale (A1 #1452), the A18 tuning Arc (#1510) and the A7
         // tempo control (#1458) across the switch — passing the same Arcs keeps user tuning
         // live (the fresh audio thread receives a clone of each), so `self.tuning` and
-        // `self.tempo` are deliberately left unswapped below.
-        let mut new = Self::new_with_device(
-            device_name,
+        // `self.tempo` are deliberately left unswapped below. Same for `recording_ring`
+        // (A9 #1460): an in-progress recording holds a clone, so handing the fresh thread a
+        // new ring would leave that recording's writer draining one nobody writes to.
+        let mut new = Self::from_opened(
+            opened,
+            requested,
             self.band_scale,
             self.tuning.clone(),
             self.tempo.clone(),
+            self.recording_ring.clone(),
         );
         self.receiver = std::mem::replace(&mut new.receiver, crossbeam_channel::bounded(1).1);
         self.latest = None;
@@ -422,8 +560,12 @@ impl AudioSystem {
         self.started_at = new.started_at;
         self._capture = new._capture.take();
         self.using_native_backend = new.using_native_backend;
-        self.recording_ring =
-            std::mem::replace(&mut new.recording_ring, Arc::new(RingBuffer::new()));
+        self.capture_failed =
+            std::mem::replace(&mut new.capture_failed, Arc::new(AtomicBool::new(false)));
+        self.silence_delivers_data = new.silence_delivers_data;
+        // `recording_ring` is deliberately NOT swapped (A9 #1460) — `from_opened` was handed
+        // ours, so the new audio thread already writes to the same ring an in-progress
+        // recording is draining.
         self.sample_rate = new.sample_rate;
         self.beat_counter = std::mem::replace(&mut new.beat_counter, Arc::new(AtomicU32::new(0)));
         self.beats_seen = self.beat_counter.load(Ordering::Relaxed);
@@ -439,6 +581,8 @@ impl AudioSystem {
         self.cb_changed_at = Instant::now();
         self.stall_reported = false;
         // Keep existing cached_devices/scan_in_flight/last_scan — no need to re-scan on switch
+        // `self.reconnect` is likewise deliberately unswapped (A9 #1460): an episode spans the
+        // backends it cycles through, so `new`'s fresh state must not clobber the live one.
         // `new` is dropped here — its Drop is a no-op since thread_handle is None and shutdown is true
     }
 
@@ -499,14 +643,19 @@ impl AudioSystem {
             return;
         }
         self.band_scale = band_scale;
-        // Reopen the same source: `None` for the native loopback backend, else the cpal
-        // device name. `switch_device` carries `self.band_scale` into the new pipeline.
-        let device = if self.using_native_backend {
+        // `switch_device` carries `self.band_scale` into the new pipeline.
+        let device = self.current_target();
+        self.switch_device(device.as_deref());
+    }
+
+    /// How to reopen whatever we are listening to now: `None` for the native loopback backend
+    /// (which `open_backend` only tries when no device is named), else the cpal device name.
+    fn current_target(&self) -> Option<String> {
+        if self.using_native_backend {
             None
         } else {
             Some(self.device_name.clone())
-        };
-        self.switch_device(device.as_deref());
+        }
     }
 
     /// Return cached input device list. Triggers a background rescan every 5 seconds
@@ -661,30 +810,145 @@ impl AudioSystem {
         std::mem::take(&mut self.pending_mel)
     }
 
-    /// Watchdog: detect a device that stopped delivering data mid-session and
-    /// report it once per stall episode. Detection only — automatically tearing
-    /// down a stalled backend is unsafe: dropping it joins a capture thread that
-    /// may be blocked in a timeout-less read (e.g. `pa_simple_read`), which would
-    /// hang the render thread for as long as the stall lasts. The 5-second
-    /// startup check in `latest_features()` covers devices that never delivered.
+    /// Turn auto-reconnect on or off (A9 #1460). Off abandons any episode in flight.
+    pub fn set_auto_reconnect(&mut self, enabled: bool) {
+        self.reconnect.set_enabled(enabled);
+    }
+
+    /// What the status bar's AUD dot should show (A9 #1460).
+    pub fn indicator(&self) -> AudioIndicator {
+        if self.reconnect.is_reconnecting() {
+            AudioIndicator::Reconnecting {
+                attempt: self.reconnect.attempt(),
+            }
+        } else if !self.active || self.reconnect.is_exhausted() {
+            AudioIndicator::Failed
+        } else if self.stall_reported {
+            AudioIndicator::Quiet
+        } else {
+            AudioIndicator::Live
+        }
+    }
+
+    /// Reap the current backend and start a reopen of the same source on a worker thread
+    /// (A9 #1460).
+    ///
+    /// `open_backend` must not run on the render thread: on Linux it forks a `pactl`
+    /// subprocess and makes two blocking PulseAudio server round-trips, and a dead server —
+    /// the likeliest cause of the stall we are answering — bounds neither. Running it inline
+    /// would put an unbounded wait back on the render thread and undo the reaper.
+    fn start_reopen(&mut self) {
+        let target = self.current_target();
+        self.reopen_target = target.clone();
+
+        // Reap first: it releases the device before the reopen (an exclusive ALSA device will
+        // not open twice) and stops the stalled thread fighting for the source. Adopting the
+        // `Err` shell parks us in the existing "no device" state, whose stale-feature decay in
+        // `latest_features` already carries the visuals gracefully across the gap.
+        self.adopt(
+            target.as_deref(),
+            Err("Reconnecting…".to_string()),
+            Teardown::Reap,
+        );
+
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        self.pending_open = Some(rx);
+        thread::Builder::new()
+            .name("phosphor-audio-reopen".into())
+            .spawn(move || {
+                let _ = tx.send(open_backend(target.as_deref()));
+            })
+            // Spawn failure drops `tx`, so `rx` disconnects and `poll_health` fails the
+            // attempt on its next tick — no special case needed.
+            .ok();
+    }
+
+    /// Land a completed reopen, if one is in flight. Returns a message for the status toast.
+    fn poll_pending_open(&mut self) -> Option<String> {
+        let rx = self.pending_open.as_ref()?;
+        match rx.try_recv() {
+            Ok(result) => {
+                self.pending_open = None;
+                let opened = result.is_ok();
+                let target = self.reopen_target.take();
+                // Nothing to tear down — `start_reopen` already reaped it and adopted the
+                // `Err` shell, so this join is over a `None` handle.
+                self.adopt(target.as_deref(), result, Teardown::Blocking);
+                self.reconnect.note_attempt(Instant::now(), opened);
+                opened.then(|| format!("Audio reconnected: {}", self.device_name))
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => None,
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                // The worker never ran, or died before sending.
+                self.pending_open = None;
+                self.reopen_target = None;
+                self.reconnect.note_attempt(Instant::now(), false);
+                None
+            }
+        }
+    }
+
+    /// Watchdog: detect a capture backend that died or stalled mid-session and, when
+    /// auto-reconnect is on (A9 #1460), reap it off-thread and reopen. Returns a one-shot
+    /// message for the status toast.
+    ///
+    /// The trigger is a *positive* death signal (`capture_failed`) rather than a frozen
+    /// callback count, because a freeze is ambiguous on both loopback backends: WASAPI
+    /// delivers no packets while nothing plays, and a PulseAudio monitor of a suspended sink
+    /// stops delivering. Only cpal, whose callbacks run on the device clock and deliver zeros
+    /// through silence, may reconnect on a freeze alone — see `silence_delivers_data`.
+    ///
+    /// The 5-second startup check in `latest_features()` covers devices that never delivered.
     pub fn poll_health(&mut self) -> Option<String> {
+        // Land any completed reopen first, so this frame's state machine sees the result.
+        if let Some(msg) = self.poll_pending_open() {
+            log::info!("{msg}");
+            return Some(msg);
+        }
+
         let cb = self.callback_count.load(Ordering::Relaxed);
         if cb != self.last_cb_count {
             self.last_cb_count = cb;
             self.cb_changed_at = Instant::now();
             self.stall_reported = false;
+            self.reconnect.note_healthy();
             return None;
         }
 
         // Only trip once callbacks have flowed at least once and then stalled.
-        // WASAPI loopback delivers no packets while nothing is playing, so a
-        // long playback pause on Windows can look like a stall — hence the
-        // neutral wording and once-per-episode reporting.
-        if self.active
-            && cb > 0
-            && !self.stall_reported
-            && self.cb_changed_at.elapsed() > Duration::from_secs(10)
-        {
+        let frozen = self.active && cb > 0 && self.cb_changed_at.elapsed() > STALL_TIMEOUT;
+        let health = reconnect::Health {
+            died: self.active && self.capture_failed.load(Ordering::Relaxed),
+            frozen,
+            any_callbacks: cb > 0,
+            silence_delivers_data: self.silence_delivers_data,
+        };
+
+        let action = self.reconnect.poll(Instant::now(), health);
+        let msg = match action {
+            reconnect::ReconnectAction::Reopen { attempt } => {
+                self.start_reopen();
+                Some(format!(
+                    "Audio device lost — reconnecting ({attempt}/{})…",
+                    reconnect::MAX_ATTEMPTS
+                ))
+            }
+            reconnect::ReconnectAction::GiveUp => Some(format!(
+                "Audio reconnect failed after {} attempts (Settings → Audio)",
+                reconnect::MAX_ATTEMPTS
+            )),
+            reconnect::ReconnectAction::Idle => None,
+        };
+        if let Some(msg) = msg {
+            log::warn!("{msg}");
+            self.last_error = Some(msg.clone());
+            return Some(msg);
+        }
+
+        // Detection-only fallback: the stalls we deliberately do not act on — a quiet loopback
+        // backend, or auto-reconnect turned off. Neutral wording because on those backends
+        // this really may just be silence.
+        if frozen && !self.stall_reported {
             self.stall_reported = true;
             let msg =
                 "No audio data for 10s — device may be idle or disconnected (Settings → Audio)";
@@ -717,7 +981,13 @@ impl Drop for AudioSystem {
         if let Some(handle) = self.thread_handle.take() {
             let _ = handle.join();
         }
-        // _capture is dropped automatically
+        // A9 (#1460): reap rather than drop the backend here. Dropping it joins the capture
+        // thread, which during a stall may be blocked in a timeout-less read — that used to
+        // hang the whole process on quit. The reaper is detached, so the process exits and the
+        // OS reclaims the thread.
+        if let Some(capture) = self._capture.take() {
+            reconnect::reap("phosphor-audio-reaper", capture);
+        }
     }
 }
 

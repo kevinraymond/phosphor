@@ -643,6 +643,7 @@ impl ApplicationHandler for PhosphorApp {
                                 app.settings.particle_quality,
                                 app.settings.band_scale,
                                 app.settings.use_ffmpeg_webcam,
+                                app.settings.auto_reconnect,
                             );
                         }
                         // Sync global postprocess enabled from layer
@@ -1008,6 +1009,17 @@ impl ApplicationHandler for PhosphorApp {
                     app.settings.save();
                     // Rebuild the audio pipeline so the analyzer picks up the new scaling.
                     app.audio.set_band_scale(scale);
+                }
+
+                // Handle auto-reconnect toggle from settings panel (A9 #1460)
+                let set_auto_reconnect: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("set_auto_reconnect")));
+                if let Some(on) = set_auto_reconnect {
+                    app.settings.auto_reconnect = on;
+                    app.settings.save();
+                    app.audio.set_auto_reconnect(on);
                 }
 
                 // Persist A18 structure tuning after a slider release (#1510). The live value
