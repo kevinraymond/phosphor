@@ -500,6 +500,13 @@ impl Drop for AudioSystem {
     }
 }
 
+/// A5 (#1456): fixed analysis hop. The audio thread accumulates capture reads into a FIFO
+/// and runs one analyze/beat/… frame per exactly this many samples, so spectral-flux and
+/// onset amplitudes, the tempo frame rate (`sr / ANALYSIS_HOP`), and A18's decimation no
+/// longer drift with scheduler jitter or read-burst size. 512 @ 44.1 kHz ≈ 11.6 ms/frame
+/// (87.5% overlap of the 4096-sample analysis window).
+pub const ANALYSIS_HOP: usize = 512;
+
 fn audio_thread(
     ring: Arc<RingBuffer>,
     sample_rate: f32,
@@ -517,8 +524,14 @@ fn audio_thread(
     let mut downbeat_tracker = DownbeatTracker::new();
     let mut smoother = FeatureSmoother::new();
     let mut read_buf = vec![0.0f32; 8192]; // larger for 4096-pt FFT
-    let mut last_time = Instant::now();
-    let start_time = Instant::now();
+
+    // A5 (#1456): accumulate capture reads here and analyze exactly ANALYSIS_HOP samples at
+    // a time. `samples_consumed` is a sample clock — each frame's timestamp is derived from
+    // it, so frame timing is exact and independent of scheduler jitter or read-burst size.
+    let mut fifo: Vec<f32> = Vec::with_capacity(read_buf.len() + ANALYSIS_HOP);
+    let mut samples_consumed: u64 = 0;
+    // Fixed per-frame delta for time-constant smoothing (attack/release EMAs, onset decay).
+    let dt = ANALYSIS_HOP as f32 / sample_rate;
 
     loop {
         if shutdown.load(Ordering::Acquire) {
@@ -534,97 +547,107 @@ fn audio_thread(
 
         let to_read = available.min(read_buf.len());
         let read = ring.read(&mut read_buf[..to_read]);
-
-        // Mirror samples to recording ring (lock-free, no overhead if nobody reads)
-        if read > 0 {
-            recording_ring.push(&read_buf[..read]);
-        }
         if read == 0 {
             continue;
         }
 
-        let now = Instant::now();
-        let dt = now.duration_since(last_time).as_secs_f32();
-        let timestamp = now.duration_since(start_time).as_secs_f64();
-        last_time = now;
+        // Mirror samples to recording ring (lock-free, no overhead if nobody reads).
+        recording_ring.push(&read_buf[..read]);
+        // Queue for hop-aligned analysis.
+        fifo.extend_from_slice(&read_buf[..read]);
 
-        // Multi-resolution FFT + feature extraction
-        let mut raw = analyzer.analyze(&read_buf[..read]);
+        // Process every complete hop the read produced (>=2 when catching up after a stall).
+        let mut offset = 0;
+        while fifo.len() - offset >= ANALYSIS_HOP {
+            let hop = &fifo[offset..offset + ANALYSIS_HOP];
+            offset += ANALYSIS_HOP;
+            samples_consumed += ANALYSIS_HOP as u64;
+            let timestamp = samples_consumed as f64 / sample_rate as f64;
 
-        // A10 (#1461): perceptual loudness on the fresh capture block (each sample once,
-        // not the analyzer's overlapping window). Fields are Passthrough, so — like the
-        // beat block — they survive normalize/smooth unrescaled.
-        let loud = loudness_meter.process(&read_buf[..read]);
-        raw.loudness_m = loud.m;
-        raw.loudness_s = loud.s;
-        raw.loudness_trend = loud.trend;
+            // Multi-resolution FFT + feature extraction. The analyzer shifts this hop into
+            // its 4096-sample window, so consecutive hops overlap 87.5%.
+            let mut raw = analyzer.analyze(hop);
 
-        // A11 (#1462): key detection on the fresh CQT chroma, before normalization
-        // rescales it. Key fields are Passthrough, so they survive normalize/smooth.
-        let key_result = key_detector.process(&raw.chroma, dt);
-        raw.key_class = key_result.key_class;
-        raw.key_is_minor = key_result.is_minor;
-        raw.key_confidence = key_result.confidence;
+            // A10 (#1461): perceptual loudness on the fresh hop (each sample once). Fields
+            // are Passthrough, so — like the beat block — they survive normalize/smooth
+            // unrescaled.
+            let loud = loudness_meter.process(hop);
+            raw.loudness_m = loud.m;
+            raw.loudness_s = loud.s;
+            raw.loudness_trend = loud.trend;
 
-        // A12 (#1463): capture pre-normalization chroma + per-band flux for the downbeat
-        // tracker. The adaptive normalizer rescales chroma per-bin, which would distort the
-        // inter-beat chord-change magnitude, so snapshot both before normalize().
-        let pre_norm_chroma = raw.chroma;
-        let band_flux = analyzer.band_flux_3();
+            // A11 (#1462): key detection on the fresh CQT chroma, before normalization
+            // rescales it. Key fields are Passthrough, so they survive normalize/smooth.
+            let key_result = key_detector.process(&raw.chroma, dt);
+            raw.key_class = key_result.key_class;
+            raw.key_is_minor = key_result.is_minor;
+            raw.key_confidence = key_result.confidence;
 
-        // Adaptive normalization (replaces fixed gains)
-        raw = normalizer.normalize(&raw);
+            // A12 (#1463): capture pre-normalization chroma + per-band flux for the downbeat
+            // tracker. The adaptive normalizer rescales chroma per-bin, which would distort
+            // the inter-beat chord-change magnitude, so snapshot both before normalize().
+            let pre_norm_chroma = raw.chroma;
+            let band_flux = analyzer.band_flux_3();
 
-        // Beat detection (on raw magnitude spectra)
-        let beat_result = beat_detector.process(
-            analyzer.bass_magnitude(),
-            analyzer.mid_magnitude(),
-            analyzer.high_magnitude(),
-            raw.rms,
-            timestamp,
-        );
-        raw.onset = beat_result.onset_strength;
-        raw.beat = beat_result.beat;
-        raw.beat_phase = beat_result.beat_phase;
-        raw.bpm = beat_result.bpm / 300.0; // normalize to 0-1
-        raw.beat_strength = beat_result.beat_strength;
+            // Adaptive normalization (replaces fixed gains)
+            raw = normalizer.normalize(&raw);
 
-        // Count beats in an atomic so the consumer can't miss a 1-frame pulse
-        // when the channel overflows or it drains multiple frames at once.
-        if beat_result.beat > 0.5 {
-            beat_counter.fetch_add(1, Ordering::Relaxed);
+            // Beat detection (on raw magnitude spectra)
+            let beat_result = beat_detector.process(
+                analyzer.bass_magnitude(),
+                analyzer.mid_magnitude(),
+                analyzer.high_magnitude(),
+                raw.rms,
+                timestamp,
+            );
+            raw.onset = beat_result.onset_strength;
+            raw.beat = beat_result.beat;
+            raw.beat_phase = beat_result.beat_phase;
+            raw.bpm = beat_result.bpm / 300.0; // normalize to 0-1
+            raw.beat_strength = beat_result.beat_strength;
+
+            // Count beats in an atomic so the consumer can't miss a 1-frame pulse
+            // when the channel overflows or it drains multiple frames at once.
+            if beat_result.beat > 0.5 {
+                beat_counter.fetch_add(1, Ordering::Relaxed);
+            }
+
+            // A12 (#1463): bar/downbeat/meter tracking. Runs every frame (advances bar_phase
+            // on the audio clock, integrates flux); heavy scoring gates on a fired beat.
+            let db = downbeat_tracker.process(
+                &beat_result,
+                band_flux,
+                raw.rms,
+                &pre_norm_chroma,
+                timestamp,
+            );
+            raw.downbeat = db.downbeat;
+            raw.bar_phase = db.bar_phase;
+            raw.beat_in_bar = db.beat_in_bar;
+            // Counter-back the downbeat trigger, same as `beat`, so a 1-frame pulse survives.
+            if db.downbeat > 0.5 {
+                downbeat_counter.fetch_add(1, Ordering::Relaxed);
+            }
+
+            // Smoothing (per-feature asymmetric EMA; beat/beat_phase pass through)
+            let smoothed = smoother.smooth(&raw, dt);
+
+            // A17 (#1468): sample the render-facing spectrum + mel column from the analyzer's
+            // fresh magnitude, so all three ride the same frame across the channel.
+            let frame = AudioFrame {
+                features: smoothed,
+                spectrum: Box::new(analyzer.log_spectrum_512()),
+                mel: Box::new(analyzer.spectrogram_column()),
+            };
+
+            // Non-blocking send; drop if main thread is behind
+            let _ = tx.try_send(frame);
         }
 
-        // A12 (#1463): bar/downbeat/meter tracking. Runs every frame (advances bar_phase on
-        // the audio clock, integrates flux); heavy scoring gates on a fired beat internally.
-        let db = downbeat_tracker.process(
-            &beat_result,
-            band_flux,
-            raw.rms,
-            &pre_norm_chroma,
-            timestamp,
-        );
-        raw.downbeat = db.downbeat;
-        raw.bar_phase = db.bar_phase;
-        raw.beat_in_bar = db.beat_in_bar;
-        // Counter-back the downbeat trigger, same as `beat`, so a 1-frame pulse survives.
-        if db.downbeat > 0.5 {
-            downbeat_counter.fetch_add(1, Ordering::Relaxed);
+        // Drop the samples we consumed; keep the sub-hop remainder for next time.
+        if offset > 0 {
+            fifo.drain(..offset);
         }
-
-        // Smoothing (per-feature asymmetric EMA; beat/beat_phase pass through)
-        let smoothed = smoother.smooth(&raw, dt);
-
-        // A17 (#1468): sample the render-facing spectrum + mel column from the analyzer's
-        // fresh magnitude, so all three ride the same frame across the channel.
-        let frame = AudioFrame {
-            features: smoothed,
-            spectrum: Box::new(analyzer.log_spectrum_512()),
-            mel: Box::new(analyzer.spectrogram_column()),
-        };
-
-        // Non-blocking send; drop if main thread is behind
-        let _ = tx.try_send(frame);
     }
 }
 

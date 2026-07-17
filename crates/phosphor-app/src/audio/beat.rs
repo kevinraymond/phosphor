@@ -96,6 +96,10 @@ impl CircularBuffer {
         }
     }
 
+    // Retained stats-utility sibling of `median`/`mad`/`max` (has its own unit test). Its
+    // prod caller was the tempo estimator's runtime frame-timing average, removed in A5
+    // (#1456) now that the analysis hop is fixed.
+    #[allow(dead_code)]
     fn mean(&self) -> f64 {
         if self.count == 0 {
             return 0.0;
@@ -385,11 +389,8 @@ struct TempoEstimator {
     bpm_range: (f32, f32),
 
     onset_history: CircularBuffer,
-    frame_time_history: CircularBuffer,
     frame_rate: f64,
     frame_time: f64,
-    initial_frame_time: f64,
-    last_time: f64,
     frame_count: u32,
 
     current_bpm: f64,
@@ -422,11 +423,8 @@ impl TempoEstimator {
         Self {
             bpm_range: (40.0, 300.0),
             onset_history: CircularBuffer::new(history_size),
-            frame_time_history: CircularBuffer::new(30),
             frame_rate,
             frame_time,
-            initial_frame_time: frame_time,
-            last_time: 0.0,
             frame_count: 0,
             current_bpm: 0.0,
             current_confidence: 0.0,
@@ -441,23 +439,12 @@ impl TempoEstimator {
     }
 
     /// Update tempo estimate. Returns (bpm, confidence, period_seconds).
-    fn update(&mut self, onset_value: f64, timestamp: f64) -> (f64, f64, f64) {
-        // Track frame timing
-        if self.last_time > 0.0 {
-            let dt = timestamp - self.last_time;
-            if dt > 0.0 && dt < 0.1 {
-                self.frame_time_history.push(dt);
-                if self.frame_time_history.len() >= 10 {
-                    let measured = self.frame_time_history.mean();
-                    let lo = self.initial_frame_time * 0.5;
-                    let hi = self.initial_frame_time * 2.0;
-                    self.frame_time = measured.clamp(lo, hi);
-                    self.frame_rate = 1.0 / self.frame_time;
-                }
-            }
-        }
-        self.last_time = timestamp;
-
+    ///
+    /// A5 (#1456): the analysis hop is fixed (`ANALYSIS_HOP` samples), so `frame_rate` and
+    /// `frame_time` are exact from construction — the old runtime re-estimation of frame
+    /// timing from wall-clock `timestamp` deltas (a workaround for the jittery variable
+    /// hop) is gone, and with it this stage's dependence on `timestamp`.
+    fn update(&mut self, onset_value: f64) -> (f64, f64, f64) {
         self.onset_history.push(onset_value);
         self.frame_count += 1;
 
@@ -947,8 +934,10 @@ pub struct BeatDetector {
 
 impl BeatDetector {
     pub fn new(sample_rate: f32) -> Self {
-        // Approximate frame rate (~100 Hz for 10ms audio loop)
-        let frame_rate = 100.0;
+        // A5 (#1456): exact frame rate from the fixed analysis hop (sr / ANALYSIS_HOP),
+        // e.g. ~86.1 Hz @ 44.1 kHz. Replaces the old hardcoded ~100 Hz approximation that
+        // the tempo estimator then had to correct at runtime.
+        let frame_rate = sample_rate as f64 / super::ANALYSIS_HOP as f64;
 
         let history_size = (0.5 * frame_rate) as usize; // ~0.5s
         let long_term_size = (4.0 * frame_rate) as usize; // ~4s
@@ -1003,7 +992,7 @@ impl BeatDetector {
         }
 
         // Stage 2: Tempo estimation
-        let (bpm, confidence, period_s) = self.tempo_estimator.update(combined_flux, timestamp);
+        let (bpm, confidence, period_s) = self.tempo_estimator.update(combined_flux);
 
         // Stage 3: Beat scheduling
         self.beat_scheduler.update_tempo(bpm, period_s, confidence);
