@@ -288,17 +288,19 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
     // ---- Reserved tail (batched ABI bump #1629, "v3") — 0.0 until each detector lands ----
     // Conservative placeholders (Passthrough/Scale/gently-smoothed) like the v2 tail above;
     // each DSP fill sets the final policy when it wires real data (CPU-side only — no ABI churn).
-    // A14 HPSS (#1465): the analyzer dB-maps these to 0..1 in-module, so pass them through the
-    // normalizer; gently smoothed, Scale toward 0 on silence.
+    // A14 HPSS (#1465): the two energies are raw masked-power levels — Adaptive, so the gated
+    // percentile normalizer ranges them like the frequency bands (quiet music still fills 0..1).
+    // `harmonic_ratio` is already a level-invariant 0..1 balance the analyzer neutral-gates on
+    // silence, so it passes through. All three Scale toward 0 on a stalled device.
     def(
         "percussive_energy",
-        Passthrough,
+        Adaptive,
         SmoothParams::ar(0.03, 0.15),
         Scale,
     ),
     def(
         "harmonic_energy",
-        Passthrough,
+        Adaptive,
         SmoothParams::ar(0.03, 0.15),
         Scale,
     ),
@@ -469,18 +471,19 @@ mod tests {
     /// - **Passthrough** (producer-owned): kick (8, single-normalized by the A3 #1454
     ///   detector); the beat block (15..=19); chroma + dominant_chroma + loudness + key +
     ///   bar clock, which happen to be contiguous (33..=54); the A13 stereo block (55..=57,
-    ///   producer-remapped to 0..1); the A18 structure block (58..=60); and the v3 (#1629)
-    ///   reserved tail — A14 HPSS (61..=63, dB-mapped in-module), A15 pitch (64..=65), A16
-    ///   contrast (66..=73) — all producer-scaled to 0..1, so 33..=73 contiguous.
-    /// - **Adaptive** (gated percentile ranging): everything else — the 7 bands, rms (7),
-    ///   and flux (10).
+    ///   producer-remapped to 0..1); the A18 structure block (58..=60); and most of the v3 (#1629)
+    ///   reserved tail — `harmonic_ratio` (63, a level-invariant balance), A15 pitch (64..=65),
+    ///   A16 contrast (66..=73) — all producer-scaled to 0..1.
+    /// - **Adaptive** (gated percentile ranging): the energy-like features — the 7 bands, rms (7),
+    ///   flux (10), and the A14 HPSS energies `percussive_energy` / `harmonic_energy` (61, 62),
+    ///   which are raw masked-power levels of unknown absolute scale.
     #[test]
     fn norm_policy_assignment() {
         for (i, def) in FEATURES.iter().enumerate() {
             let expected = match i {
                 9 | 11 | 12 | 13 | 14 => FixedRange,
                 20..=32 => ZScore,
-                8 | 15..=19 | 33..=73 => Passthrough,
+                8 | 15..=19 | 33..=60 | 63..=73 => Passthrough,
                 _ => Adaptive,
             };
             assert_eq!(

@@ -258,10 +258,10 @@ Fosfora extracts **74 audio features** from multi-resolution FFT analysis. The c
 - **pan / stereo_width / stereo_corr** — stereo field
 - **section_novelty / buildup / drop** — song-structure cues
 
-The last three groups were reserved by the shader ABI v3 bump and read `0.0` until their detectors land:
-- **percussive_energy / harmonic_energy / harmonic_ratio** — harmonic/percussive split (A14)
-- **pitch / pitch_confidence** — monophonic pitch estimate (A15)
-- **contrast_0 … contrast_5 / contrast_mean / timbre_flux** — spectral contrast + timbre dynamics (A16)
+The remaining three groups were reserved by the shader ABI v3 bump. The harmonic/percussive split is live as of the A14 detector; pitch and spectral contrast read `0.0` until their detectors land:
+- **percussive_energy / harmonic_energy / harmonic_ratio** — harmonic/percussive split (A14): drum-vs-tone energy and their 0–1 balance, for routing transients to strobes and sustained tones to color washes
+- **pitch / pitch_confidence** — monophonic pitch estimate (A15, reserved)
+- **contrast_0 … contrast_5 / contrast_mean / timbre_flux** — spectral contrast + timbre dynamics (A16, reserved)
 
 Alongside these, three live audio *textures* let effects read the signal directly, for oscilloscopes, spectrum bars and waterfalls — sample them with the built-in helpers:
 - **`waveform(x)`** → `vec2f` (min, max) of the raw PCM at horizontal position `x` — a min/max-decimated, zero-crossing-triggered scope trace.
@@ -329,10 +329,10 @@ downbeat, bar_phase, beat_in_bar              // bar-level clock
 pan, stereo_width, stereo_corr                // stereo field
 section_novelty, buildup, drop                // song-structure cues
 
-// Reserved by shader ABI v3 — read 0.0 until their detectors land
-percussive_energy, harmonic_energy, harmonic_ratio  // harmonic/percussive split (A14)
-pitch, pitch_confidence                             // monophonic pitch (A15)
-contrast_0, contrast_1, contrast_2, contrast_3,     // spectral contrast (A16)
+// Shader ABI v3 tail
+percussive_energy, harmonic_energy, harmonic_ratio  // harmonic/percussive split (A14, live)
+pitch, pitch_confidence                             // monophonic pitch (A15, reserved — reads 0.0)
+contrast_0, contrast_1, contrast_2, contrast_3,     // spectral contrast (A16, reserved — reads 0.0)
 contrast_4, contrast_5, contrast_mean, timbre_flux
 
 // Audio textures — read the signal directly

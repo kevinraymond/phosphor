@@ -4,6 +4,7 @@ pub mod capture;
 pub mod chroma;
 pub mod downbeat;
 pub mod features;
+pub mod hpss;
 pub mod interp;
 pub mod key;
 pub mod loudness;
@@ -67,6 +68,7 @@ use self::beat::BeatDetector;
 pub use self::beat::{TempoCommand, TempoConfig, TempoControl, TempoPreset};
 use self::capture::{AudioCapture, RingBuffer};
 use self::downbeat::DownbeatTracker;
+use self::hpss::HpssAnalyzer;
 use self::interp::FeatureInterpolator;
 use self::key::KeyDetector;
 use self::loudness::LoudnessMeter;
@@ -1152,6 +1154,7 @@ fn audio_thread(
     let mut structure_tracker = StructureTracker::new(sample_rate / ANALYSIS_HOP as f32);
     let mut smoother = FeatureSmoother::new();
     let mut stereo_analyzer = StereoAnalyzer::new();
+    let mut hpss_analyzer = HpssAnalyzer::new();
     // A13 (#1464): the capture ring yields interleaved L,R. `read_buf` reads it raw; `mono_scratch`
     // holds the mono mix derived from it (fed to the recording mirror + FFT, exactly as before).
     let mut read_buf = vec![0.0f32; 8192]; // 4096 stereo frames; larger for the 4096-pt FFT
@@ -1232,6 +1235,15 @@ fn audio_thread(
             raw.pan = stereo_field.pan;
             raw.stereo_width = stereo_field.stereo_width;
             raw.stereo_corr = stereo_field.stereo_corr;
+
+            // A14 (#1465): harmonic/percussive split from the medium (1024-pt) magnitude. The two
+            // energies are raw levels set before normalize() so the adaptive normalizer ranges and
+            // silence-gates them like the bands (Adaptive); `harmonic_ratio` is a level-invariant
+            // 0..1 balance (Passthrough), neutral-gated inside the analyzer on `loud_silent`.
+            let hpss = hpss_analyzer.process(analyzer.mid_magnitude(), loud_silent);
+            raw.percussive_energy = hpss.percussive_energy;
+            raw.harmonic_energy = hpss.harmonic_energy;
+            raw.harmonic_ratio = hpss.harmonic_ratio;
 
             // A3 (#1454): fill `kick` now that the silence flag is known — a single
             // detector-owned P95 normalizer, gated so noise-floor log-flux can't fire. Set

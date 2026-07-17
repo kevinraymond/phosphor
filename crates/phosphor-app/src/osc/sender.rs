@@ -85,6 +85,10 @@ impl OscSender {
         self.send_float("/phosphor/audio/pan", f.pan * 2.0 - 1.0);
         self.send_float("/phosphor/audio/stereo_width", f.stereo_width);
         self.send_float("/phosphor/audio/stereo_corr", f.stereo_corr * 2.0 - 1.0);
+        // A14 HPSS (#1465): percussive / harmonic energies (0..1) and their balance (0..1).
+        self.send_float("/phosphor/audio/percussive_energy", f.percussive_energy);
+        self.send_float("/phosphor/audio/harmonic_energy", f.harmonic_energy);
+        self.send_float("/phosphor/audio/harmonic_ratio", f.harmonic_ratio);
     }
 
     /// Send current state (active layer, effect name).
