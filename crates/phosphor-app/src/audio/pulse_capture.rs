@@ -181,7 +181,14 @@ pub struct PulseCapture {
 }
 
 /// Query PulseAudio for the default sink's monitor source name.
-fn find_monitor_source() -> Option<String> {
+///
+/// `None` on any of: `pactl` missing, non-zero exit, or empty output — callers fall back to
+/// the PA default source. Forks a subprocess, so it must never run on the render thread.
+///
+/// Visible to the parent module for A9b (#1617), which polls it to notice a default-sink
+/// change; that poll is the reason the hit is logged at `debug` rather than `info`, since it
+/// now runs on a 5s cadence rather than once per device open.
+pub(super) fn find_monitor_source() -> Option<String> {
     let output = std::process::Command::new("pactl")
         .arg("get-default-sink")
         .output()
@@ -194,7 +201,7 @@ fn find_monitor_source() -> Option<String> {
         return None;
     }
     let monitor = format!("{sink}.monitor");
-    log::info!("PulseAudio default sink monitor: {monitor}");
+    log::debug!("PulseAudio default sink monitor: {monitor}");
     Some(monitor)
 }
 

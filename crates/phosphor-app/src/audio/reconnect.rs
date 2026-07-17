@@ -144,6 +144,27 @@ impl ReconnectState {
         self.reset();
     }
 
+    /// Whether auto-reconnect is on. [`Self::poll`] gates on this itself, but A9b's
+    /// default-sink trigger (#1617) reaches [`Self::note_reopen_started`] without going
+    /// through `poll`, so it has to ask.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Begin an episode that `poll` did not initiate — A9b's default-sink change (#1617),
+    /// which is neither a stall nor a death and so has no [`Health`] signal to poll on.
+    ///
+    /// Mirrors the `Healthy` + `is_dead` arm of [`Self::poll`]. Two things carry over from it
+    /// deliberately: `Phase::Opening` is what stops the caller re-firing the reopen on every
+    /// rendered frame (`poll_health` runs at 60-144+Hz), and `attempt = 1` puts the new sink
+    /// on the same backoff ladder — so a sink we cannot open retries rather than giving up on
+    /// the first failure.
+    pub fn note_reopen_started(&mut self) {
+        self.attempt = 1;
+        self.phase = Phase::Opening;
+        self.giveup_pending = false;
+    }
+
     /// Callbacks advanced — the backend is alive. No-op while a reopen is in flight, so a late
     /// callback from the outgoing backend cannot cancel it.
     pub fn note_healthy(&mut self) {

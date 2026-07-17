@@ -108,6 +108,11 @@ struct OpenedBackend {
 /// How long `callback_count` may stay frozen before the watchdog calls it a stall.
 const STALL_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// A9b (#1617): how often to ask `pactl` which sink is default. Each poll forks a subprocess,
+/// so this is a cadence rather than a per-frame check; it matches `list_devices`' rescan gap.
+#[cfg(target_os = "linux")]
+const SINK_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
 /// A9 (#1460): what the status bar's AUD dot shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioIndicator {
@@ -301,6 +306,17 @@ pub struct AudioSystem {
     /// A9 (#1460): what `pending_open` is trying to reopen, so the landing `adopt` can name it
     /// (a cpal open silently falls back to the default device, so the result cannot say).
     reopen_target: Option<String>,
+    /// A9b (#1617): newest `<sink>.monitor` the background sink poll has seen, `None` until
+    /// `pactl` first answers. Linux/Pulse only — `find_monitor_source` is Pulse-specific, and
+    /// WASAPI's equivalent is a follow-up (finding #1616).
+    #[cfg(target_os = "linux")]
+    default_sink: Arc<Mutex<Option<String>>>,
+    /// A9b (#1617): whether a background sink poll is already in flight.
+    #[cfg(target_os = "linux")]
+    sink_poll_in_flight: Arc<AtomicBool>,
+    /// A9b (#1617): when the last sink poll was spawned.
+    #[cfg(target_os = "linux")]
+    last_sink_poll: Instant,
 }
 
 impl AudioSystem {
@@ -430,6 +446,16 @@ impl AudioSystem {
                     reconnect: reconnect::ReconnectState::new(true),
                     pending_open: None,
                     reopen_target: None,
+                    #[cfg(target_os = "linux")]
+                    default_sink: Arc::new(Mutex::new(None)),
+                    #[cfg(target_os = "linux")]
+                    sink_poll_in_flight: Arc::new(AtomicBool::new(false)),
+                    // Backdated like `last_scan`, so the first `poll_health` seeds the cache
+                    // rather than waiting out an interval first.
+                    #[cfg(target_os = "linux")]
+                    last_sink_poll: Instant::now()
+                        .checked_sub(Duration::from_secs(60))
+                        .expect("60s subtraction from now cannot underflow"),
                 }
             }
             Err(e) => {
@@ -481,6 +507,14 @@ impl AudioSystem {
                     reconnect: reconnect::ReconnectState::new(true),
                     pending_open: None,
                     reopen_target: None,
+                    #[cfg(target_os = "linux")]
+                    default_sink: Arc::new(Mutex::new(None)),
+                    #[cfg(target_os = "linux")]
+                    sink_poll_in_flight: Arc::new(AtomicBool::new(false)),
+                    #[cfg(target_os = "linux")]
+                    last_sink_poll: Instant::now()
+                        .checked_sub(Duration::from_secs(60))
+                        .expect("60s subtraction from now cannot underflow"),
                 }
             }
         }
@@ -581,6 +615,9 @@ impl AudioSystem {
         self.cb_changed_at = Instant::now();
         self.stall_reported = false;
         // Keep existing cached_devices/scan_in_flight/last_scan — no need to re-scan on switch
+        // A9b's default_sink/sink_poll_in_flight/last_sink_poll (#1617) are unswapped for the
+        // same reason, and one more: the cached sink is what *triggered* this adopt, so keeping
+        // it is what stops the fresh `device_name` re-firing against a stale `None`.
         // `self.reconnect` is likewise deliberately unswapped (A9 #1460): an episode spans the
         // backends it cycles through, so `new`'s fresh state must not clobber the live one.
         // `new` is dropped here — its Drop is a no-op since thread_handle is None and shutdown is true
@@ -863,6 +900,80 @@ impl AudioSystem {
             .ok();
     }
 
+    /// A9b (#1617): notice that the PulseAudio/PipeWire default sink changed, and follow it.
+    ///
+    /// This is not a stall and not a death, so the watchdog in `poll_health` structurally
+    /// cannot see it: PipeWire silently *migrates* a `pa_simple` stream to the new default's
+    /// monitor, so reads keep flowing at 43/s and `callback_count` keeps advancing while we
+    /// capture the wrong device (finding #1614, runtime-verified). The sink name is the only
+    /// signal there is, so poll it.
+    ///
+    /// Reopening needs no new machinery: `current_target` returns `None` on this backend, so
+    /// `start_reopen` re-runs `find_monitor_source` and lands on whatever is default *now*.
+    ///
+    /// Gated on `using_native_backend` for two independent reasons: `device_name` only holds a
+    /// PA monitor source on that path (it is a cpal device name otherwise, so the comparison
+    /// would be nonsense), and a user who explicitly picked a device did not ask to follow the
+    /// system default. Reuses the `auto_reconnect` setting rather than adding a knob — picking
+    /// the native backend already means "capture whatever my system is playing", and following
+    /// the default sink is that choice's literal meaning.
+    ///
+    /// The poll runs on a worker because `pactl` is a subprocess fork; this only ever reads the
+    /// cached answer. Polling is the cheap half of #1617 — the event-driven version wants
+    /// `pa_context_subscribe` on `PA_SUBSCRIPTION_MASK_SERVER`, which needs ~12 more dlopen'd
+    /// symbols from the async API that this simple-API backend does not bind.
+    #[cfg(target_os = "linux")]
+    fn poll_default_sink(&mut self) -> Option<String> {
+        if !self.using_native_backend
+            || !self.reconnect.is_enabled()
+            || self.reconnect.is_reconnecting()
+            || self.pending_open.is_some()
+        {
+            return None;
+        }
+
+        if self.last_sink_poll.elapsed() > SINK_POLL_INTERVAL
+            && !self.sink_poll_in_flight.swap(true, Ordering::AcqRel)
+        {
+            let cell = self.default_sink.clone();
+            let flag = self.sink_poll_in_flight.clone();
+            thread::Builder::new()
+                .name("phosphor-sinkpoll".into())
+                .spawn(move || {
+                    let found = pulse_capture::find_monitor_source();
+                    // Recover from a poisoned mutex like `list_devices` does — a sink name is
+                    // non-critical, and a panic here must not take the watchdog down with it.
+                    *cell.lock().unwrap_or_else(|e| e.into_inner()) = found;
+                    flag.store(false, Ordering::Release);
+                })
+                .ok();
+            self.last_sink_poll = Instant::now();
+        }
+
+        let current = self
+            .default_sink
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()?;
+        if current == self.device_name {
+            return None;
+        }
+
+        log::info!(
+            "Default sink changed: {} -> {current} — following",
+            self.device_name
+        );
+        self.reconnect.note_reopen_started();
+        self.start_reopen();
+        Some(format!("Audio output changed — following to {current}"))
+    }
+
+    /// Non-Linux: no `pactl`, and WASAPI's equivalent is a follow-up (finding #1616).
+    #[cfg(not(target_os = "linux"))]
+    fn poll_default_sink(&mut self) -> Option<String> {
+        None
+    }
+
     /// Land a completed reopen, if one is in flight. Returns a message for the status toast.
     fn poll_pending_open(&mut self) -> Option<String> {
         let rx = self.pending_open.as_ref()?;
@@ -903,6 +1014,15 @@ impl AudioSystem {
         // Land any completed reopen first, so this frame's state machine sees the result.
         if let Some(msg) = self.poll_pending_open() {
             log::info!("{msg}");
+            return Some(msg);
+        }
+
+        // A9b (#1617) must run *before* the healthy-path return below, not after: a migrated
+        // stream keeps delivering (finding #1614), so a default-sink change only ever reaches
+        // this function with `callback_count` advancing — i.e. down the one path that returns
+        // early. Placing it after would make it dead code in exactly the case it exists for.
+        if let Some(msg) = self.poll_default_sink() {
+            self.last_error = Some(msg.clone());
             return Some(msg);
         }
 
