@@ -147,6 +147,10 @@ impl ReconnectState {
     /// Whether auto-reconnect is on. [`Self::poll`] gates on this itself, but A9b's
     /// default-sink trigger (#1617) reaches [`Self::note_reopen_started`] without going
     /// through `poll`, so it has to ask.
+    ///
+    /// A9b's only caller is Linux-gated, so this is dead code on other platforms until the
+    /// WASAPI default-device follow-up (finding #1616) gives it a second caller.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
@@ -159,6 +163,9 @@ impl ReconnectState {
     /// rendered frame (`poll_health` runs at 60-144+Hz), and `attempt = 1` puts the new sink
     /// on the same backoff ladder — so a sink we cannot open retries rather than giving up on
     /// the first failure.
+    ///
+    /// Dead code off Linux for the same reason as [`Self::is_enabled`].
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub fn note_reopen_started(&mut self) {
         self.attempt = 1;
         self.phase = Phase::Opening;
