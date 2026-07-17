@@ -28,8 +28,7 @@ const SILENCE_LUFS: f32 = -70.0;
 /// excess is a strong riser.
 const TREND_RANGE_LU: f32 = 8.0;
 /// Momentary loudness below this (LUFS) counts as silence for gating (consumed by the
-/// onset detector in A6 #1457). −55 LUFS is well below any musical content.
-#[allow(dead_code)] // wired into the onset gate in A6 (#1457)
+/// onset detector, A6 #1457). −55 LUFS is well below any musical content.
 const SILENCE_GATE_LUFS: f32 = -55.0;
 
 /// A single biquad section in Direct Form I. Coefficients assume `a0 == 1`.
@@ -135,7 +134,6 @@ pub struct LoudnessMeter {
     sum_m: f64,
     sum_s: f64,
     /// Most recent momentary loudness in LUFS (for the silence gate).
-    #[allow(dead_code)] // read by `is_silent`, wired into the onset gate in A6 (#1457)
     last_m_lufs: f32,
 }
 
@@ -175,7 +173,6 @@ impl LoudnessMeter {
 
     /// Momentary loudness is below the silence gate (−55 LUFS). Consumed by the onset
     /// detector so all stages gate on the same perceptual threshold (A6 #1457).
-    #[allow(dead_code)] // wired into the onset gate in A6 (#1457)
     pub fn is_silent(&self) -> bool {
         self.last_m_lufs < SILENCE_GATE_LUFS
     }

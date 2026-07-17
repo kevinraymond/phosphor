@@ -116,21 +116,40 @@ impl CircularBuffer {
 // Stage 1: Multi-band onset detection
 // ---------------------------------------------------------------------------
 
-/// Frequency band definition: (lo_hz, hi_hz, weight)
-const ONSET_BANDS: [(f32, f32, f32); 4] = [
-    (20.0, 80.0, 0.4),     // sub-bass (kick drums)
-    (80.0, 250.0, 0.3),    // bass (bass guitar/synth)
-    (500.0, 2000.0, 0.2),  // mid (snares/vocals)
-    (2000.0, 4000.0, 0.1), // high-mid (hi-hats/cymbals)
-];
+/// SuperFlux onset detection (A6 #1457): a log-magnitude filterbank spectral flux with a
+/// frequency **maximum filter** applied to the reference frame (Böck & Widmer, DAFx 2013).
+/// The max filter lets a partial drift ±`SUPERFLUX_MAX_BINS` bands between frames without
+/// registering flux, which suppresses the phantom onsets that plain flux fires on vibrato
+/// and pitch slides. The bands are contiguous and log-spaced, so they cover 250–500 Hz —
+/// the snare/tom/male-vocal gap the old four-band detector left open.
+const N_ONSET_BANDS: usize = 64;
+const ONSET_F_MIN: f32 = 20.0;
+const ONSET_F_MAX: f32 = 16000.0;
+/// Frequency max-filter half-width, in bands, on the reference frame.
+const SUPERFLUX_MAX_BINS: usize = 1;
+/// Partition edges (Hz) splitting the bands into low / mid / high, and the weights that
+/// combine their mean flux. Preserves the old kick/bass-vs-snare-vs-hat balance; `mid` now
+/// also spans the reclaimed 250–500 Hz. Weights sum to 1.
+const ONSET_LOW_HZ: f32 = 250.0;
+const ONSET_HIGH_HZ: f32 = 2000.0;
+const ONSET_W_LOW: f64 = 0.60;
+const ONSET_W_MID: f64 = 0.28;
+const ONSET_W_HIGH: f64 = 0.12;
 
 struct OnsetDetector {
     sample_rate: f32,
     threshold_mult: f32,
-    silence_threshold: f32,
     threshold_ceiling: f32,
 
-    prev_mags: [Option<Vec<f64>>; 4],
+    /// `[lo_bin, hi_bin)` in the 4096-pt spectrum for each log band (computed once the
+    /// spectrum length is known), the partition (0=low,1=mid,2=high) each band belongs to,
+    /// and the band count per partition (for mean-flux normalization).
+    band_bins: Vec<(usize, usize)>,
+    band_partition: Vec<u8>,
+    partition_counts: [usize; 3],
+    /// Previous frame's per-band log-magnitude (the μ=1 reference the max filter runs over).
+    prev_log: Vec<f64>,
+
     onset_history: CircularBuffer,
     long_term_history: CircularBuffer,
     silent_frames: u32,
@@ -141,96 +160,113 @@ impl OnsetDetector {
         Self {
             sample_rate,
             threshold_mult: 2.0,
-            silence_threshold: 0.002,
             threshold_ceiling: 0.5,
-            prev_mags: [None, None, None, None],
+            band_bins: Vec::new(),
+            band_partition: Vec::new(),
+            partition_counts: [0; 3],
+            prev_log: Vec::new(),
             onset_history: CircularBuffer::new(history_size),
             long_term_history: CircularBuffer::new(long_term_size),
             silent_frames: 0,
         }
     }
 
-    fn bin_range(&self, lo_hz: f32, hi_hz: f32, fft_size: usize) -> (usize, usize) {
-        let bin_width = self.sample_rate / fft_size as f32;
-        let lo_bin = (lo_hz / bin_width).round().max(0.0) as usize;
-        let hi_bin = ((hi_hz / bin_width).round() as usize).min(fft_size / 2);
-        (lo_bin, hi_bin)
+    /// Build the log-spaced filterbank the first time we see the spectrum length. Each band
+    /// spans at least one FFT bin (adjacent low bands may overlap a shared bin, which is
+    /// harmless); its partition is decided by the band's geometric-centre frequency.
+    fn ensure_bands(&mut self, num_bins: usize) {
+        if self.band_bins.len() == N_ONSET_BANDS {
+            return;
+        }
+        let bin_hz = self.sample_rate / ((num_bins - 1) * 2) as f32;
+        let ratio = (ONSET_F_MAX / ONSET_F_MIN).powf(1.0 / N_ONSET_BANDS as f32);
+        self.band_bins.clear();
+        self.band_partition.clear();
+        self.partition_counts = [0; 3];
+        for b in 0..N_ONSET_BANDS {
+            let f_lo = ONSET_F_MIN * ratio.powi(b as i32);
+            let f_hi = ONSET_F_MIN * ratio.powi(b as i32 + 1);
+            let lo = (f_lo / bin_hz).floor() as usize;
+            let hi = ((f_hi / bin_hz).ceil() as usize).max(lo + 1).min(num_bins);
+            self.band_bins
+                .push((lo.min(num_bins.saturating_sub(1)), hi));
+            let centre = (f_lo * f_hi).sqrt();
+            let part = if centre < ONSET_LOW_HZ {
+                0u8
+            } else if centre < ONSET_HIGH_HZ {
+                1u8
+            } else {
+                2u8
+            };
+            self.band_partition.push(part);
+            self.partition_counts[part as usize] += 1;
+        }
+        self.prev_log.clear();
     }
 
-    /// Process multi-resolution spectra and return (is_onset, onset_strength, combined_flux).
+    /// Process the multi-resolution spectra and return (is_onset, onset_strength,
+    /// combined_flux). SuperFlux runs on the 4096-pt `bass_spectrum` (its fine, consistent
+    /// frequency resolution is what the max filter needs); `mid_spectrum`/`high_spectrum`
+    /// are part of the detector's interface but not consumed here. `loud_silent` is the
+    /// perceptual silence gate from the A10 loudness meter (replaces the old raw-RMS gate).
     fn process(
         &mut self,
-        bass_spectrum: &[f32], // 4096-pt FFT magnitudes (num_bins)
-        mid_spectrum: &[f32],  // 1024-pt FFT magnitudes
-        high_spectrum: &[f32], // 512-pt FFT magnitudes
-        rms: f32,
+        bass_spectrum: &[f32],  // 4096-pt FFT magnitudes (num_bins)
+        _mid_spectrum: &[f32],  // 1024-pt FFT magnitudes (unused by SuperFlux)
+        _high_spectrum: &[f32], // 512-pt FFT magnitudes (unused by SuperFlux)
+        loud_silent: bool,
     ) -> (bool, f32, f64) {
-        // Silence gate
-        if rms < self.silence_threshold {
+        // Unified perceptual silence gate (A10 #1461).
+        if loud_silent {
             self.silent_frames += 1;
             return (false, 0.0, 0.0);
         }
         self.silent_frames = 0;
 
-        // Map bands to spectra: sub-bass & bass → 4096, mid → 1024, high-mid → 512
-        let spectra: [&[f32]; 4] = [bass_spectrum, bass_spectrum, mid_spectrum, high_spectrum];
-        // Reconstruct fft_size from num_bins: num_bins = fft_size/2 + 1
-        let fft_sizes: [usize; 4] = [
-            (bass_spectrum.len() - 1) * 2,
-            (bass_spectrum.len() - 1) * 2,
-            (mid_spectrum.len() - 1) * 2,
-            (high_spectrum.len() - 1) * 2,
-        ];
+        self.ensure_bands(bass_spectrum.len());
 
-        let mut band_flux = [0.0f64; 4];
-
-        for (i, &(lo_hz, hi_hz, _weight)) in ONSET_BANDS.iter().enumerate() {
-            let spectrum = spectra[i];
-            let fft_size = fft_sizes[i];
-            let (lo_bin, hi_bin) = self.bin_range(lo_hz, hi_hz, fft_size);
-
-            if hi_bin <= lo_bin || hi_bin > spectrum.len() {
-                continue;
+        // Current per-band log magnitude.
+        let mut cur = vec![0.0f64; N_ONSET_BANDS];
+        for (b, &(lo, hi)) in self.band_bins.iter().enumerate() {
+            let hi = hi.min(bass_spectrum.len());
+            let mut e = 0.0f64;
+            for &m in &bass_spectrum[lo..hi] {
+                e += m as f64;
             }
-
-            // Log-magnitude spectral flux: better models human loudness perception
-            let current_mags: Vec<f64> = spectrum[lo_bin..hi_bin]
-                .iter()
-                .map(|&m| (m as f64 + 1e-10).ln())
-                .collect();
-
-            if let Some(ref prev) = self.prev_mags[i] {
-                if prev.len() == current_mags.len() {
-                    let count = current_mags.len().max(1) as f64;
-                    let flux: f64 = current_mags
-                        .iter()
-                        .zip(prev.iter())
-                        .map(|(&c, &p)| (c - p).max(0.0))
-                        .sum();
-                    band_flux[i] = flux / count;
-                }
-            }
-
-            self.prev_mags[i] = Some(current_mags);
+            cur[b] = (e + 1e-10).ln();
         }
 
-        // Weighted combination
-        let weight_sum: f32 = ONSET_BANDS.iter().map(|b| b.2).sum();
-        let combined_flux: f64 = band_flux
-            .iter()
-            .zip(ONSET_BANDS.iter())
-            .map(|(&flux, &(_, _, w))| flux * w as f64)
-            .sum::<f64>()
-            / weight_sum as f64;
+        // SuperFlux: half-wave-rectified difference against the frequency-max-filtered
+        // reference frame, accumulated per partition.
+        let mut part = [0.0f64; 3];
+        if self.prev_log.len() == N_ONSET_BANDS {
+            for b in 0..N_ONSET_BANDS {
+                let lo = b.saturating_sub(SUPERFLUX_MAX_BINS);
+                let hi = (b + SUPERFLUX_MAX_BINS).min(N_ONSET_BANDS - 1);
+                let mut reference = f64::MIN;
+                for &v in &self.prev_log[lo..=hi] {
+                    reference = reference.max(v);
+                }
+                let flux = (cur[b] - reference).max(0.0);
+                part[self.band_partition[b] as usize] += flux;
+            }
+        }
+        self.prev_log.clone_from(&cur);
+
+        // Mean flux per partition, weighted into one onset value (weights sum to 1).
+        let mean = |sum: f64, count: usize| if count > 0 { sum / count as f64 } else { 0.0 };
+        let combined_flux = ONSET_W_LOW * mean(part[0], self.partition_counts[0])
+            + ONSET_W_MID * mean(part[1], self.partition_counts[1])
+            + ONSET_W_HIGH * mean(part[2], self.partition_counts[2]);
 
         self.onset_history.push(combined_flux);
         self.long_term_history.push(combined_flux);
 
-        // Adaptive threshold: median + k * MAD
+        // Adaptive threshold: median + k * MAD (unchanged).
         let threshold = self.compute_threshold();
         let is_onset = combined_flux > threshold;
 
-        // Normalize onset strength to 0-1
+        // Normalize onset strength to 0-1.
         let recent_max = self.long_term_history.max();
         let onset_strength = (combined_flux / recent_max.max(1e-6)).min(1.0) as f32;
 
@@ -960,8 +996,9 @@ impl BeatDetector {
     /// - bass_spectrum: magnitude spectrum from 4096-pt FFT (num_bins)
     /// - mid_spectrum: magnitude spectrum from 1024-pt FFT
     /// - high_spectrum: magnitude spectrum from 512-pt FFT
-    /// - rms: current RMS energy
+    /// - rms: current RMS energy (only for the hard phase-freeze on near-silence)
     /// - timestamp: current time in seconds
+    /// - loud_silent: perceptual silence gate from the A10 loudness meter (#1457)
     pub fn process(
         &mut self,
         bass_spectrum: &[f32],
@@ -969,6 +1006,7 @@ impl BeatDetector {
         high_spectrum: &[f32],
         rms: f32,
         timestamp: f64,
+        loud_silent: bool,
     ) -> BeatResult {
         let dt = if self.last_timestamp > 0.0 {
             (timestamp - self.last_timestamp).max(0.0)
@@ -980,7 +1018,7 @@ impl BeatDetector {
         // Stage 1: Onset detection
         let (is_onset, onset_strength, combined_flux) =
             self.onset_detector
-                .process(bass_spectrum, mid_spectrum, high_spectrum, rms);
+                .process(bass_spectrum, mid_spectrum, high_spectrum, loud_silent);
 
         // Apply onset cooldown
         let mut onset_gated = is_onset;
@@ -1200,7 +1238,8 @@ mod tests {
         let bass = vec![0.0; 2049]; // 4096-pt fft
         let mid = vec![0.0; 513]; // 1024-pt fft
         let high = vec![0.0; 257]; // 512-pt fft
-        let (is_onset, strength, _) = od.process(&bass, &mid, &high, 0.0);
+        // Perceptual silence gate (A10): loud_silent = true → no onset.
+        let (is_onset, strength, _) = od.process(&bass, &mid, &high, true);
         assert!(!is_onset);
         assert!(approx_eq(strength, 0.0, 1e-6));
     }
@@ -1212,19 +1251,44 @@ mod tests {
         let mid = vec![0.0; 513];
         let high = vec![0.0; 257];
         for _ in 0..40 {
-            od.process(&bass, &mid, &high, 0.0);
+            od.process(&bass, &mid, &high, true);
         }
         assert!(od.is_sustained_silence());
     }
 
     #[test]
-    fn onset_bin_range() {
-        let od = OnsetDetector::new(44100.0, 50, 400);
-        let (lo, hi) = od.bin_range(20.0, 80.0, 4096);
-        // bin_width = 44100/4096 ≈ 10.77 Hz
-        // lo = round(20/10.77) = 2, hi = round(80/10.77) = 7
-        assert!((1..=3).contains(&lo), "lo={}", lo);
-        assert!((6..=8).contains(&hi), "hi={}", hi);
+    fn superflux_fires_on_broadband_onset_not_vibrato() {
+        // Bands are built on first process; a broadband magnitude jump must produce flux,
+        // while a partial merely sliding ±1 band (vibrato) must be suppressed by the freq
+        // max filter.
+        let mut od = OnsetDetector::new(44100.0, 50, 400);
+        let bins = 2049;
+        let (mid, high) = (vec![0.0; 513], vec![0.0; 257]);
+        let quiet = vec![0.01f32; bins];
+        // Warm up on a steady quiet spectrum (fills prev_log, no flux).
+        for _ in 0..4 {
+            od.process(&quiet, &mid, &high, false);
+        }
+        // Broadband jump → onset flux well above the quiet baseline.
+        let mut loud = vec![0.01f32; bins];
+        for m in loud.iter_mut().take(400).skip(4) {
+            *m = 3.0;
+        }
+        let (_, _, onset_flux) = od.process(&loud, &mid, &high, false);
+
+        // A single tone that slides up one FFT bin each frame (vibrato) should barely register.
+        let mut vib = OnsetDetector::new(44100.0, 50, 400);
+        let mut vibrato_flux = 0.0;
+        for k in 0..6 {
+            let mut s = vec![0.01f32; bins];
+            s[40 + k] = 3.0; // partial drifts one bin/frame
+            let (_, _, f) = vib.process(&s, &mid, &high, false);
+            vibrato_flux = f;
+        }
+        assert!(
+            onset_flux > vibrato_flux * 3.0,
+            "broadband onset ({onset_flux}) should dominate vibrato flux ({vibrato_flux})"
+        );
     }
 
     // ---- BeatScheduler tests ----
@@ -1295,7 +1359,7 @@ mod tests {
             }
 
             let rms = if is_kick_frame { 0.5 } else { 0.05 };
-            let result = detector.process(&bass, &mid, &high, rms, t);
+            let result = detector.process(&bass, &mid, &high, rms, t, false);
             last_bpm = result.bpm;
         }
 
