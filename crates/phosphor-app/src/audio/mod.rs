@@ -11,6 +11,7 @@ pub mod normalizer;
 pub mod pulse_capture;
 pub mod schema;
 pub mod smoother;
+pub mod structure;
 #[cfg(target_os = "windows")]
 pub mod wasapi_capture;
 
@@ -46,6 +47,7 @@ use self::key::KeyDetector;
 use self::loudness::LoudnessMeter;
 use self::normalizer::AdaptiveNormalizer;
 use self::smoother::FeatureSmoother;
+use self::structure::StructureTracker;
 
 /// Holds the capture backend, keeping it alive while the audio processing thread runs.
 /// On Linux, this may be either PulseAudio (preferred) or cpal/ALSA (fallback).
@@ -167,6 +169,12 @@ pub struct AudioSystem {
     downbeat_counter: Arc<AtomicU32>,
     /// Value of `downbeat_counter` at the end of the previous `latest_features()` poll.
     downbeats_seen: u32,
+    /// Total drops detected (A18 #1469), counted by the audio thread. Same counter-latch as
+    /// `beat`/`downbeat` so the 1-frame drop pulse survives channel overflow and the
+    /// drain-to-newest loop in `latest_features()`.
+    drop_counter: Arc<AtomicU32>,
+    /// Value of `drop_counter` at the end of the previous `latest_features()` poll.
+    drops_seen: u32,
     /// When the last frame arrived over the channel (for stale-feature decay).
     last_frame_at: Instant,
     /// When `latest_features()` was last polled (for frame-rate-independent decay).
@@ -192,6 +200,7 @@ impl AudioSystem {
         let recording_ring = Arc::new(RingBuffer::new());
         let beat_counter = Arc::new(AtomicU32::new(0));
         let downbeat_counter = Arc::new(AtomicU32::new(0));
+        let drop_counter = Arc::new(AtomicU32::new(0));
 
         match open_backend(device_name) {
             Ok(opened) => {
@@ -201,6 +210,7 @@ impl AudioSystem {
                 let rec_ring = recording_ring.clone();
                 let beats = beat_counter.clone();
                 let downbeats = downbeat_counter.clone();
+                let drops = drop_counter.clone();
 
                 let thread_handle = thread::Builder::new()
                     .name("phosphor-audio".into())
@@ -213,6 +223,7 @@ impl AudioSystem {
                             rec_ring,
                             beats,
                             downbeats,
+                            drops,
                         );
                     })
                     .expect("Failed to spawn audio thread");
@@ -242,6 +253,8 @@ impl AudioSystem {
                     beats_seen: 0,
                     downbeat_counter,
                     downbeats_seen: 0,
+                    drop_counter,
+                    drops_seen: 0,
                     last_frame_at: Instant::now(),
                     last_poll_at: Instant::now(),
                     last_cb_count: 0,
@@ -276,6 +289,8 @@ impl AudioSystem {
                     beats_seen: 0,
                     downbeat_counter,
                     downbeats_seen: 0,
+                    drop_counter,
+                    drops_seen: 0,
                     last_frame_at: Instant::now(),
                     last_poll_at: Instant::now(),
                     last_cb_count: 0,
@@ -323,6 +338,8 @@ impl AudioSystem {
         self.downbeat_counter =
             std::mem::replace(&mut new.downbeat_counter, Arc::new(AtomicU32::new(0)));
         self.downbeats_seen = self.downbeat_counter.load(Ordering::Relaxed);
+        self.drop_counter = std::mem::replace(&mut new.drop_counter, Arc::new(AtomicU32::new(0)));
+        self.drops_seen = self.drop_counter.load(Ordering::Relaxed);
         // Reset stale-feature decay and watchdog state for the fresh backend.
         self.last_frame_at = Instant::now();
         self.last_poll_at = Instant::now();
@@ -406,6 +423,7 @@ impl AudioSystem {
         // channel's field: any advance since the last poll means a beat fired.
         let beats_now = self.beat_counter.load(Ordering::Relaxed);
         let downbeats_now = self.downbeat_counter.load(Ordering::Relaxed);
+        let drops_now = self.drop_counter.load(Ordering::Relaxed);
         let result = self.latest.map(|mut features| {
             features.beat = if beats_now == self.beats_seen {
                 0.0
@@ -418,10 +436,17 @@ impl AudioSystem {
             } else {
                 1.0
             };
+            // Same latch for the A18 drop trigger (#1469).
+            features.drop = if drops_now == self.drops_seen {
+                0.0
+            } else {
+                1.0
+            };
             features
         });
         self.beats_seen = beats_now;
         self.downbeats_seen = downbeats_now;
+        self.drops_seen = drops_now;
 
         result
     }
@@ -515,6 +540,7 @@ fn audio_thread(
     recording_ring: Arc<RingBuffer>,
     beat_counter: Arc<AtomicU32>,
     downbeat_counter: Arc<AtomicU32>,
+    drop_counter: Arc<AtomicU32>,
 ) {
     let mut analyzer = FftAnalyzer::new(sample_rate);
     let mut normalizer = AdaptiveNormalizer::new();
@@ -522,6 +548,7 @@ fn audio_thread(
     let mut key_detector = KeyDetector::new(sample_rate);
     let mut loudness_meter = LoudnessMeter::new(sample_rate);
     let mut downbeat_tracker = DownbeatTracker::new();
+    let mut structure_tracker = StructureTracker::new(sample_rate / ANALYSIS_HOP as f32);
     let mut smoother = FeatureSmoother::new();
     let mut read_buf = vec![0.0f32; 8192]; // larger for 4096-pt FFT
 
@@ -590,6 +617,11 @@ fn audio_thread(
             // the inter-beat chord-change magnitude, so snapshot both before normalize().
             let pre_norm_chroma = raw.chroma;
             let band_flux = analyzer.band_flux_3();
+            // A18 (#1469): snapshot the whole feature set before normalize() for the structure
+            // tracker — it keys on the true loudness / sub-bass / centroid dynamics the adaptive
+            // normalizer would flatten. (`AudioFeatures` is Copy; loudness + spectral shape are
+            // already filled at this point; onset/bpm come from `beat_result` below.)
+            let pre_norm = raw;
 
             // Adaptive normalization (replaces fixed gains)
             raw = normalizer.normalize(&raw);
@@ -632,6 +664,17 @@ fn audio_thread(
                 downbeat_counter.fetch_add(1, Ordering::Relaxed);
             }
 
+            // A18 (#1469): section novelty / build-up / drop. Reads the pre-normalization
+            // snapshot + the beat result; heavy work is decimated to ~10 Hz internally.
+            let structure = structure_tracker.process(&pre_norm, &beat_result, timestamp);
+            raw.section_novelty = structure.section_novelty;
+            raw.buildup = structure.buildup;
+            raw.drop = structure.drop;
+            // Counter-back the drop trigger, same as `beat`/`downbeat`.
+            if structure.drop > 0.5 {
+                drop_counter.fetch_add(1, Ordering::Relaxed);
+            }
+
             // Smoothing (per-feature asymmetric EMA; beat/beat_phase pass through)
             let smoothed = smoother.smooth(&raw, dt);
 
@@ -671,8 +714,10 @@ mod tests {
         decay_features(&mut f, 0.5);
         for (i, &v) in f.as_slice().iter().enumerate() {
             match i {
-                // The beat (16) and downbeat (52) triggers are forced to 0 on silence.
-                16 | 52 => assert!(approx_eq(v, 0.0, 1e-6), "trigger {i} must be forced to 0"),
+                // The beat (16), downbeat (52) and drop (60) triggers are forced to 0 on silence.
+                16 | 52 | 60 => {
+                    assert!(approx_eq(v, 0.0, 1e-6), "trigger {i} must be forced to 0");
+                }
                 // bpm (18) and the categorical key fields key_class (49) / key_is_minor
                 // (50) hold their last value rather than sweeping toward silence.
                 18 | 49 | 50 => assert!(approx_eq(v, 1.0, 1e-6), "index {i} must hold"),
