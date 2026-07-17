@@ -22,6 +22,22 @@ const N_CHROMA: usize = 12;
 /// perceptual gate skips the push), so a kick after a quiet passage isn't over-scaled.
 const KICK_WINDOW: usize = 860;
 
+/// A4 (#1455): the `centroid` feature maps a power-weighted mean of log2(frequency) onto
+/// 0..1 across this musical range, so it reads as a perceptual brightness fader instead
+/// of hugging the top octave on a linear-Hz axis.
+const CENTROID_F_MIN: f32 = 40.0;
+const CENTROID_F_MAX: f32 = 18000.0;
+
+/// A4 (#1455): fraction of spectral energy below the rolloff frequency. Configurable
+/// (was a hardcoded 0.85); can be promoted to a user setting later with no ABI impact.
+const ROLLOFF_PERCENTILE: f32 = 0.85;
+
+/// A4 (#1455): magnitude floor (~−60 dB below a unit tone) applied before the log in the
+/// spectral-flux feature. Per-bin log magnitude is wildly unstable near the noise floor —
+/// without a floor, sub-signal bins dominate the flux and it tracks level again. Clamping
+/// them to a common floor makes their frame-to-frame diff zero, so flux reads change only.
+const FLUX_FLOOR: f32 = 1e-3;
+
 /// Mel bands for the A17 scrolling spectrogram texture (#1468). Independent of the
 /// MFCC filterbank (N_MELS) — a higher band count gives finer vertical detail in the
 /// waterfall (Strata #1479) without touching MFCC output. Also the height of the
@@ -516,8 +532,10 @@ impl FftAnalyzer {
         // struct below and filled from `kick_envelope`.
         self.kick_flux = self.large.spectral_flux_range_log(30.0, 120.0);
 
-        // Spectral features (from large FFT for best frequency resolution)
-        let centroid_hz = self.spectral_centroid();
+        // Spectral features (from large FFT for best frequency resolution). `centroid_hz`
+        // is the power-weighted arithmetic centroid in Hz, used as the centre for the
+        // bandwidth spread; the `centroid` feature itself is on a log2 axis (A4 #1455).
+        let centroid_hz = self.spectral_centroid_hz();
 
         let [
             sub_bass,
@@ -540,7 +558,7 @@ impl FftAnalyzer {
             brilliance,
             rms,
             kick: 0.0, // A3 (#1454): filled by `kick_envelope` after the silence gate
-            centroid: centroid_hz / (self.sample_rate * 0.5),
+            centroid: self.spectral_centroid_01(),
             flux: self.spectral_flux(),
             flatness: self.spectral_flatness(),
             rolloff: self.spectral_rolloff() / (self.sample_rate * 0.5),
@@ -570,19 +588,24 @@ impl FftAnalyzer {
         out
     }
 
-    /// Compute 13 MFCCs from the large FFT magnitude spectrum.
-    fn compute_mfccs(&self, out: &mut AudioFeatures) {
+    /// The 26 mel-band **power** energies from the large magnitude spectrum. Shared by the
+    /// MFCC path and A4's mel-band flatness (#1455), so both see the same filterbank.
+    fn mel_energies(&self) -> [f32; N_MELS] {
         let mag = &self.large.magnitude;
-
-        // Apply mel filterbank → 26 mel energies
-        let mut mel_energies = [0.0f32; N_MELS];
+        let mut mel = [0.0f32; N_MELS];
         for (m, filter) in self.mel_filters.iter().enumerate() {
             let mut energy = 0.0f32;
             for &(k, w) in filter {
                 energy += mag[k] * mag[k] * w;
             }
-            mel_energies[m] = energy;
+            mel[m] = energy;
         }
+        mel
+    }
+
+    /// Compute 13 MFCCs from the large FFT magnitude spectrum.
+    fn compute_mfccs(&self, out: &mut AudioFeatures) {
+        let mut mel_energies = self.mel_energies();
 
         // Log compression
         for e in &mut mel_energies {
@@ -599,64 +622,105 @@ impl FftAnalyzer {
         }
     }
 
-    fn spectral_centroid(&self) -> f32 {
+    /// Power-weighted spectral centroid in **Hz** (arithmetic, skipping the DC bin). The
+    /// centre of mass used for the bandwidth spread; the `centroid` feature uses the log2
+    /// form below.
+    fn spectral_centroid_hz(&self) -> f32 {
         let mag = &self.large.magnitude;
         let bin_hz = self.large.bin_hz;
         let mut weighted_sum = 0.0f32;
-        let mut mag_sum = 0.0f32;
-        for (i, &m) in mag.iter().enumerate() {
-            let freq = i as f32 * bin_hz;
-            weighted_sum += freq * m;
-            mag_sum += m;
+        let mut power_sum = 0.0f32;
+        for (i, &m) in mag.iter().enumerate().skip(1) {
+            let p = m * m;
+            weighted_sum += (i as f32 * bin_hz) * p;
+            power_sum += p;
         }
-        if mag_sum > 1e-10 {
-            weighted_sum / mag_sum
+        if power_sum > 1e-12 {
+            weighted_sum / power_sum
         } else {
             0.0
         }
     }
 
+    /// A4 (#1455): the `centroid` feature — a power-weighted mean of **log2(frequency)**
+    /// (skipping DC) mapped onto 0..1 across `CENTROID_F_MIN..CENTROID_F_MAX`. On a log
+    /// axis the centroid stops living in the top octave and becomes a usable brightness
+    /// fader; the FixedRange policy (A2) holds it steady below the silence gate.
+    fn spectral_centroid_01(&self) -> f32 {
+        let mag = &self.large.magnitude;
+        let bin_hz = self.large.bin_hz;
+        let mut weighted_log2 = 0.0f32;
+        let mut power_sum = 0.0f32;
+        for (i, &m) in mag.iter().enumerate().skip(1) {
+            let p = m * m;
+            weighted_log2 += (i as f32 * bin_hz).log2() * p;
+            power_sum += p;
+        }
+        if power_sum <= 1e-12 {
+            return 0.0;
+        }
+        let lo = CENTROID_F_MIN.log2();
+        let hi = CENTROID_F_MAX.log2();
+        ((weighted_log2 / power_sum - lo) / (hi - lo)).clamp(0.0, 1.0)
+    }
+
+    /// A4 (#1455): spectral flux as a **level-invariant** rate of change — half-wave
+    /// rectified per-bin log-magnitude difference (skipping DC), averaged over bins. The
+    /// old version summed linear-magnitude differences over the whole spectrum, so it
+    /// doubled when the volume doubled (a second RMS); this measures *change*, not level,
+    /// and the Adaptive percentile policy (A2) ranges it downstream.
     fn spectral_flux(&self) -> f32 {
         let mag = &self.large.magnitude;
         let prev = &self.large.prev_magnitude;
+        let n = mag.len();
+        if n <= 1 {
+            return 0.0;
+        }
         let mut flux = 0.0f32;
-        for i in 0..mag.len() {
-            let diff = mag[i] - prev[i];
+        for i in 1..n {
+            let diff = mag[i].max(FLUX_FLOOR).ln() - prev[i].max(FLUX_FLOOR).ln();
             if diff > 0.0 {
                 flux += diff;
             }
         }
-        flux
+        flux / (n - 1) as f32
     }
 
+    /// A4 (#1455): spectral flatness as **Wiener entropy over the 26 mel bands** — the
+    /// ratio of their geometric to arithmetic mean, already in 0..1 (FixedRange). Computing
+    /// it over mel bands (every band counted, with a tiny floor) removes the tiny-bin
+    /// skipping bias and the raw-FFT HF dominance of the old version, so it cleanly
+    /// separates tonal pads (low) from noise sweeps (high).
     fn spectral_flatness(&self) -> f32 {
-        let mag = &self.large.magnitude;
+        let mel = self.mel_energies();
         let mut log_sum = 0.0f64;
         let mut linear_sum = 0.0f64;
-        let mut count = 0u32;
-        for &m in &mag[1..] {
-            let m = m as f64;
-            if m > 1e-10 {
-                log_sum += m.ln();
-                linear_sum += m;
-                count += 1;
-            }
+        for &e in &mel {
+            let e = e as f64 + 1e-12;
+            log_sum += e.ln();
+            linear_sum += e;
         }
-        if count == 0 || linear_sum < 1e-10 {
+        let n = N_MELS as f64;
+        let arithmetic_mean = linear_sum / n;
+        if arithmetic_mean < 1e-12 {
             return 0.0;
         }
-        let geometric_mean = (log_sum / count as f64).exp();
-        let arithmetic_mean = linear_sum / count as f64;
-        (geometric_mean / arithmetic_mean) as f32
+        let geometric_mean = (log_sum / n).exp();
+        (geometric_mean / arithmetic_mean).clamp(0.0, 1.0) as f32
     }
 
+    /// A4 (#1455): frequency below which `ROLLOFF_PERCENTILE` of the spectral power lies
+    /// (skipping DC; percentage now a named const rather than a hardcoded 0.85).
     fn spectral_rolloff(&self) -> f32 {
         let mag = &self.large.magnitude;
         let bin_hz = self.large.bin_hz;
-        let total_energy: f32 = mag.iter().map(|m| m * m).sum();
-        let threshold = total_energy * 0.85;
+        let total_energy: f32 = mag.iter().skip(1).map(|m| m * m).sum();
+        if total_energy < 1e-12 {
+            return 0.0;
+        }
+        let threshold = total_energy * ROLLOFF_PERCENTILE;
         let mut cumulative = 0.0f32;
-        for (i, &m) in mag.iter().enumerate() {
+        for (i, &m) in mag.iter().enumerate().skip(1) {
             cumulative += m * m;
             if cumulative >= threshold {
                 return i as f32 * bin_hz;
@@ -926,6 +990,90 @@ mod tests {
         assert!(
             sustain < 0.5,
             "sustained bass must not saturate the kick, got {sustain}"
+        );
+    }
+
+    /// A4 (#1455): the centroid feature tracks brightness — a high tone reads much higher
+    /// than a low tone — on its log2 axis, and stays in 0..1.
+    #[test]
+    fn centroid_rises_with_frequency() {
+        let low = features_for_sine(BandScale::Db, 200.0).centroid;
+        let high = features_for_sine(BandScale::Db, 6000.0).centroid;
+        assert!((0.0..=1.0).contains(&low) && (0.0..=1.0).contains(&high));
+        assert!(
+            high > low + 0.2,
+            "centroid should track brightness: low={low}, high={high}"
+        );
+    }
+
+    /// A4 (#1455): flux measures *change*, not level — a steady tone reads ~0 flux at any
+    /// amplitude (the old linear-sum flux scaled with volume, a second RMS).
+    #[test]
+    fn flux_measures_change_not_level() {
+        fn steady_flux(freq: f32, amp: f32) -> f32 {
+            let mut a = FftAnalyzer::new(SR, BandScale::Db);
+            let mut phase = 0.0f32;
+            let step = 2.0 * std::f32::consts::PI * freq / SR;
+            let mut flux = 0.0;
+            for _ in 0..6 {
+                let block: Vec<f32> = (0..FFT_LARGE)
+                    .map(|_| {
+                        let s = amp * phase.sin();
+                        phase += step;
+                        s
+                    })
+                    .collect();
+                flux = a.analyze(&block).flux;
+            }
+            flux
+        }
+        let quiet = steady_flux(1000.0, 0.2);
+        let loud = steady_flux(1000.0, 0.9);
+        assert!(
+            quiet < 0.02 && loud < 0.02,
+            "steady flux should be ~0: quiet={quiet}, loud={loud}"
+        );
+        assert!(
+            (quiet - loud).abs() < 0.02,
+            "flux must not scale with level: {quiet} vs {loud}"
+        );
+    }
+
+    /// A4 (#1455): mel-band Wiener-entropy flatness separates a tone (low) from white
+    /// noise (high).
+    #[test]
+    fn flatness_separates_tone_from_noise() {
+        let tone = features_for_sine(BandScale::Db, 1000.0).flatness;
+        let mut a = FftAnalyzer::new(SR, BandScale::Db);
+        let mut state: u32 = 0x1234_5678;
+        let mut feats = AudioFeatures::default();
+        for _ in 0..6 {
+            let block: Vec<f32> = (0..FFT_LARGE)
+                .map(|_| {
+                    // Deterministic LCG white noise in −1..1.
+                    state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+                })
+                .collect();
+            feats = a.analyze(&block);
+        }
+        let noise = feats.flatness;
+        assert!((0.0..=1.0).contains(&tone) && (0.0..=1.0).contains(&noise));
+        assert!(
+            noise > tone + 0.2,
+            "noise flatness ({noise}) should exceed tone flatness ({tone})"
+        );
+    }
+
+    /// A4 (#1455): rolloff rises with the frequency content, stays in 0..1.
+    #[test]
+    fn rolloff_rises_with_frequency() {
+        let low = features_for_sine(BandScale::Db, 400.0).rolloff;
+        let high = features_for_sine(BandScale::Db, 8000.0).rolloff;
+        assert!((0.0..=1.0).contains(&low) && (0.0..=1.0).contains(&high));
+        assert!(
+            high > low,
+            "rolloff should rise with tone frequency: low={low}, high={high}"
         );
     }
 }

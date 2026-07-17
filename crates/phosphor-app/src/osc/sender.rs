@@ -53,6 +53,13 @@ impl OscSender {
         // Aggregates + beat
         self.send_float("/phosphor/audio/rms", f.rms);
         self.send_float("/phosphor/audio/kick", f.kick);
+        // Spectral shape (A4 #1455): now level-invariant / log-axis and worth emitting.
+        self.send_float("/phosphor/audio/centroid", f.centroid);
+        self.send_float("/phosphor/audio/flux", f.flux);
+        self.send_float("/phosphor/audio/flatness", f.flatness);
+        self.send_float("/phosphor/audio/rolloff", f.rolloff);
+        self.send_float("/phosphor/audio/bandwidth", f.bandwidth);
+        self.send_float("/phosphor/audio/zcr", f.zcr);
         self.send_float("/phosphor/audio/onset", f.onset);
         self.send_float("/phosphor/audio/beat", f.beat);
         self.send_float("/phosphor/audio/beat_phase", f.beat_phase);
