@@ -1276,6 +1276,7 @@ fn audio_thread(
                 raw.rms,
                 &pre_norm_chroma,
                 timestamp,
+                loud_silent,
             );
             raw.downbeat = db.downbeat;
             raw.bar_phase = db.bar_phase;

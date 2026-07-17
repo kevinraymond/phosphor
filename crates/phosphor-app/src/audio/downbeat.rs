@@ -118,6 +118,13 @@ impl DownbeatTracker {
     /// Called every audio frame. `band_flux` is `Analyzer::band_flux_3()` (low/mid/high),
     /// `rms` the current amplitude, `chroma` the pre-normalization pitch-class vector, and
     /// `timestamp` the audio-thread clock (seconds). Heavy scoring runs only on a fired beat.
+    ///
+    /// `loud_silent` is the A10 perceptual silence gate, mirroring `BeatDetector::process`
+    /// (#1598). Without it this tracker had no silence gate at all: beats stop firing through
+    /// a silence, so `last_downbeat_time`/`bar_duration` freeze while `bar_clock` — a pure
+    /// function of the audio clock — keeps ramping. The result was an incoherent pairing where
+    /// `beat_phase` sat pinned at 0 while `bar_phase` swept the full 0→1 (verified live: over
+    /// 361 silent samples `beat_phase` held one value, `bar_phase` swept at cv 0.035).
     pub fn process(
         &mut self,
         beat: &BeatResult,
@@ -125,6 +132,7 @@ impl DownbeatTracker {
         rms: f32,
         chroma: &[f32; 12],
         timestamp: f64,
+        loud_silent: bool,
     ) -> DownbeatResult {
         // Integrate flux across every frame in the current beat interval.
         for i in 0..3 {
@@ -137,7 +145,16 @@ impl DownbeatTracker {
             downbeat = self.on_beat(beat, rms, chroma, timestamp);
         }
 
-        let (bar_phase, bar_duration) = self.bar_clock(timestamp);
+        // Pin the phase through silence but keep publishing the *rate* (#1598). Returning the
+        // `(0.0, 0.0)` sentinel here instead would need no render-side change at all — but it
+        // would overload a sentinel that means "no downbeat ever locked", and on the way *out*
+        // of a silence `bar_duration` would jump 0 → live while `bar_phase` resumed mid-bar,
+        // breaking the invariant on `last_downbeat_time` above that A8b's shared rate rests on.
+        let (bar_phase, bar_duration) = if loud_silent {
+            (0.0, self.bar_duration)
+        } else {
+            self.bar_clock(timestamp)
+        };
 
         DownbeatResult {
             downbeat,
@@ -355,6 +372,20 @@ mod tests {
         }
     }
 
+    /// What `BeatDetector` emits through a silence: no beat fires, but the tempo estimate
+    /// holds (`bpm` is a `Hold` feature, not a level). This is the input shape that made
+    /// `bar_phase` free-run before #1598 — nothing fires, so nothing refreshes the bar
+    /// anchor, yet the audio clock keeps ticking underneath `bar_clock`.
+    fn silent_beat(bpm: f32) -> BeatResult {
+        BeatResult {
+            onset_strength: 0.0,
+            beat: 0.0,
+            beat_phase: 0.0,
+            bpm,
+            beat_strength: 0.0,
+        }
+    }
+
     /// Drive `count` beats at `meter`, accenting the "one" (idx % meter == 0) with strong
     /// low-band flux + a chord change + a loudness rise. Returns the downbeat pattern
     /// (1.0/0.0) for each beat in order.
@@ -382,7 +413,7 @@ mod tests {
                 [0.5, 0.3, 0.3, 0.4, 0.35, 0.25, 0.1, 0.3, 0.5, 0.1, 0.2, 0.1]
             };
             let t = i as f64 * period;
-            let r = tracker.process(&beat_result(bpm), flux, rms, &chroma, t);
+            let r = tracker.process(&beat_result(bpm), flux, rms, &chroma, t, false);
             out.push(r.downbeat);
         }
         out
@@ -436,6 +467,7 @@ mod tests {
                 0.5,
                 &chroma,
                 i as f64 * 0.47,
+                false,
             );
             assert!(r.bar_phase >= 0.0 && r.bar_phase < 1.0);
             assert!(r.beat_in_bar >= 0.0 && r.beat_in_bar < 1.0);
@@ -456,7 +488,14 @@ mod tests {
         // Sample bar_phase across one bar between beats: should rise monotonically toward 1.
         let base = 33.0 * period; // start after the driven beats
         // Fire a downbeat to seed last_downbeat_time cleanly.
-        let seed = t.process(&beat_result(120.0), [1.0, 0.2, 0.1], 0.9, &[0.4; 12], base);
+        let seed = t.process(
+            &beat_result(120.0),
+            [1.0, 0.2, 0.1],
+            0.9,
+            &[0.4; 12],
+            base,
+            false,
+        );
         // The bar clock the render thread will advance on (A8b #1554): 4 beats at 120 BPM.
         assert!(
             (seed.bar_duration - 2.0).abs() < 1e-9,
@@ -473,6 +512,7 @@ mod tests {
                     0.5,
                     &[0.4; 12],
                     base + k as f64 * period * 0.1,
+                    false,
                 )
                 .bar_phase;
             if bp > last {
@@ -485,6 +525,70 @@ mod tests {
             "bar_phase should advance between beats on the audio clock"
         );
         assert!(last < 1.0, "bar_phase stays in [0,1)");
+    }
+
+    /// #1598: the silence gate `BeatDetector` always had. Beats stop firing through a silence,
+    /// so `bar_clock` — a pure function of the audio clock — would otherwise keep ramping, and
+    /// `bar_phase` would sweep the full 0→1 while `beat_phase` sat pinned at 0.
+    ///
+    /// `bar_duration` must stay live while pinned: the render side shares that rate (A8b
+    /// #1554), and dropping it to the 0 sentinel would mean "no downbeat ever locked" and would
+    /// make it jump back to live mid-bar on the way out of the silence.
+    #[test]
+    fn bar_phase_pins_to_zero_under_silence() {
+        let mut t = DownbeatTracker::new();
+        run_meter(&mut t, 4, 32, 120.0);
+        let period = 60.0 / 120.0;
+        let base = 33.0 * period;
+        // Seed a clean bar clock, then go silent mid-bar — the point in the sawtooth where a
+        // free-running phase is most obviously wrong.
+        let seed = t.process(
+            &beat_result(120.0),
+            [1.0, 0.2, 0.1],
+            0.9,
+            &[0.4; 12],
+            base,
+            false,
+        );
+        assert!(
+            (seed.bar_duration - 2.0).abs() < 1e-9,
+            "4/4 at 120 BPM = 2 s"
+        );
+
+        // A silence long enough to sweep more than a whole 2 s bar, so a free-running phase
+        // could not hide inside one.
+        for k in 1..40 {
+            let r = t.process(
+                &silent_beat(120.0),
+                [0.0, 0.0, 0.0],
+                0.0,
+                &[0.0; 12],
+                base + k as f64 * period * 0.1,
+                true,
+            );
+            assert_eq!(r.bar_phase, 0.0, "bar_phase pins through silence");
+            assert!(
+                (r.bar_duration - 2.0).abs() < 1e-9,
+                "the bar rate stays published while pinned, got {}",
+                r.bar_duration
+            );
+        }
+
+        // Audio returns. The bar clock resumes on the tracker's own timeline — 2.5 s past a
+        // downbeat is a quarter of the way into the next bar — rather than restarting from 0.
+        let back = t.process(
+            &silent_beat(120.0),
+            [0.0, 0.0, 0.0],
+            0.5,
+            &[0.4; 12],
+            base + 2.5,
+            false,
+        );
+        assert!(
+            (back.bar_phase - 0.25).abs() < 1e-6,
+            "the bar clock resumes where the audio timeline says, got {}",
+            back.bar_phase
+        );
     }
 
     #[test]

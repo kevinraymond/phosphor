@@ -173,7 +173,8 @@ impl FeatureInterpolator {
         // `bar_duration` give it exactly.
         features.beat_phase =
             self.advance_beat_phase(dt, features.beat_phase, features.bpm, phase_frozen);
-        features.bar_phase = self.advance_bar_phase(dt, features.bar_phase, bar_duration);
+        features.bar_phase =
+            self.advance_bar_phase(dt, features.bar_phase, bar_duration, phase_frozen);
         Some(features)
     }
 
@@ -274,12 +275,23 @@ impl FeatureInterpolator {
     /// chases — and on a lost tempo lock (`bpm → 0`, `meter` still 4) it would freeze the
     /// local phase while the tracker's kept ramping on its stale duration.
     ///
-    /// No `frozen` gate, deliberately: unlike `BeatDetector`, `DownbeatTracker` has no
-    /// silence gate — with `beat` pinned low its `bar_phase` keeps free-running on the audio
-    /// clock — so freezing here would invent a policy the audio side does not have, and would
-    /// put the stair-step back for the length of every quiet passage. (Whether the tracker
-    /// *should* freeze it is a separate question, board #1598.)
-    fn advance_bar_phase(&mut self, dt: f32, audio_phase: f32, bar_duration: f64) -> f32 {
+    /// The `frozen` gate mirrors [`Self::advance_beat_phase`] (#1598). It used to be absent
+    /// deliberately, because `DownbeatTracker` had no silence gate of its own and this side
+    /// reproduces the audio thread rather than inventing policy it lacks — but the tracker now
+    /// pins its `bar_phase` to 0 through a silence, so following it here is what keeps the two
+    /// sides agreeing. Note the tracker keeps publishing a live `bar_duration` while pinned, so
+    /// the `bar_duration <= 0.0` branch below does *not* cover this case.
+    fn advance_bar_phase(
+        &mut self,
+        dt: f32,
+        audio_phase: f32,
+        bar_duration: f64,
+        frozen: bool,
+    ) -> f32 {
+        if frozen {
+            self.local_bar_phase = audio_phase;
+            return self.local_bar_phase;
+        }
         if bar_duration <= 0.0 {
             // No bar clock yet (no downbeat locked, or the stall fallback): the tracker pins
             // its bar phase at 0 under exactly this condition, so follow it. Also the guard
@@ -776,7 +788,7 @@ mod tests {
     fn bar_phase_snaps_rather_than_sweeping_backwards() {
         let mut it = FeatureInterpolator::new(SR);
         it.local_bar_phase = 0.25;
-        let p = it.advance_bar_phase(RENDER_DT, 0.05, BAR_2S);
+        let p = it.advance_bar_phase(RENDER_DT, 0.05, BAR_2S, false);
         assert!(
             (p - 0.05).abs() < 1e-5,
             "must snap onto the tracker at 0.05, landed at {p} (a flat PHASE_SNAP crawls \
@@ -791,12 +803,12 @@ mod tests {
         // free-run — and must not divide by zero (a NaN would fail this `assert_eq!`, and
         // would poison the local phase permanently).
         for _ in 0..100 {
-            it.advance_bar_phase(RENDER_DT, 0.0, 0.0);
+            it.advance_bar_phase(RENDER_DT, 0.0, 0.0, false);
         }
         assert_eq!(it.local_bar_phase, 0.0);
 
         // The gate is "follow the tracker", not "freeze at 0".
-        let p = it.advance_bar_phase(RENDER_DT, 0.37, 0.0);
+        let p = it.advance_bar_phase(RENDER_DT, 0.37, 0.0, false);
         assert!((p - 0.37).abs() < 1e-6, "must follow the tracker, got {p}");
     }
 
@@ -823,21 +835,27 @@ mod tests {
         );
     }
 
-    /// Documents a deliberate asymmetry (board #1598): `DownbeatTracker` has no silence gate,
-    /// so its `bar_phase` keeps free-running on the audio clock while `BeatDetector` pins
-    /// `beat_phase` at 0. The interpolator reproduces the audio thread rather than inventing
-    /// a freeze of its own — so through a silence the bar sawtooth stays smooth.
+    /// Both phases pin together through a silence (#1598). `DownbeatTracker` gained the
+    /// silence gate `BeatDetector` always had, so it now publishes `bar_phase == 0` with its
+    /// bar *rate* still live, and this side follows rather than sweeping on into the quiet.
+    ///
+    /// This test asserted the opposite before #1598 — a smooth bar sweep against a pinned
+    /// `beat_phase`, which is precisely the incoherent pairing the task was filed for.
+    ///
+    /// The live `BAR_2S` is what makes this a real test of the `frozen` gate: the
+    /// `bar_duration <= 0.0` branch cannot cover this case, so without the gate the PLL would
+    /// creep up at 0.5 Hz and snap back each time it drifted past the threshold.
     #[test]
-    fn bar_phase_free_runs_through_silence() {
+    fn bar_phase_pins_to_zero_through_silence() {
         let mut it = FeatureInterpolator::new(SR);
         let mut clock = 0.0f64;
         let mut next_hop = 0.0f64;
         let mut out = Vec::new();
         for _ in 0..600 {
             while next_hop <= clock {
-                // Silence: the detector pins beat_phase at 0 and flags the freeze; the
-                // tracker keeps ramping bar_phase on its last bar clock.
-                let mut f = bar_feats(((next_hop / BAR_2S) % 1.0) as f32);
+                // Silence: the detector pins beat_phase at 0 and flags the freeze, and the
+                // tracker now pins bar_phase alongside it while still publishing the rate.
+                let mut f = bar_feats(0.0);
                 f.beat_phase = 0.0;
                 it.push(next_hop, f, true, BAR_2S);
                 next_hop += HOP;
@@ -852,13 +870,9 @@ mod tests {
             tail.iter().all(|f| f.beat_phase == 0.0),
             "beat_phase must follow the detector's freeze"
         );
-        let dupes = tail
-            .windows(2)
-            .filter(|w| w[0].bar_phase == w[1].bar_phase)
-            .count();
-        assert_eq!(
-            dupes, 0,
-            "bar_phase must keep advancing through the silence"
+        assert!(
+            tail.iter().all(|f| f.bar_phase == 0.0),
+            "bar_phase must follow the tracker's freeze, not free-run on the bar clock"
         );
     }
 
