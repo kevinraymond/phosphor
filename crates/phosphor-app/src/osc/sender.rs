@@ -65,6 +65,14 @@ impl OscSender {
         self.send_float("/phosphor/audio/downbeat", f.downbeat);
         self.send_float("/phosphor/audio/bar_phase", f.bar_phase);
         self.send_float("/phosphor/audio/beat_in_bar", f.beat_in_bar);
+        // A10 loudness (#1461): momentary / short-term loudness + rising trend.
+        self.send_float("/phosphor/audio/loudness_m", f.loudness_m);
+        self.send_float("/phosphor/audio/loudness_s", f.loudness_s);
+        self.send_float("/phosphor/audio/loudness_trend", f.loudness_trend);
+        // A18 structure (#1469): section-boundary novelty, build-up, drop trigger.
+        self.send_float("/phosphor/audio/section_novelty", f.section_novelty);
+        self.send_float("/phosphor/audio/buildup", f.buildup);
+        self.send_float("/phosphor/audio/drop", f.drop);
     }
 
     /// Send current state (active layer, effect name).
