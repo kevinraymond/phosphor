@@ -106,7 +106,10 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
     def("brilliance", Adaptive, SmoothParams::ar(0.005, 0.08), Scale),
     // Aggregates (2)
     def("rms", Adaptive, SmoothParams::ar(0.01, 0.12), Scale),
-    def("kick", Adaptive, SmoothParams::ar(0.002, 0.06), Scale), // fast attack
+    // A3 (#1454): kick is now single-normalized by the detector (log-flux / long-term P95
+    // in `FftAnalyzer::kick_envelope`), so it Passes through here — the old Adaptive slot
+    // was a second AGC stacked on the analyzer's peak-hold. Fast attack retained.
+    def("kick", Passthrough, SmoothParams::ar(0.002, 0.06), Scale),
     // Spectral shape (6) — A4 (#1455) puts each in a known physical 0..1 range, so
     // FixedRange clamps + holds on silence rather than adaptively rescaling. `flux` is
     // the exception: a level-invariant change rate with no fixed ceiling, so it stays
@@ -317,19 +320,20 @@ mod tests {
     ///   puts in a known physical 0..1 range — centroid (9), flatness (11), rolloff (12),
     ///   bandwidth (13), zcr (14).
     /// - **ZScore** (standardized): the 13 signed MFCC coefficients (20..=32).
-    /// - **Passthrough** (producer-owned): the beat block (15..=19); chroma +
-    ///   dominant_chroma + loudness + key + bar clock, which happen to be contiguous
-    ///   (33..=54); and the A18 structure block (58..=60).
+    /// - **Passthrough** (producer-owned): kick (8, single-normalized by the A3 #1454
+    ///   detector); the beat block (15..=19); chroma + dominant_chroma + loudness + key +
+    ///   bar clock, which happen to be contiguous (33..=54); and the A18 structure block
+    ///   (58..=60).
     /// - **Adaptive** (gated percentile ranging): everything else — the 7 bands, rms (7),
-    ///   kick (8, until A3 #1454 moves it to Passthrough), flux (10), and the A13 stereo
-    ///   slots (55..=57) which stay Adaptive until that detector lands.
+    ///   flux (10), and the A13 stereo slots (55..=57) which stay Adaptive until that
+    ///   detector lands.
     #[test]
     fn norm_policy_assignment() {
         for (i, def) in FEATURES.iter().enumerate() {
             let expected = match i {
                 9 | 11 | 12 | 13 | 14 => FixedRange,
                 20..=32 => ZScore,
-                15..=19 | 33..=54 | 58..=60 => Passthrough,
+                8 | 15..=19 | 33..=54 | 58..=60 => Passthrough,
                 _ => Adaptive,
             };
             assert_eq!(

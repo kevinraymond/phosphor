@@ -632,6 +632,12 @@ fn audio_thread(
             // A6 (#1457): the onset detector gates on this perceptual silence flag.
             let loud_silent = loudness_meter.is_silent();
 
+            // A3 (#1454): fill `kick` now that the silence flag is known — a single
+            // detector-owned P95 normalizer, gated so noise-floor log-flux can't fire. Set
+            // before the pre-norm snapshot so structure/downbeat see the true kick, and it
+            // survives normalize() unchanged (kick is Passthrough).
+            raw.kick = analyzer.kick_envelope(loud_silent);
+
             // A11 (#1462): key detection on the fresh CQT chroma, before normalization
             // rescales it. Key fields are Passthrough, so they survive normalize/smooth.
             let key_result = key_detector.process(&raw.chroma, dt);
