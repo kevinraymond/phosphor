@@ -40,6 +40,12 @@ impl PercentileWindow {
         }
     }
 
+    /// The `q`-quantile (`q` in 0..1) of the current contents, or 0.0 if empty. Used by
+    /// the A3 kick as its single long-term P95 normalizer.
+    pub fn percentile(&mut self, q: f32) -> f32 {
+        self.range(q, q).0
+    }
+
     /// Both the `p_lo` and `p_hi` quantiles from a single sort — the hot path for
     /// adaptive ranging, which needs P5 and P95 together. Returns `(0.0, 0.0)` if empty.
     pub fn range(&mut self, p_lo: f32, p_hi: f32) -> (f32, f32) {
