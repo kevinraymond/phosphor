@@ -207,15 +207,18 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
         Scale,
     ),
     def("stereo_corr", Adaptive, SmoothParams::ar(0.03, 0.15), Scale),
-    // A18 structure (#1469)
+    // A18 structure (#1469) — detector-owned. `section_novelty` is self-normalized 0..1 and
+    // `buildup` is a logistic 0..1, so both pass through the normalizer; each is smoothed to
+    // iron out the ~10 Hz decimation stairs, and Scales toward 0 on silence. `drop` is a
+    // 1-frame trigger like `beat`/`downbeat`: pass through, no EMA, ForceZero on silence.
     def(
         "section_novelty",
-        Adaptive,
-        SmoothParams::ar(0.03, 0.15),
+        Passthrough,
+        SmoothParams::ar(0.05, 0.2),
         Scale,
     ),
-    def("buildup", Adaptive, SmoothParams::ar(0.03, 0.15), Scale),
-    def("drop", Adaptive, SmoothParams::ar(0.03, 0.15), Scale),
+    def("buildup", Passthrough, SmoothParams::ar(0.08, 0.25), Scale),
+    def("drop", Passthrough, SmoothParams::bypass(), ForceZero),
 ];
 
 /// Terse constructor so the table above reads as one row per feature.
@@ -287,17 +290,21 @@ mod tests {
     /// The detector-owned fields are exactly the set the normalizer passes through:
     /// the beat block (onset..beat_strength, 15..=19), the A10 loudness block
     /// (loudness_m/s/trend, 46..=48 — absolute LUFS mapped to 0..1), the categorical key
-    /// fields (key_class/key_is_minor/key_confidence, 49..=51), and the A12 bar clock
+    /// fields (key_class/key_is_minor/key_confidence, 49..=51), the A12 bar clock
     /// (downbeat/bar_phase/beat_in_bar, 52..=54 — a trigger, a sawtooth, and a normalized
-    /// index, all already 0..1). Loudness through the bar clock is contiguous (46..=54).
+    /// index, all already 0..1), and the A18 structure block (section_novelty/buildup/drop,
+    /// 58..=60 — self-normalized curves and a trigger). Loudness through the bar clock is
+    /// contiguous (46..=54); the A13 stereo slots 55..=57 stay Adaptive until that detector
+    /// lands.
     #[test]
     fn passthrough_is_detector_owned() {
         for (i, def) in FEATURES.iter().enumerate() {
-            let expected = if (15..=19).contains(&i) || (46..=54).contains(&i) {
-                Passthrough
-            } else {
-                Adaptive
-            };
+            let expected =
+                if (15..=19).contains(&i) || (46..=54).contains(&i) || (58..=60).contains(&i) {
+                    Passthrough
+                } else {
+                    Adaptive
+                };
             assert_eq!(
                 def.norm, expected,
                 "norm policy for slot {i} ({})",
@@ -314,7 +321,7 @@ mod tests {
         for (i, def) in FEATURES.iter().enumerate() {
             let expected = match def.name {
                 "bpm" | "key_class" | "key_is_minor" => Hold,
-                "beat" | "downbeat" => ForceZero,
+                "beat" | "downbeat" | "drop" => ForceZero,
                 _ => Scale,
             };
             assert_eq!(
