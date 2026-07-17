@@ -167,14 +167,18 @@ impl FftResolution {
     /// Half-wave rectified spectral flux in a frequency range, on **log** magnitude and
     /// per-bin-mean (A3 #1454). Same level-invariant form as the SuperFlux onset detector:
     /// a bass *change* registers regardless of absolute level, so the kick no longer
-    /// saturates on loud material or vanishes on quiet material.
+    /// saturates on loud material or vanishes on quiet material. Magnitudes are floored
+    /// (`FLUX_FLOOR`) before the log so sub-signal bins — e.g. the near-silent 30–120 Hz
+    /// bins under a bassless lead — read a constant zero instead of jittering into false
+    /// kicks (a real, loud kick sits well above the floor and is unaffected).
     fn spectral_flux_range_log(&self, lo_hz: f32, hi_hz: f32) -> f32 {
         let (lo, hi) = self.bin_range(lo_hz, hi_hz);
         let hi = hi.min(self.num_bins);
         let count = hi.saturating_sub(lo).max(1);
         let mut flux = 0.0f32;
         for i in lo..hi {
-            let diff = (self.magnitude[i] + 1e-10).ln() - (self.prev_magnitude[i] + 1e-10).ln();
+            let diff = self.magnitude[i].max(FLUX_FLOOR).ln()
+                - self.prev_magnitude[i].max(FLUX_FLOOR).ln();
             if diff > 0.0 {
                 flux += diff;
             }
