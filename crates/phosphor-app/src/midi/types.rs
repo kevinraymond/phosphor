@@ -30,6 +30,11 @@ pub enum TriggerAction {
     SceneGoNext,
     SceneGoPrev,
     ToggleTimeline,
+    /// A7 (#1458): force the detected tempo down/up an octave, and tap tempo — the controls
+    /// every hardware tool puts under a thumb, so they need to reach a MIDI pad.
+    TempoHalf,
+    TempoDouble,
+    TempoTap,
 }
 
 impl TriggerAction {
@@ -46,6 +51,9 @@ impl TriggerAction {
         TriggerAction::SceneGoNext,
         TriggerAction::SceneGoPrev,
         TriggerAction::ToggleTimeline,
+        TriggerAction::TempoHalf,
+        TriggerAction::TempoDouble,
+        TriggerAction::TempoTap,
     ];
 
     pub fn display_name(&self) -> &'static str {
@@ -61,6 +69,9 @@ impl TriggerAction {
             TriggerAction::SceneGoNext => "Scene Next",
             TriggerAction::SceneGoPrev => "Scene Prev",
             TriggerAction::ToggleTimeline => "Toggle Timeline",
+            TriggerAction::TempoHalf => "Tempo Half",
+            TriggerAction::TempoDouble => "Tempo Double",
+            TriggerAction::TempoTap => "Tap Tempo",
         }
     }
 
@@ -77,6 +88,9 @@ impl TriggerAction {
             TriggerAction::SceneGoNext => "Scn Next",
             TriggerAction::SceneGoPrev => "Scn Prev",
             TriggerAction::ToggleTimeline => "Timeline",
+            TriggerAction::TempoHalf => "Tempo /2",
+            TriggerAction::TempoDouble => "Tempo x2",
+            TriggerAction::TempoTap => "Tap",
         }
     }
 }
@@ -94,7 +108,7 @@ mod tests {
 
     #[test]
     fn trigger_action_all_count() {
-        assert_eq!(TriggerAction::ALL.len(), 11);
+        assert_eq!(TriggerAction::ALL.len(), 14);
     }
 
     #[test]

@@ -42,6 +42,7 @@ use crossbeam_channel::{Receiver, Sender};
 
 use self::analyzer::FftAnalyzer;
 use self::beat::BeatDetector;
+pub use self::beat::{TempoCommand, TempoConfig, TempoControl, TempoPreset};
 use self::capture::{AudioCapture, RingBuffer};
 use self::downbeat::DownbeatTracker;
 use self::key::KeyDetector;
@@ -171,6 +172,14 @@ pub struct AudioSystem {
     /// which snapshots it once per hop; the audio panel writes it directly (no pipeline
     /// rebuild). Threaded through `switch_device` so user tuning survives a device change.
     tuning: Arc<Mutex<StructureConfig>>,
+    /// Live tempo prior + one-shot octave/tap commands (A7 #1458). Same shape as `tuning`:
+    /// shared with the audio thread, snapshotted once per hop, threaded through
+    /// `switch_device`. The mailbox half carries UI/MIDI/OSC overrides to the detector.
+    tempo: Arc<Mutex<TempoControl>>,
+    /// Beat taps for tap tempo (A7 #1458). Held as `Instant`s rather than offsets from
+    /// `started_at`, which `switch_device` resets — a reset clock mid-sequence would turn
+    /// the stored taps into garbage intervals.
+    tap_times: Vec<Instant>,
     /// Total beats detected, incremented by the audio thread. The consumer compares
     /// this against `beats_seen` so a 1-frame beat pulse survives channel overflow
     /// and the drain-to-newest loop in `latest_features()`.
@@ -208,6 +217,7 @@ impl AudioSystem {
             None,
             BandScale::default(),
             Arc::new(Mutex::new(StructureConfig::default())),
+            Arc::new(Mutex::new(TempoControl::default())),
         )
     }
 
@@ -215,6 +225,7 @@ impl AudioSystem {
         device_name: Option<&str>,
         band_scale: BandScale,
         tuning: Arc<Mutex<StructureConfig>>,
+        tempo: Arc<Mutex<TempoControl>>,
     ) -> Self {
         let (tx, rx): (Sender<AudioFrame>, Receiver<AudioFrame>) = crossbeam_channel::bounded(4);
 
@@ -234,6 +245,7 @@ impl AudioSystem {
                 let downbeats = downbeat_counter.clone();
                 let drops = drop_counter.clone();
                 let tuning_thread = tuning.clone();
+                let tempo_thread = tempo.clone();
 
                 let thread_handle = thread::Builder::new()
                     .name("phosphor-audio".into())
@@ -249,6 +261,7 @@ impl AudioSystem {
                             drops,
                             band_scale,
                             tuning_thread,
+                            tempo_thread,
                         );
                     })
                     .expect("Failed to spawn audio thread");
@@ -277,6 +290,8 @@ impl AudioSystem {
                     sample_rate: sample_rate as u32,
                     band_scale,
                     tuning,
+                    tempo,
+                    tap_times: Vec::new(),
                     beat_counter,
                     beats_seen: 0,
                     downbeat_counter,
@@ -316,6 +331,8 @@ impl AudioSystem {
                     sample_rate: 44100,
                     band_scale,
                     tuning,
+                    tempo,
+                    tap_times: Vec::new(),
                     beat_counter,
                     beats_seen: 0,
                     downbeat_counter,
@@ -346,10 +363,16 @@ impl AudioSystem {
         self._capture = None;
 
         // Create new system and swap all fields (mem::replace avoids move-out-of-Drop).
-        // Preserve the current band scale (A1 #1452) and the A18 tuning Arc (#1510) across the
-        // switch — passing the same `tuning` Arc keeps user tuning live (the fresh audio thread
-        // receives a clone of it), so `self.tuning` is deliberately left unswapped below.
-        let mut new = Self::new_with_device(device_name, self.band_scale, self.tuning.clone());
+        // Preserve the current band scale (A1 #1452), the A18 tuning Arc (#1510) and the A7
+        // tempo control (#1458) across the switch — passing the same Arcs keeps user tuning
+        // live (the fresh audio thread receives a clone of each), so `self.tuning` and
+        // `self.tempo` are deliberately left unswapped below.
+        let mut new = Self::new_with_device(
+            device_name,
+            self.band_scale,
+            self.tuning.clone(),
+            self.tempo.clone(),
+        );
         self.receiver = std::mem::replace(&mut new.receiver, crossbeam_channel::bounded(1).1);
         self.latest = None;
         self.latest_spectrum = std::mem::take(&mut new.latest_spectrum);
@@ -390,6 +413,49 @@ impl AudioSystem {
     /// rebuild, and it survives a device switch (the same Arc is threaded through).
     pub fn tuning(&self) -> &Arc<Mutex<StructureConfig>> {
         &self.tuning
+    }
+
+    /// Shared tempo prior + command mailbox (A7 #1458). The audio panel locks and writes the
+    /// config directly; the audio thread snapshots it once per hop. Survives a device switch.
+    pub fn tempo(&self) -> &Arc<Mutex<TempoControl>> {
+        &self.tempo
+    }
+
+    /// Queue a one-shot tempo override (A7 #1458) for the audio thread — the half/double and
+    /// tap-tempo controls, reachable from the UI and from MIDI/OSC triggers.
+    pub fn send_tempo_command(&self, cmd: TempoCommand) {
+        self.tempo
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(cmd);
+    }
+
+    /// Register one beat tap (A7 #1458), sending the averaged tempo to the detector once
+    /// enough taps have landed. Owned here so the panel's Tap button and the MIDI/OSC tap
+    /// trigger feed a single sequence — tapping across both still averages correctly.
+    /// Averaging on this side keeps wall-clock tap times out of the audio thread's sample
+    /// clock; only the resulting BPM crosses over.
+    pub fn tap_tempo(&mut self) {
+        let now = Instant::now();
+        if self
+            .tap_times
+            .last()
+            .is_some_and(|&t| now.duration_since(t).as_secs_f64() > TAP_RESET_SECS)
+        {
+            self.tap_times.clear();
+        }
+        self.tap_times.push(now);
+        if self.tap_times.len() > TAP_WINDOW {
+            let excess = self.tap_times.len() - TAP_WINDOW;
+            self.tap_times.drain(..excess);
+        }
+        if self.tap_times.len() >= TAP_MIN_TAPS {
+            let span = now.duration_since(self.tap_times[0]).as_secs_f64();
+            let mean_interval = span / (self.tap_times.len() - 1) as f64;
+            if mean_interval > 0.0 {
+                self.send_tempo_command(TempoCommand::Tap(60.0 / mean_interval));
+            }
+        }
     }
 
     /// Change the band scaling (A1 #1452) at runtime. Rebuilds the capture pipeline (a brief
@@ -603,6 +669,13 @@ impl Drop for AudioSystem {
 /// (87.5% overlap of the 4096-sample analysis window).
 pub const ANALYSIS_HOP: usize = 512;
 
+/// Tap tempo (A7 #1458). A gap longer than this means the user stopped and started over,
+/// so the sequence resets; `TAP_WINDOW` taps are averaged and `TAP_MIN_TAPS` (2 intervals)
+/// are needed before a tempo is inferred at all.
+const TAP_RESET_SECS: f64 = 3.0;
+const TAP_WINDOW: usize = 4;
+const TAP_MIN_TAPS: usize = 3;
+
 fn audio_thread(
     ring: Arc<RingBuffer>,
     sample_rate: f32,
@@ -614,10 +687,14 @@ fn audio_thread(
     drop_counter: Arc<AtomicU32>,
     band_scale: BandScale,
     tuning: Arc<Mutex<StructureConfig>>,
+    tempo: Arc<Mutex<TempoControl>>,
 ) {
     let mut analyzer = FftAnalyzer::new(sample_rate, band_scale);
     let mut normalizer = FeatureNormalizer::new();
-    let mut beat_detector = BeatDetector::new(sample_rate);
+    let mut beat_detector = BeatDetector::new(
+        sample_rate,
+        tempo.lock().unwrap_or_else(|e| e.into_inner()).config,
+    );
     let mut key_detector = KeyDetector::new(sample_rate);
     let mut loudness_meter = LoudnessMeter::new(sample_rate);
     let mut downbeat_tracker = DownbeatTracker::new();
@@ -705,6 +782,22 @@ fn audio_thread(
             // A2 (#1453): per-feature normalization (gated percentile / fixed-range /
             // z-score / passthrough), silence-gated on the A10 perceptual flag.
             raw = normalizer.normalize(&raw, loud_silent);
+
+            // A7 (#1458): snapshot the shared tempo config and drain the command mailbox
+            // once per hop, same as the A18 tuning above. In auto mode the estimator owns the
+            // prior centre, so publish what it adapted to back into the shared config — that's
+            // what the UI slider reads, and where it freezes when auto is switched off.
+            let (tempo_cfg, tempo_cmds) = {
+                let mut t = tempo.lock().unwrap_or_else(|e| e.into_inner());
+                if t.config.auto_prior {
+                    t.config.prior_center_bpm = beat_detector.prior_center_bpm();
+                }
+                (t.config, t.drain())
+            };
+            beat_detector.set_tempo_config(tempo_cfg);
+            for cmd in tempo_cmds {
+                beat_detector.apply_tempo_command(cmd);
+            }
 
             // Beat detection (on raw magnitude spectra)
             let beat_result = beat_detector.process(

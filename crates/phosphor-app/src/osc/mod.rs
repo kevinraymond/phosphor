@@ -483,6 +483,9 @@ fn trigger_slug(action: &TriggerAction) -> &'static str {
         TriggerAction::SceneGoNext => "scene_go_next",
         TriggerAction::SceneGoPrev => "scene_go_prev",
         TriggerAction::ToggleTimeline => "toggle_timeline",
+        TriggerAction::TempoHalf => "tempo_half",
+        TriggerAction::TempoDouble => "tempo_double",
+        TriggerAction::TempoTap => "tempo_tap",
     }
 }
 
@@ -528,6 +531,9 @@ mod tests {
             (TriggerAction::SceneGoNext, "scene_go_next"),
             (TriggerAction::SceneGoPrev, "scene_go_prev"),
             (TriggerAction::ToggleTimeline, "toggle_timeline"),
+            (TriggerAction::TempoHalf, "tempo_half"),
+            (TriggerAction::TempoDouble, "tempo_double"),
+            (TriggerAction::TempoTap, "tempo_tap"),
         ];
         for (action, slug) in expected {
             assert_eq!(trigger_slug(&action), slug);

@@ -156,6 +156,9 @@ fn parse_client_message(text: &str) -> Option<WsInMessage> {
                 "scene_go_next" => TriggerAction::SceneGoNext,
                 "scene_go_prev" => TriggerAction::SceneGoPrev,
                 "toggle_timeline" => TriggerAction::ToggleTimeline,
+                "tempo_half" => TriggerAction::TempoHalf,
+                "tempo_double" => TriggerAction::TempoDouble,
+                "tempo_tap" => TriggerAction::TempoTap,
                 _ => return None,
             };
             Some(WsInMessage::Trigger(action))
@@ -324,6 +327,9 @@ mod tests {
             ("scene_go_next", TriggerAction::SceneGoNext),
             ("scene_go_prev", TriggerAction::SceneGoPrev),
             ("toggle_timeline", TriggerAction::ToggleTimeline),
+            ("tempo_half", TriggerAction::TempoHalf),
+            ("tempo_double", TriggerAction::TempoDouble),
+            ("tempo_tap", TriggerAction::TempoTap),
         ] {
             let json = format!(r#"{{"type":"trigger","action":"{action_str}"}}"#);
             match parse_client_message(&json) {

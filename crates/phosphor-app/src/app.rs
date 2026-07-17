@@ -359,6 +359,9 @@ impl App {
             settings.audio_device.as_deref(),
             settings.band_scale,
             Arc::new(std::sync::Mutex::new(settings.structure_tuning)),
+            Arc::new(std::sync::Mutex::new(crate::audio::TempoControl::new(
+                settings.tempo,
+            ))),
         );
         let midi = MidiSystem::new();
         let osc = OscSystem::new();

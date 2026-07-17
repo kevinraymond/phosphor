@@ -3,7 +3,161 @@
 
 use rustfft::FftPlanner;
 use rustfft::num_complex::Complex;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+// ---------------------------------------------------------------------------
+// A7 (#1458): tempo prior configuration + manual octave/tap overrides
+// ---------------------------------------------------------------------------
+
+/// Lowest/highest BPM the tempo estimator will report. Manual octave shifts and tap
+/// tempo are rejected when they would land outside this window.
+pub const BPM_MIN: f64 = 40.0;
+pub const BPM_MAX: f64 = 300.0;
+
+/// Auto-prior adaptation (A7 #1458). The rate is per tempo update — the estimator runs
+/// one every 6 frames (~14 Hz), so 0.001 is a ~70s time constant: slow enough that a
+/// transient mis-lock can't drag the prior with it. Bounds are tighter than
+/// `BPM_MIN`/`BPM_MAX`: the *prior centre* has no business out at 40 or 300.
+const AUTO_PRIOR_RATE: f64 = 0.001;
+const AUTO_PRIOR_MIN_CONFIDENCE: f64 = 0.5;
+const AUTO_PRIOR_MIN_BPM: f64 = 60.0;
+const AUTO_PRIOR_MAX_BPM: f64 = 200.0;
+
+/// Bounds on the prior width, in octaves. Zero would make the prior a delta function that
+/// rejects every candidate; the upper bound is already effectively "no opinion".
+const MIN_PRIOR_SIGMA: f64 = 0.05;
+const MAX_PRIOR_SIGMA: f64 = 4.0;
+
+/// Prior centre in log2 space, clamped to the range the estimator can actually report.
+fn prior_center_log2(bpm: f32) -> f64 {
+    (bpm as f64).clamp(BPM_MIN, BPM_MAX).log2()
+}
+
+/// User-tunable tempo prior (A7 #1458). The estimator scores metrical-ratio candidates
+/// with a log-Gaussian centred on `prior_center_bpm`, so this is what decides whether a
+/// 172 BPM DnB track reads as 172 or folds to 86.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TempoConfig {
+    /// Centre of the log-Gaussian tempo prior, in BPM.
+    pub prior_center_bpm: f32,
+    /// Prior width in octaves (log2 BPM). Small = a strong opinion about the octave.
+    pub prior_sigma: f32,
+    /// When set, the estimator slowly walks `prior_center_bpm` toward the tempo it is
+    /// actually locking onto. The audio thread publishes the adapted value back into the
+    /// shared config, so the UI reads it live and it freezes in place when auto is off.
+    pub auto_prior: bool,
+}
+
+impl Default for TempoConfig {
+    fn default() -> Self {
+        // The pre-A7 hardcoded values — upgrading users get identical detection until
+        // they pick a preset.
+        Self {
+            prior_center_bpm: 150.0,
+            prior_sigma: 1.0,
+            auto_prior: false,
+        }
+    }
+}
+
+/// Genre presets for the tempo prior (A7 #1458).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TempoPreset {
+    Neutral,
+    Wide,
+    House,
+    DrumAndBass,
+    HipHop,
+    Ambient,
+}
+
+impl TempoPreset {
+    pub const ALL: &[TempoPreset] = &[
+        TempoPreset::Neutral,
+        TempoPreset::Wide,
+        TempoPreset::House,
+        TempoPreset::DrumAndBass,
+        TempoPreset::HipHop,
+        TempoPreset::Ambient,
+    ];
+
+    /// (centre BPM, sigma in octaves).
+    pub fn values(self) -> (f32, f32) {
+        match self {
+            Self::Neutral => (150.0, 1.0),
+            Self::Wide => (140.0, 1.2),
+            Self::House => (127.0, 0.35),
+            Self::DrumAndBass => (172.0, 0.3),
+            Self::HipHop => (90.0, 0.4),
+            Self::Ambient => (70.0, 0.6),
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Neutral => "Neutral \u{00b7} 150",
+            Self::Wide => "Wide \u{00b7} 140",
+            Self::House => "House \u{00b7} 127",
+            Self::DrumAndBass => "Drum & Bass \u{00b7} 172",
+            Self::HipHop => "Hip-hop \u{00b7} 90",
+            Self::Ambient => "Ambient \u{00b7} 70",
+        }
+    }
+
+    /// The preset matching this config exactly, or `None` when the user has hand-tuned
+    /// the sliders. Keeps the config the single source of truth — no preset field to
+    /// drift out of sync with the values it names.
+    pub fn from_config(cfg: &TempoConfig) -> Option<TempoPreset> {
+        Self::ALL.iter().copied().find(|p| {
+            let (c, s) = p.values();
+            cfg.prior_center_bpm == c && cfg.prior_sigma == s
+        })
+    }
+}
+
+/// One-shot tempo override from the UI / MIDI / OSC (A7 #1458). Queued in
+/// [`TempoControl::pending`] and drained by the audio thread each hop.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TempoCommand {
+    /// Force the reported tempo up (+1) or down (-1) an octave.
+    ShiftOctave(i32),
+    /// Lock onto a tapped tempo, in BPM (averaged UI-side — see `audio_panel`).
+    Tap(f64),
+}
+
+/// Shared tempo state: live config plus a small command mailbox, both behind one mutex
+/// the audio thread locks once per hop (the #1510 pattern, extended with the mailbox the
+/// A7 note called for). Cloned into the audio thread and threaded through `switch_device`,
+/// so user tuning survives a device change.
+#[derive(Debug, Default)]
+pub struct TempoControl {
+    pub config: TempoConfig,
+    pending: Vec<TempoCommand>,
+}
+
+impl TempoControl {
+    pub fn new(config: TempoConfig) -> Self {
+        Self {
+            config,
+            pending: Vec::new(),
+        }
+    }
+
+    /// Queue a command for the audio thread. Bounded so a stalled/absent audio thread
+    /// can't grow this without limit — dropping the oldest keeps the newest intent.
+    pub fn push(&mut self, cmd: TempoCommand) {
+        const MAX_PENDING: usize = 16;
+        if self.pending.len() >= MAX_PENDING {
+            self.pending.remove(0);
+        }
+        self.pending.push(cmd);
+    }
+
+    pub fn drain(&mut self) -> Vec<TempoCommand> {
+        std::mem::take(&mut self.pending)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Circular buffer (fixed-size ring buffer with statistical methods)
@@ -327,6 +481,30 @@ impl KalmanBpm {
         }
     }
 
+    /// Jump the state to `bpm` with high certainty (A7 #1458: tap tempo). Bypasses the
+    /// octave-snap preprocessing in `update`, which would otherwise reject a tap that is
+    /// an octave away from the current estimate — exactly the case the user is correcting.
+    fn force(&mut self, bpm: f64) {
+        if bpm <= 0.0 {
+            return;
+        }
+        self.state = bpm.log2();
+        self.variance = 0.01;
+        self.diverge_count = 0;
+        self.snap_count = 0;
+        self.initialized = true;
+    }
+
+    /// Shift the filtered state by `direction` octaves (A7 #1458). Resets `snap_count` so
+    /// the shift doesn't immediately trip the snap-escape counter.
+    fn shift_octave(&mut self, direction: i32) {
+        if !self.initialized {
+            return;
+        }
+        self.state += direction as f64;
+        self.snap_count = 0;
+    }
+
     /// Update with a raw BPM measurement and confidence. Returns filtered BPM.
     fn update(&mut self, raw_bpm: f64, confidence: f64) -> f64 {
         if raw_bpm <= 0.0 {
@@ -441,13 +619,20 @@ struct TempoEstimator {
     // Genre-aware tempo prior (log-Gaussian)
     prior_center_log2: f64,
     prior_sigma: f64,
+    /// A7 (#1458): when set, `prior_center_log2` walks toward the locked tempo.
+    auto_prior: bool,
+    /// A7 (#1458): user octave override, in octaves. Applied to every raw measurement
+    /// before the Kalman rather than to the filter state alone — a one-shot state nudge
+    /// would be undone within ~2s by the snap-escape counter, since the autocorrelation
+    /// keeps reporting the octave the user just rejected.
+    octave_offset: i32,
 
     // Kalman filter replaces EMA + stability tracking
     kalman: KalmanBpm,
 }
 
 impl TempoEstimator {
-    fn new(history_seconds: f64, frame_rate: f64, prior_center_bpm: f64) -> Self {
+    fn new(history_seconds: f64, frame_rate: f64, config: TempoConfig) -> Self {
         let history_size = (history_seconds * frame_rate).ceil() as usize;
         let frame_time = 1.0 / frame_rate;
 
@@ -457,7 +642,7 @@ impl TempoEstimator {
         let fft_inverse = planner.plan_fft_inverse(fft_size);
 
         Self {
-            bpm_range: (40.0, 300.0),
+            bpm_range: (BPM_MIN as f32, BPM_MAX as f32),
             onset_history: CircularBuffer::new(history_size),
             frame_rate,
             frame_time,
@@ -468,10 +653,84 @@ impl TempoEstimator {
             fft_forward,
             fft_inverse,
             fft_size,
-            prior_center_log2: prior_center_bpm.log2(),
-            prior_sigma: 1.0,
+            prior_center_log2: prior_center_log2(config.prior_center_bpm),
+            prior_sigma: (config.prior_sigma as f64).clamp(MIN_PRIOR_SIGMA, MAX_PRIOR_SIGMA),
+            auto_prior: config.auto_prior,
+            octave_offset: 0,
             kalman: KalmanBpm::new(),
         }
+    }
+
+    /// Apply live config from the shared [`TempoControl`] (A7 #1458). In auto mode the
+    /// estimator owns `prior_center_bpm`, so the incoming centre is ignored — the audio
+    /// thread publishes ours back instead (see `prior_center_bpm`).
+    fn set_config(&mut self, config: TempoConfig) {
+        self.auto_prior = config.auto_prior;
+        // Both values are clamped rather than trusted: the UI can only produce sane ones, but
+        // `settings.json` is hand-editable, and a centre of 0 would make every candidate weight
+        // exp(-inf) = 0 — the prior would silently stop discriminating instead of failing loudly.
+        self.prior_sigma = (config.prior_sigma as f64).clamp(MIN_PRIOR_SIGMA, MAX_PRIOR_SIGMA);
+        if !config.auto_prior {
+            self.prior_center_log2 = prior_center_log2(config.prior_center_bpm);
+        }
+    }
+
+    /// Current prior centre in BPM — what auto mode has adapted to.
+    fn prior_center_bpm(&self) -> f32 {
+        2.0f64.powf(self.prior_center_log2) as f32
+    }
+
+    /// A7 (#1458): force the reported tempo up/down an octave. Shifts both the offset
+    /// (so it sticks) and the filter state (so the readout moves now, not after the
+    /// filter reconverges). Rejected when the result would leave the BPM range.
+    fn shift_octave(&mut self, direction: i32) {
+        let current = self.current_bpm;
+        if current > 0.0 {
+            let shifted = current * 2.0f64.powi(direction);
+            if shifted < self.bpm_range.0 as f64 || shifted > self.bpm_range.1 as f64 {
+                log::debug!("Octave shift rejected: {shifted:.1} BPM out of range");
+                return;
+            }
+        }
+        self.octave_offset += direction;
+        self.kalman.shift_octave(direction);
+        if current > 0.0 {
+            self.current_bpm = current * 2.0f64.powi(direction);
+            self.current_period_frames = 60.0 / (self.current_bpm * self.frame_time);
+        }
+        log::info!(
+            "Tempo octave shift {:+} -> offset {}",
+            direction,
+            self.octave_offset
+        );
+    }
+
+    /// A7 (#1458): lock onto a tapped tempo. Also re-aims `octave_offset` when the tap is
+    /// a clean octave off the raw reading, so the estimator keeps agreeing with the tap
+    /// instead of drifting back to the octave the user just corrected.
+    fn tap(&mut self, bpm: f64) {
+        if bpm < self.bpm_range.0 as f64 || bpm > self.bpm_range.1 as f64 {
+            log::debug!("Tap tempo rejected: {bpm:.1} BPM out of range");
+            return;
+        }
+        // What the detector reads before any offset — the octave the autocorrelation
+        // will keep insisting on.
+        let raw = self.current_bpm * 2.0f64.powi(-self.octave_offset);
+        if raw > 0.0 {
+            let octaves = (bpm / raw).log2().round();
+            if octaves.abs() <= 3.0 && (bpm / (raw * 2.0f64.powf(octaves)) - 1.0).abs() < 0.06 {
+                self.octave_offset = octaves as i32;
+            }
+        }
+        self.kalman.force(bpm);
+        self.current_bpm = bpm;
+        self.current_confidence = 1.0;
+        self.current_period_frames = 60.0 / (bpm * self.frame_time);
+        log::info!(
+            "Tap tempo: {:.1} BPM (octave offset {})",
+            bpm,
+            self.octave_offset
+        );
     }
 
     /// Update tempo estimate. Returns (bpm, confidence, period_seconds).
@@ -507,8 +766,24 @@ impl TempoEstimator {
             return (self.current_bpm, self.current_confidence, period_s);
         }
 
+        // A7 (#1458): honour the user's octave override before filtering.
+        let raw_bpm = self.apply_octave_offset(raw_bpm);
+
         // Kalman filter update
         let filtered_bpm = self.kalman.update(raw_bpm, confidence);
+
+        // A7 (#1458): auto prior — walk the centre toward the tempo we're locking onto, so
+        // the prior stops fighting a track whose real tempo sits far from it. Gated on high
+        // confidence: the prior steers octave selection and this steers the prior back, so a
+        // confident lock is what keeps that loop from cementing a wrong octave. The slow rate
+        // (~70s time constant at this update cadence) and the clamp bound the damage if it does.
+        if self.auto_prior && confidence >= AUTO_PRIOR_MIN_CONFIDENCE && filtered_bpm > 0.0 {
+            let target = filtered_bpm.log2();
+            self.prior_center_log2 += AUTO_PRIOR_RATE * (target - self.prior_center_log2);
+            self.prior_center_log2 = self
+                .prior_center_log2
+                .clamp(AUTO_PRIOR_MIN_BPM.log2(), AUTO_PRIOR_MAX_BPM.log2());
+        }
 
         self.current_bpm = filtered_bpm;
         self.current_confidence = confidence;
@@ -685,6 +960,24 @@ impl TempoEstimator {
         );
 
         (bpm, confidence, refined_lag)
+    }
+
+    /// Apply the user's octave override to a raw measurement (A7 #1458). Walks the offset
+    /// back toward zero if the tempo has since moved somewhere the shifted value can't
+    /// legally sit, so an override taken at 90 BPM can't strand a later 200 BPM track
+    /// outside the range.
+    fn apply_octave_offset(&mut self, raw_bpm: f64) -> f64 {
+        if raw_bpm <= 0.0 {
+            return raw_bpm;
+        }
+        while self.octave_offset != 0 {
+            let shifted = raw_bpm * 2.0f64.powi(self.octave_offset);
+            if shifted >= self.bpm_range.0 as f64 && shifted <= self.bpm_range.1 as f64 {
+                return shifted;
+            }
+            self.octave_offset -= self.octave_offset.signum();
+        }
+        raw_bpm
     }
 
     /// Log-Gaussian tempo prior weight centered at prior_center_bpm.
@@ -969,7 +1262,7 @@ pub struct BeatDetector {
 }
 
 impl BeatDetector {
-    pub fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32, tempo: TempoConfig) -> Self {
         // A5 (#1456): exact frame rate from the fixed analysis hop (sr / ANALYSIS_HOP),
         // e.g. ~86.1 Hz @ 44.1 kHz. Replaces the old hardcoded ~100 Hz approximation that
         // the tempo estimator then had to correct at runtime.
@@ -980,7 +1273,7 @@ impl BeatDetector {
 
         Self {
             onset_detector: OnsetDetector::new(sample_rate, history_size, long_term_size),
-            tempo_estimator: TempoEstimator::new(8.0, frame_rate, 150.0),
+            tempo_estimator: TempoEstimator::new(8.0, frame_rate, tempo),
             beat_scheduler: BeatScheduler::new(),
             held_onset: 0.0,
             onset_decay_tau: 0.20,
@@ -988,6 +1281,24 @@ impl BeatDetector {
             onset_cooldown: 0.05,
             last_onset_time: 0.0,
         }
+    }
+
+    /// Apply live tempo config (A7 #1458), snapshotted from the shared `TempoControl`.
+    pub fn set_tempo_config(&mut self, config: TempoConfig) {
+        self.tempo_estimator.set_config(config);
+    }
+
+    /// Apply a one-shot tempo override (A7 #1458).
+    pub fn apply_tempo_command(&mut self, cmd: TempoCommand) {
+        match cmd {
+            TempoCommand::ShiftOctave(dir) => self.tempo_estimator.shift_octave(dir),
+            TempoCommand::Tap(bpm) => self.tempo_estimator.tap(bpm),
+        }
+    }
+
+    /// Prior centre in BPM — published back to the shared config in auto mode (A7 #1458).
+    pub fn prior_center_bpm(&self) -> f32 {
+        self.tempo_estimator.prior_center_bpm()
     }
 
     /// Process one frame of audio data.
@@ -1329,14 +1640,22 @@ mod tests {
     /// Run a BPM convergence test with synthetic kicks at the given tempo.
     /// Returns the detected BPM after `duration_secs` seconds.
     fn run_bpm_convergence_test(target_bpm: f64, duration_secs: f64) -> f32 {
+        run_bpm_convergence_with(target_bpm, duration_secs, TempoConfig::default())
+    }
+
+    fn run_bpm_convergence_with(target_bpm: f64, duration_secs: f64, tempo: TempoConfig) -> f32 {
         let sample_rate = 44100.0;
-        let mut detector = BeatDetector::new(sample_rate);
+        let mut detector = BeatDetector::new(sample_rate, tempo);
 
         let bass_len = 2049; // 4096/2 + 1
         let mid_len = 513; // 1024/2 + 1
         let high_len = 257; // 512/2 + 1
 
-        let dt = 0.01; // 100 Hz frame rate
+        // Frames must be spaced at the detector's own clock. Since A5 (#1456) that is derived
+        // from the fixed analysis hop (sr / ANALYSIS_HOP ~= 86.1 Hz @ 44.1 kHz), not the 100 Hz
+        // this harness used to assume — at 100 Hz every `target_bpm` below actually reached the
+        // estimator 13.9% low, and only the +/-15% tolerance bands hid it.
+        let dt = crate::audio::ANALYSIS_HOP as f64 / sample_rate as f64;
         let kick_interval = 60.0 / target_bpm;
         let mut last_kick = -1.0f64;
         let num_frames = (duration_secs / dt) as usize;
@@ -1429,5 +1748,253 @@ mod tests {
             bpm > 116.0 && bpm < 174.0,
             "145 BPM: expected 116-174 (not 290 octave double), got {bpm}"
         );
+    }
+
+    // ---- A7 (#1458): tempo prior, octave override, tap tempo ----
+
+    #[test]
+    fn tempo_config_default_matches_pre_a7_hardcoding() {
+        // Upgrading users must get byte-identical detection until they touch a preset.
+        let c = TempoConfig::default();
+        assert_eq!(c.prior_center_bpm, 150.0);
+        assert_eq!(c.prior_sigma, 1.0);
+        assert!(!c.auto_prior);
+    }
+
+    #[test]
+    fn tempo_preset_round_trips_through_config() {
+        for &p in TempoPreset::ALL {
+            let (center, sigma) = p.values();
+            let cfg = TempoConfig {
+                prior_center_bpm: center,
+                prior_sigma: sigma,
+                auto_prior: false,
+            };
+            assert_eq!(TempoPreset::from_config(&cfg), Some(p));
+        }
+    }
+
+    #[test]
+    fn hand_tuned_config_matches_no_preset() {
+        let cfg = TempoConfig {
+            prior_center_bpm: 133.0,
+            prior_sigma: 0.5,
+            auto_prior: false,
+        };
+        assert_eq!(TempoPreset::from_config(&cfg), None);
+    }
+
+    #[test]
+    fn prior_center_decides_the_octave() {
+        // The A7 payoff, stated as something this harness can actually prove: the same 172 BPM
+        // signal reads as 172 under the default prior and folds to half tempo under a prior
+        // centred low. That is the prior steering metrical-ratio selection — the mechanism the
+        // genre presets exist to drive.
+        //
+        // Note this harness feeds a clean impulse train, whose autocorrelation has no strong
+        // half-tempo subharmonic, so it cannot reproduce the real-world 172->86 fold the task
+        // describes (that needs a backbeat on 2 and 4). It proves the prior is wired and
+        // effective; it does not prove the DnB preset fixes real DnB audio.
+        let default_bpm = run_bpm_convergence_with(172.0, 10.0, TempoConfig::default());
+        assert!(
+            default_bpm > 155.0 && default_bpm < 190.0,
+            "default prior should hold 172, got {default_bpm}"
+        );
+
+        let (center, sigma) = TempoPreset::Ambient.values();
+        let low_bpm = run_bpm_convergence_with(
+            172.0,
+            10.0,
+            TempoConfig {
+                prior_center_bpm: center,
+                prior_sigma: sigma,
+                auto_prior: false,
+            },
+        );
+        assert!(
+            low_bpm > 78.0 && low_bpm < 95.0,
+            "a prior centred at {center} should fold 172 to half tempo, got {low_bpm}"
+        );
+    }
+
+    #[test]
+    fn tempo_control_mailbox_drains_once() {
+        let mut ctl = TempoControl::default();
+        ctl.push(TempoCommand::ShiftOctave(1));
+        ctl.push(TempoCommand::Tap(128.0));
+        assert_eq!(
+            ctl.drain(),
+            vec![TempoCommand::ShiftOctave(1), TempoCommand::Tap(128.0)]
+        );
+        assert!(ctl.drain().is_empty(), "commands must not be redelivered");
+    }
+
+    #[test]
+    fn tempo_control_mailbox_is_bounded() {
+        // A stalled/absent audio thread must not let the mailbox grow without limit.
+        let mut ctl = TempoControl::default();
+        for _ in 0..100 {
+            ctl.push(TempoCommand::ShiftOctave(1));
+        }
+        assert!(ctl.drain().len() <= 16);
+    }
+
+    /// Drive the estimator to a stable lock, then hand back the estimator for override tests.
+    fn locked_estimator(target_bpm: f64) -> TempoEstimator {
+        let frame_rate = 100.0;
+        let mut est = TempoEstimator::new(8.0, frame_rate, TempoConfig::default());
+        let dt = 1.0 / frame_rate;
+        let interval = 60.0 / target_bpm;
+        let mut last = -1.0f64;
+        for frame in 0..1000 {
+            let t = frame as f64 * dt;
+            let onset = if (t - last) >= interval - dt * 0.5 && t >= interval {
+                last = t;
+                1.0
+            } else {
+                0.0
+            };
+            est.update(onset);
+        }
+        est
+    }
+
+    #[test]
+    fn octave_shift_survives_the_snap_escape() {
+        // The regression this guards: shifting only the Kalman state is undone within ~30
+        // updates by the snap-escape counter, because the autocorrelation keeps reporting the
+        // octave the user just rejected. The offset must make the override stick.
+        let mut est = locked_estimator(120.0);
+        let before = est.current_bpm;
+        assert!(before > 100.0 && before < 140.0, "setup: got {before}");
+
+        est.shift_octave(-1);
+        assert!(
+            (est.current_bpm - before / 2.0).abs() < 5.0,
+            "shift should halve the readout immediately, got {}",
+            est.current_bpm
+        );
+
+        // Keep feeding the same 120 BPM signal well past the 30-update escape threshold.
+        let dt = 0.01;
+        let interval = 0.5;
+        let mut last = -1.0f64;
+        for frame in 0..800 {
+            let t = frame as f64 * dt;
+            let onset = if (t - last) >= interval - dt * 0.5 && t >= interval {
+                last = t;
+                1.0
+            } else {
+                0.0
+            };
+            est.update(onset);
+        }
+        assert!(
+            est.current_bpm < 80.0,
+            "octave override must hold, got {} BPM back at full tempo",
+            est.current_bpm
+        );
+    }
+
+    #[test]
+    fn octave_shift_out_of_range_is_rejected() {
+        let mut est = locked_estimator(170.0);
+        let before = est.current_bpm;
+        est.shift_octave(1); // 340 BPM > BPM_MAX
+        assert_eq!(
+            est.current_bpm, before,
+            "out-of-range shift must be a no-op"
+        );
+    }
+
+    #[test]
+    fn tap_tempo_locks_across_an_octave() {
+        // A tap an octave away from the estimate is exactly the case the user is correcting,
+        // so it must bypass the Kalman's octave-snap preprocessing rather than be swallowed.
+        let mut est = locked_estimator(86.0);
+        assert!(est.current_bpm < 100.0, "setup: got {}", est.current_bpm);
+        est.tap(172.0);
+        assert!(
+            (est.current_bpm - 172.0).abs() < 1.0,
+            "tap must win, got {}",
+            est.current_bpm
+        );
+    }
+
+    #[test]
+    fn tap_tempo_out_of_range_is_rejected() {
+        let mut est = locked_estimator(120.0);
+        let before = est.current_bpm;
+        est.tap(700.0);
+        assert_eq!(est.current_bpm, before, "out-of-range tap must be a no-op");
+    }
+
+    #[test]
+    fn auto_prior_walks_toward_the_detected_tempo() {
+        let frame_rate = 100.0;
+        let mut est = TempoEstimator::new(
+            8.0,
+            frame_rate,
+            TempoConfig {
+                prior_center_bpm: 150.0,
+                prior_sigma: 0.4,
+                auto_prior: true,
+            },
+        );
+        let start = est.prior_center_bpm();
+        let dt = 1.0 / frame_rate;
+        let interval = 60.0 / 96.0;
+        let mut last = -1.0f64;
+        for frame in 0..12000 {
+            let t = frame as f64 * dt;
+            let onset = if (t - last) >= interval - dt * 0.5 && t >= interval {
+                last = t;
+                1.0
+            } else {
+                0.0
+            };
+            est.update(onset);
+        }
+        let end = est.prior_center_bpm();
+        assert!(
+            end < start - 1.0,
+            "auto prior should drift down from {start} toward ~96, ended at {end}"
+        );
+        assert!(
+            end >= AUTO_PRIOR_MIN_BPM as f32 && end <= AUTO_PRIOR_MAX_BPM as f32,
+            "auto prior must stay clamped, got {end}"
+        );
+    }
+
+    #[test]
+    fn nonsense_config_values_are_clamped_not_trusted() {
+        // settings.json is hand-editable; a 0 centre would make every prior weight exp(-inf).
+        let mut est = TempoEstimator::new(8.0, 100.0, TempoConfig::default());
+        est.set_config(TempoConfig {
+            prior_center_bpm: 0.0,
+            prior_sigma: 0.0,
+            auto_prior: false,
+        });
+        assert!(
+            est.prior_center_bpm().is_finite() && est.prior_center_bpm() >= BPM_MIN as f32,
+            "centre must stay finite and in range, got {}",
+            est.prior_center_bpm()
+        );
+        assert!(est.prior_sigma >= MIN_PRIOR_SIGMA);
+        // The prior must still discriminate between candidates.
+        assert!(est.tempo_prior_weight(BPM_MIN) > est.tempo_prior_weight(BPM_MAX * 0.9));
+    }
+
+    #[test]
+    fn auto_prior_ignores_the_config_center() {
+        // In auto mode the estimator owns the centre — a stale UI value must not stomp it.
+        let mut est = TempoEstimator::new(8.0, 100.0, TempoConfig::default());
+        est.set_config(TempoConfig {
+            prior_center_bpm: 70.0,
+            prior_sigma: 0.5,
+            auto_prior: true,
+        });
+        assert_eq!(est.prior_center_bpm(), 150.0);
+        assert_eq!(est.prior_sigma, 0.5, "sigma must still track the config");
     }
 }

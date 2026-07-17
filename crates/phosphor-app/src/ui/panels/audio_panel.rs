@@ -2,7 +2,7 @@ use std::f32::consts::{PI, TAU};
 
 use egui::{Color32, Mesh, Pos2, Rect, RichText, Shape, Stroke, Ui, Vec2, pos2};
 
-use crate::audio::{AudioSystem, StructureConfig};
+use crate::audio::{AudioSystem, StructureConfig, TempoCommand, TempoConfig, TempoPreset};
 use crate::gpu::ShaderUniforms;
 use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
@@ -854,6 +854,9 @@ pub fn draw_audio_panel(ui: &mut Ui, audio: &mut AudioSystem, uniforms: &ShaderU
     // Structure tuning (A18 knobs, #1510) — collapsible, writes the shared config live.
     draw_tuning_rows(ui, audio);
 
+    // Tempo prior + octave/tap overrides (A7 #1458) — collapsible, same live-write pattern.
+    draw_tempo_rows(ui, audio, uniforms);
+
     // Chroma
     draw_section_header(ui, "CHROMA", "12 pitch classes");
     ui.vertical_centered(|ui| {
@@ -982,5 +985,132 @@ fn draw_tuning_rows(ui: &mut Ui, audio: &mut AudioSystem) {
     if committed {
         ui.ctx()
             .data_mut(|d| d.insert_temp(egui::Id::new("structure_tuning_dirty"), true));
+    }
+}
+
+/// Tempo prior + manual overrides (A7 #1458). Genre presets and the prior sliders write the
+/// shared `TempoControl` config directly (the audio thread reads it next hop — no pipeline
+/// rebuild); the half/double and tap controls go through the same struct's command mailbox.
+/// Collapsed by default to keep the monitor panel uncluttered.
+fn draw_tempo_rows(ui: &mut Ui, audio: &mut AudioSystem, uniforms: &ShaderUniforms) {
+    let mut committed = false;
+    let mut tapped = false;
+    ui.collapsing(
+        RichText::new("TEMPO \u{00b7} prior & octave")
+            .size(SMALL_SIZE)
+            .strong(),
+        |ui| {
+            let mut ctl = audio.tempo().lock().unwrap_or_else(|e| e.into_inner());
+
+            // Preset picker. The active entry is derived from the values rather than stored,
+            // so the sliders below stay the single source of truth — hand-tune one and the
+            // picker honestly reads "Custom".
+            let current = TempoPreset::from_config(&ctl.config);
+            let selected = current.map(|p| p.display_name()).unwrap_or("Custom");
+            egui::ComboBox::from_label(RichText::new("Preset").size(SMALL_SIZE))
+                .selected_text(RichText::new(selected).size(SMALL_SIZE))
+                .show_ui(ui, |ui| {
+                    for &p in TempoPreset::ALL {
+                        if ui
+                            .selectable_label(
+                                current == Some(p),
+                                RichText::new(p.display_name()).size(SMALL_SIZE),
+                            )
+                            .clicked()
+                        {
+                            let (center, sigma) = p.values();
+                            ctl.config.prior_center_bpm = center;
+                            ctl.config.prior_sigma = sigma;
+                            committed = true;
+                        }
+                    }
+                });
+
+            let auto = ctl.config.auto_prior;
+            // In auto mode the detector owns the centre and publishes it back each hop, so the
+            // slider becomes a live readout rather than an input.
+            let center_resp = ui
+                .add_enabled(
+                    !auto,
+                    egui::Slider::new(&mut ctl.config.prior_center_bpm, 60.0..=200.0)
+                        .text("Centre"),
+                )
+                .on_hover_text(
+                    "Where the detector expects the tempo to sit. Tracks far from this fold to \
+                     half/double.",
+                );
+            committed |= center_resp.drag_stopped() || center_resp.lost_focus();
+
+            let sigma_resp = ui
+                .add(egui::Slider::new(&mut ctl.config.prior_sigma, 0.2..=1.5).text("Width"))
+                .on_hover_text(
+                    "Prior width in octaves. Narrow = a strong opinion about which octave is \
+                     right.",
+                );
+            committed |= sigma_resp.drag_stopped() || sigma_resp.lost_focus();
+
+            if ui
+                .checkbox(
+                    &mut ctl.config.auto_prior,
+                    RichText::new("Adapt automatically").size(SMALL_SIZE),
+                )
+                .on_hover_text(
+                    "Slowly move the centre toward the tempo actually being detected (~1 min).",
+                )
+                .changed()
+            {
+                committed = true;
+            }
+
+            ui.add_space(2.0);
+            let bpm = uniforms.bpm * 300.0;
+            if bpm > 1.0 {
+                ui.label(
+                    RichText::new(format!("{bpm:.1} BPM"))
+                        .size(SMALL_SIZE)
+                        .strong(),
+                );
+            } else {
+                ui.label(RichText::new("\u{2014} BPM").size(SMALL_SIZE).weak());
+            }
+
+            ui.horizontal(|ui| {
+                if ui
+                    .button(RichText::new("\u{00f7}2").size(SMALL_SIZE))
+                    .on_hover_text("Halve the detected tempo (also mappable to MIDI/OSC).")
+                    .clicked()
+                {
+                    ctl.push(TempoCommand::ShiftOctave(-1));
+                }
+                if ui
+                    .button(RichText::new("\u{00d7}2").size(SMALL_SIZE))
+                    .on_hover_text("Double the detected tempo (also mappable to MIDI/OSC).")
+                    .clicked()
+                {
+                    ctl.push(TempoCommand::ShiftOctave(1));
+                }
+                tapped = ui
+                    .button(RichText::new("Tap").size(SMALL_SIZE))
+                    .on_hover_text("Tap the beat 3+ times to lock the tempo.")
+                    .clicked();
+            });
+
+            ui.add_space(2.0);
+            if ui.button("Reset to defaults").clicked() {
+                ctl.config = TempoConfig::default();
+                committed = true;
+            }
+        },
+    );
+
+    // Outside the closure: the tempo mutex guard above has dropped, and `tap_tempo` locks it
+    // again to post the averaged tempo.
+    if tapped {
+        audio.tap_tempo();
+    }
+
+    if committed {
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(egui::Id::new("tempo_config_dirty"), true));
     }
 }

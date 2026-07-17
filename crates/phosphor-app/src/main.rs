@@ -1023,6 +1023,23 @@ impl ApplicationHandler for PhosphorApp {
                     app.settings.save();
                 }
 
+                // Persist the A7 tempo prior after a slider release / preset pick (#1458). Same
+                // deal as the A18 tuning above: the live value already reached the audio thread
+                // through the shared Arc, so this only snapshots it into settings and saves.
+                let tempo_dirty: Option<bool> = app
+                    .egui_overlay
+                    .context()
+                    .data_mut(|d| d.remove_temp(egui::Id::new("tempo_config_dirty")));
+                if tempo_dirty == Some(true) {
+                    app.settings.tempo = app
+                        .audio
+                        .tempo()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .config;
+                    app.settings.save();
+                }
+
                 // Handle FFmpeg webcam toggle from settings panel
                 #[cfg(feature = "webcam")]
                 {
@@ -3066,6 +3083,17 @@ impl ApplicationHandler for PhosphorApp {
                         TriggerAction::SceneGoPrev => {
                             let event = app.timeline.go_prev();
                             app.process_timeline_event(event);
+                        }
+                        TriggerAction::TempoHalf => {
+                            app.audio
+                                .send_tempo_command(crate::audio::TempoCommand::ShiftOctave(-1));
+                        }
+                        TriggerAction::TempoDouble => {
+                            app.audio
+                                .send_tempo_command(crate::audio::TempoCommand::ShiftOctave(1));
+                        }
+                        TriggerAction::TempoTap => {
+                            app.audio.tap_tempo();
                         }
                         TriggerAction::ToggleTimeline => {
                             if app.timeline.active {

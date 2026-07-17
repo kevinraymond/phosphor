@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::audio::StructureConfig;
+use crate::audio::{StructureConfig, TempoConfig};
 use crate::ui::theme::ThemeMode;
 
 /// How the 7 frequency bands are scaled (A1 #1452).
@@ -84,6 +84,10 @@ pub struct SettingsConfig {
     /// without this key load with the built-in defaults.
     #[serde(default)]
     pub structure_tuning: StructureConfig,
+    /// A7 tempo prior (#1458). `#[serde(default)]` so older settings files without this key
+    /// load with the built-in defaults (the pre-A7 hardcoded 150 BPM / sigma 1.0).
+    #[serde(default)]
+    pub tempo: TempoConfig,
 }
 
 impl Default for SettingsConfig {
@@ -97,6 +101,7 @@ impl Default for SettingsConfig {
             webcam_device: None,
             use_ffmpeg_webcam: false,
             structure_tuning: StructureConfig::default(),
+            tempo: TempoConfig::default(),
         }
     }
 }
@@ -188,6 +193,7 @@ mod tests {
                 webcam_device: None,
                 use_ffmpeg_webcam: false,
                 structure_tuning: StructureConfig::default(),
+                tempo: TempoConfig::default(),
             };
             let json = serde_json::to_string(&c).unwrap();
             let c2: SettingsConfig = serde_json::from_str(&json).unwrap();
@@ -206,6 +212,7 @@ mod tests {
             webcam_device: None,
             use_ffmpeg_webcam: false,
             structure_tuning: StructureConfig::default(),
+            tempo: TempoConfig::default(),
         };
         let json = serde_json::to_string(&c).unwrap();
         let c2: SettingsConfig = serde_json::from_str(&json).unwrap();

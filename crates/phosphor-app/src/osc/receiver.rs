@@ -168,6 +168,9 @@ fn parse_osc_message(msg: &OscMessage) -> Option<OscInMessage> {
                 "scene_go_next" => TriggerAction::SceneGoNext,
                 "scene_go_prev" => TriggerAction::SceneGoPrev,
                 "toggle_timeline" => TriggerAction::ToggleTimeline,
+                "tempo_half" => TriggerAction::TempoHalf,
+                "tempo_double" => TriggerAction::TempoDouble,
+                "tempo_tap" => TriggerAction::TempoTap,
                 _ => {
                     let value = first_float(&msg.args).unwrap_or(1.0);
                     return Some(OscInMessage::Raw {
