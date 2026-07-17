@@ -575,6 +575,8 @@ fn audio_thread(
             raw.loudness_m = loud.m;
             raw.loudness_s = loud.s;
             raw.loudness_trend = loud.trend;
+            // A6 (#1457): the onset detector gates on this perceptual silence flag.
+            let loud_silent = loudness_meter.is_silent();
 
             // A11 (#1462): key detection on the fresh CQT chroma, before normalization
             // rescales it. Key fields are Passthrough, so they survive normalize/smooth.
@@ -599,6 +601,7 @@ fn audio_thread(
                 analyzer.high_magnitude(),
                 raw.rms,
                 timestamp,
+                loud_silent,
             );
             raw.onset = beat_result.onset_strength;
             raw.beat = beat_result.beat;
