@@ -1307,15 +1307,15 @@ impl BeatDetector {
     /// - bass_spectrum: magnitude spectrum from 4096-pt FFT (num_bins)
     /// - mid_spectrum: magnitude spectrum from 1024-pt FFT
     /// - high_spectrum: magnitude spectrum from 512-pt FFT
-    /// - rms: current RMS energy (only for the hard phase-freeze on near-silence)
     /// - timestamp: current time in seconds
-    /// - loud_silent: perceptual silence gate from the A10 loudness meter (#1457)
+    /// - loud_silent: perceptual silence gate from the A10 loudness meter (#1457). Gates
+    ///   the phase freeze; took over from an `rms < 1e-4` test that misfired on loud audio
+    ///   (see the freeze site below).
     pub fn process(
         &mut self,
         bass_spectrum: &[f32],
         mid_spectrum: &[f32],
         high_spectrum: &[f32],
-        rms: f32,
         timestamp: f64,
         loud_silent: bool,
     ) -> BeatResult {
@@ -1359,8 +1359,15 @@ impl BeatDetector {
             self.held_onset *= (-dt as f32 / self.onset_decay_tau).exp();
         }
 
-        // Freeze phase at 0 during silence
-        let phase = if rms < 1e-4 { 0.0 } else { beat_phase as f32 };
+        // Freeze phase at 0 during silence.
+        //
+        // Gate on the A10 perceptual flag, not on `rms`: by this point `rms` has been
+        // through the adaptive normalizer, which maps it to `(v − P5) / (P95 − P5)` and so
+        // floors it at exactly 0.0 whenever the signal touches the bottom of its recent
+        // range. On any rhythmic material that is the trough between every hit, on
+        // perfectly loud audio — which used to punch a spurious 1-hop `beat_phase` dropout
+        // to 0 several times a beat (found while verifying A8 #1459).
+        let phase = if loud_silent { 0.0 } else { beat_phase as f32 };
 
         BeatResult {
             onset_strength: self.held_onset,
@@ -1677,8 +1684,7 @@ mod tests {
                 last_kick = t;
             }
 
-            let rms = if is_kick_frame { 0.5 } else { 0.05 };
-            let result = detector.process(&bass, &mid, &high, rms, t, false);
+            let result = detector.process(&bass, &mid, &high, t, false);
             last_bpm = result.bpm;
         }
 

@@ -4,6 +4,7 @@ pub mod capture;
 pub mod chroma;
 pub mod downbeat;
 pub mod features;
+pub mod interp;
 pub mod key;
 pub mod loudness;
 pub mod normalizer;
@@ -31,6 +32,15 @@ pub struct AudioFrame {
     /// One mel-spectrogram column, [`analyzer::SPECTROGRAM_MELS`] bands in 0..1
     /// (scrolls into the `audio_spectrogram` texture).
     pub mel: Box<[f32]>,
+    /// A5 sample-clock time this hop was analyzed at (`samples_consumed / sample_rate`),
+    /// seconds. Frames are exactly [`ANALYSIS_HOP`] apart; the A8 render playhead (#1459)
+    /// interpolates between frames on this clock.
+    pub timestamp: f64,
+    /// The audio side froze `beat_phase` at 0 for this frame (`rms < 1e-4`, see
+    /// [`beat`]`::BeatDetector::process`). Carried explicitly because the render thread only
+    /// sees the *smoothed* rms, which lags the freeze by ~1s — long enough for A8's local
+    /// phase to free-run over the start of a silence.
+    pub phase_frozen: bool,
 }
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -45,6 +55,7 @@ use self::beat::BeatDetector;
 pub use self::beat::{TempoCommand, TempoConfig, TempoControl, TempoPreset};
 use self::capture::{AudioCapture, RingBuffer};
 use self::downbeat::DownbeatTracker;
+use self::interp::FeatureInterpolator;
 use self::key::KeyDetector;
 use self::loudness::LoudnessMeter;
 use self::normalizer::FeatureNormalizer;
@@ -135,6 +146,9 @@ fn open_backend(device_name: Option<&str>) -> Result<OpenedBackend, String> {
 pub struct AudioSystem {
     receiver: Receiver<AudioFrame>,
     latest: Option<AudioFeatures>,
+    /// A8 (#1459): blends the audio thread's 86.1 Hz frames up to render rate and locally
+    /// advances `beat_phase`, so neither stair-steps on a 120-144 Hz display.
+    interp: FeatureInterpolator,
     /// Newest log-frequency spectrum column received (A17 `audio_spectrum`, #1468).
     /// Held between polls so the render thread always has a value to upload.
     latest_spectrum: Vec<f32>,
@@ -269,6 +283,7 @@ impl AudioSystem {
                 Self {
                     receiver: rx,
                     latest: None,
+                    interp: FeatureInterpolator::new(sample_rate as u32),
                     latest_spectrum: vec![0.0; analyzer::SPECTRUM_BINS],
                     pending_mel: Vec::new(),
                     latest_mel: Vec::new(),
@@ -310,6 +325,9 @@ impl AudioSystem {
                 Self {
                     receiver: rx,
                     latest: None,
+                    // No device: no frames will arrive, so this only ever serves the
+                    // fallback path. Matches the `sample_rate` default below.
+                    interp: FeatureInterpolator::new(44100),
                     latest_spectrum: vec![0.0; analyzer::SPECTRUM_BINS],
                     pending_mel: Vec::new(),
                     latest_mel: Vec::new(),
@@ -375,6 +393,12 @@ impl AudioSystem {
         );
         self.receiver = std::mem::replace(&mut new.receiver, crossbeam_channel::bounded(1).1);
         self.latest = None;
+        // A8 (#1459): the fresh audio thread restarts `samples_consumed` at 0, so the next
+        // frame's timestamp jumps *backwards* by the whole session length. Drop the
+        // interpolation state so the playhead re-seeds from the new clock instead of
+        // slewing across that gap. (`push` also guards this, but the device may also have
+        // changed sample rate — so rebuild rather than just reset.)
+        self.interp = FeatureInterpolator::new(new.sample_rate);
         self.latest_spectrum = std::mem::take(&mut new.latest_spectrum);
         self.pending_mel.clear();
         self.latest_mel.clear();
@@ -502,8 +526,14 @@ impl AudioSystem {
             .clone()
     }
 
-    /// Drain the channel and return the most recent features.
-    pub fn latest_features(&mut self) -> Option<AudioFeatures> {
+    /// Drain the channel and return the features at the render playhead.
+    ///
+    /// A8 (#1459): analysis runs at a fixed 86.1 Hz hop while the render loop may poll at
+    /// 144 Hz, so rather than repeat the newest frame this interpolates the two frames
+    /// bracketing a playhead held [`TARGET_DELAY_HOPS`] behind the audio clock, per each
+    /// slot's [`schema::InterpPolicy`], and advances `beat_phase` locally. `dt` is the
+    /// render frame time.
+    pub fn latest_features(&mut self, dt: f32) -> Option<AudioFeatures> {
         let now = Instant::now();
         let poll_dt = now.duration_since(self.last_poll_at).as_secs_f32();
         self.last_poll_at = now;
@@ -511,6 +541,8 @@ impl AudioSystem {
         let mut got_frame = false;
         while let Ok(frame) = self.receiver.try_recv() {
             self.latest = Some(frame.features);
+            self.interp
+                .push(frame.timestamp, frame.features, frame.phase_frozen);
             // Keep the newest spectrum; accumulate every mel column so the spectrogram
             // scrolls smoothly even when several audio frames arrive between polls.
             self.latest_spectrum.clear();
@@ -533,6 +565,12 @@ impl AudioSystem {
                 let k = (-poll_dt / 0.3).exp();
                 decay_features(latest, k);
             }
+            // A8: the decay above mutates `self.latest`, which the interpolator does not
+            // read — leaving its ring live here would keep serving the last *undecayed*
+            // frame and silently defeat the decay, freezing visuals loud on a dead device.
+            // Resetting drops us onto the `self.latest` fallback path; the ring refills
+            // ~23 ms after the device recovers.
+            self.interp.reset();
         }
 
         // Health check: detect stalled audio callbacks
@@ -546,14 +584,20 @@ impl AudioSystem {
             self.last_error = Some(msg.to_string());
         }
 
+        // A8 (#1459): blend the two frames bracketing the render playhead and advance
+        // `beat_phase` locally, falling back to the newest held frame when the ring can't
+        // bracket it (startup, stall, device switch) — the pre-A8 behaviour.
+        let interpolated = self.interp.sample(dt, self.latest);
+
         // Beat pulses are 1-frame events that the drain-to-newest loop above (and
         // the channel's drop-on-full policy) can lose. The audio thread counts
         // beats in an atomic, so derive `beat` from the counter instead of the
         // channel's field: any advance since the last poll means a beat fired.
+        // Runs last so it always wins over the interpolated slots.
         let beats_now = self.beat_counter.load(Ordering::Relaxed);
         let downbeats_now = self.downbeat_counter.load(Ordering::Relaxed);
         let drops_now = self.drop_counter.load(Ordering::Relaxed);
-        let result = self.latest.map(|mut features| {
+        let result = interpolated.map(|mut features| {
             features.beat = if beats_now == self.beats_seen {
                 0.0
             } else {
@@ -804,7 +848,6 @@ fn audio_thread(
                 analyzer.bass_magnitude(),
                 analyzer.mid_magnitude(),
                 analyzer.high_magnitude(),
-                raw.rms,
                 timestamp,
                 loud_silent,
             );
@@ -861,6 +904,13 @@ fn audio_thread(
                 features: smoothed,
                 spectrum: Box::new(analyzer.log_spectrum_512()),
                 mel: Box::new(analyzer.spectrogram_column()),
+                timestamp,
+                // Mirrors the silence gate in `BeatDetector::process` exactly: it pins
+                // phase at 0 under perceptual silence, so A8's local oscillator must follow
+                // rather than free-run. Same flag the detector gates on — `raw.rms` would
+                // be wrong here, since it is post-normalization and hits 0 at the bottom of
+                // the adaptive range on loud audio.
+                phase_frozen: loud_silent,
             };
 
             // Non-blocking send; drop if main thread is behind

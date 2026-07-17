@@ -50,6 +50,21 @@ pub enum DecayPolicy {
     ForceZero,
 }
 
+/// How the A8 render-side interpolator (#1459) treats a feature between audio frames.
+///
+/// Analysis runs at a fixed 86.1 Hz hop while the render loop can poll at 144 Hz, so the
+/// render thread blends the two frames bracketing its playhead. Only quantities with a
+/// meaningful value *between* two samples may be blended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterpPolicy {
+    /// Linearly blend the bracketing frames — a continuous quantity.
+    Lerp,
+    /// Zero-order hold from the older bracketing frame. For a 1-frame trigger, a wrapping
+    /// phase (whose wrap would lerp into a backwards sweep through 0.5), or a categorical
+    /// index (a value between two pitch classes is not a pitch class).
+    Hold,
+}
+
 /// Per-feature asymmetric attack/release EMA constants (seconds).
 #[derive(Debug, Clone, Copy)]
 pub struct SmoothParams {
@@ -88,6 +103,11 @@ pub struct FeatureDef {
     pub norm: NormPolicy,
     pub smooth: SmoothParams,
     pub decay: DecayPolicy,
+    /// A8 (#1459). Orthogonal to `smooth.bypass`, which cannot stand in for it:
+    /// `dominant_chroma` is an argmax index that must not be lerped yet is smoothed, and
+    /// `bpm` Holds on decay yet lerps fine. Set via [`def_hold`]; [`def`] defaults to
+    /// `Lerp` since 52 of the 61 slots are continuous.
+    pub interp: InterpPolicy,
 }
 
 use DecayPolicy::{ForceZero, Hold, Scale};
@@ -123,8 +143,10 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
     // Beat detection (5) — detector-owned: already normalized, so pass through
     // the normalizer. `beat` is a 1-frame trigger; `bpm` is a tempo estimate.
     def("onset", Passthrough, SmoothParams::ar(0.001, 0.05), Scale), // very fast
-    def("beat", Passthrough, SmoothParams::bypass(), ForceZero),
-    def("beat_phase", Passthrough, SmoothParams::bypass(), Scale),
+    def_hold("beat", Passthrough, SmoothParams::bypass(), ForceZero),
+    // A8 (#1459): a wrapping sawtooth — never lerp across the wrap. The render thread
+    // replaces this slot outright with a locally-advanced phase anyway.
+    def_hold("beat_phase", Passthrough, SmoothParams::bypass(), Scale),
     def("bpm", Passthrough, SmoothParams::ar(0.5, 1.0), Hold), // very slow
     def(
         "beat_strength",
@@ -171,8 +193,11 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
         SmoothParams::ar(0.03, 0.15),
         Scale,
     ),
-    // Derived: a pitch-class index / 11, not an energy level — Passthrough.
-    def(
+    // Derived: a pitch-class index / 11, not an energy level — Passthrough. A8 (#1459)
+    // Holds it: lerping an argmax index reads out a pitch class that was never detected
+    // (C → D# would sweep through D). Smoothed but not interpolated — the one row where
+    // `smooth.bypass` and `interp` genuinely disagree.
+    def_hold(
         "dominant_chroma",
         Passthrough,
         SmoothParams::ar(0.05, 0.2),
@@ -210,8 +235,8 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
     // percentile rescale), bypass the smoother (no EMA blend across key changes), and
     // Hold on silence (no sweep toward C). `key_confidence` is already 0..1: gently
     // smoothed and Scales toward 0 when the signal drops out.
-    def("key_class", Passthrough, SmoothParams::bypass(), Hold),
-    def("key_is_minor", Passthrough, SmoothParams::bypass(), Hold),
+    def_hold("key_class", Passthrough, SmoothParams::bypass(), Hold),
+    def_hold("key_is_minor", Passthrough, SmoothParams::bypass(), Hold),
     def(
         "key_confidence",
         Passthrough,
@@ -223,9 +248,12 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
     // is a 0-1 sawtooth (like `beat_phase`: pass through, no EMA, Scale). `beat_in_bar` is a
     // normalized index, not an energy level — pass through so the normalizer doesn't
     // percentile-rescale it.
-    def("downbeat", Passthrough, SmoothParams::bypass(), ForceZero),
-    def("bar_phase", Passthrough, SmoothParams::bypass(), Scale),
-    def("beat_in_bar", Passthrough, SmoothParams::bypass(), Scale),
+    // A8 (#1459) Holds all three: a trigger, a wrapping sawtooth, and a stepwise index.
+    // Unlike `beat_phase`, `bar_phase` is not yet locally advanced, so it keeps its 86 Hz
+    // stair-step — Hold merely stops the wrap being lerped backwards through 0.5 (A8b).
+    def_hold("downbeat", Passthrough, SmoothParams::bypass(), ForceZero),
+    def_hold("bar_phase", Passthrough, SmoothParams::bypass(), Scale),
+    def_hold("beat_in_bar", Passthrough, SmoothParams::bypass(), Scale),
     // A13 stereo (#1464)
     def("pan", Adaptive, SmoothParams::ar(0.03, 0.15), Scale),
     def(
@@ -246,10 +274,12 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
         Scale,
     ),
     def("buildup", Passthrough, SmoothParams::ar(0.08, 0.25), Scale),
-    def("drop", Passthrough, SmoothParams::bypass(), ForceZero),
+    def_hold("drop", Passthrough, SmoothParams::bypass(), ForceZero),
 ];
 
-/// Terse constructor so the table above reads as one row per feature.
+/// Terse constructor so the table above reads as one row per feature. Interpolates
+/// (A8 #1459) — the common case; use [`def_hold`] for the triggers, wrapping phases and
+/// categorical indices that must not be blended.
 const fn def(
     name: &'static str,
     norm: NormPolicy,
@@ -261,6 +291,23 @@ const fn def(
         norm,
         smooth,
         decay,
+        interp: InterpPolicy::Lerp,
+    }
+}
+
+/// As [`def`], but the A8 interpolator zero-order-holds this slot instead of blending it.
+const fn def_hold(
+    name: &'static str,
+    norm: NormPolicy,
+    smooth: SmoothParams,
+    decay: DecayPolicy,
+) -> FeatureDef {
+    FeatureDef {
+        name,
+        norm,
+        smooth,
+        decay,
+        interp: InterpPolicy::Hold,
     }
 }
 
@@ -358,6 +405,40 @@ mod tests {
             assert_eq!(
                 def.decay, expected,
                 "decay policy for slot {i} ({})",
+                def.name
+            );
+        }
+    }
+
+    /// A8 (#1459) interp exemptions: 9 of 61 slots must never be blended between audio
+    /// frames — the 1-frame triggers, the two wrapping sawtooths, and the categorical
+    /// indices. Everything else is a continuous quantity and lerps.
+    ///
+    /// Note this cannot be derived from `smooth.bypass`, and the two sets deliberately
+    /// disagree in both directions: `dominant_chroma` is smoothed but must Hold (an argmax
+    /// index), while `beat_strength` bypasses nothing and lerps fine.
+    ///
+    /// Same guard weakness as `decay_exemptions`: a newly appended row defaults to `Lerp`
+    /// in both the table and this test's `_` arm, so it passes silently. Adding a feature
+    /// means deciding its interp policy by hand.
+    #[test]
+    fn interp_policy_assignment() {
+        for (i, def) in FEATURES.iter().enumerate() {
+            let expected = match def.name {
+                // 1-frame triggers (moot in practice — the render-side counter latch
+                // overwrites all three — but correct on its own terms).
+                "beat" | "downbeat" | "drop" => InterpPolicy::Hold,
+                // Wrapping 0-1 sawtooths: lerping 0.98 → 0.02 sweeps backwards through 0.5.
+                "beat_phase" | "bar_phase" => InterpPolicy::Hold,
+                // Categorical: an index between two classes is not a class.
+                "dominant_chroma" | "key_class" | "key_is_minor" | "beat_in_bar" => {
+                    InterpPolicy::Hold
+                }
+                _ => InterpPolicy::Lerp,
+            };
+            assert_eq!(
+                def.interp, expected,
+                "interp policy for slot {i} ({})",
                 def.name
             );
         }

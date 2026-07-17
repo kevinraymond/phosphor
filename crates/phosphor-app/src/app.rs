@@ -506,7 +506,7 @@ impl App {
         self.uniforms.frame_index = self.frame_count as f32;
 
         // Drain audio features
-        if let Some(features) = self.audio.latest_features() {
+        if let Some(features) = self.audio.latest_features(dt) {
             self.latest_audio = Some(features);
             self.uniforms.sub_bass = features.sub_bass;
             self.uniforms.bass = features.bass;
