@@ -850,6 +850,7 @@ impl App {
         let bind_results = self.binding_bus.evaluate(
             self.latest_audio.as_ref(),
             self.audio.latest_mel(),
+            self.audio.latest_dmfcc(),
             &self.midi,
             &self.osc,
         );

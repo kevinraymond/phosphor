@@ -364,10 +364,13 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
         SmoothParams::ar(0.03, 0.15),
         Scale,
     ),
+    // `timbre_flux` is a flux-family excitation (L2 of the delta-MFCC over coeffs 1..12) — a raw
+    // level of unknown scale, so Adaptive: the gated percentile normalizer ranges and
+    // silence-gates it exactly like `flux`, with `flux`'s fast smoothing.
     def(
         "timbre_flux",
-        Passthrough,
-        SmoothParams::ar(0.03, 0.15),
+        Adaptive,
+        SmoothParams::ar(0.005, 0.06),
         Scale,
     ),
 ];
@@ -476,17 +479,17 @@ mod tests {
     ///   bar clock, which happen to be contiguous (33..=54); the A13 stereo block (55..=57,
     ///   producer-remapped to 0..1); the A18 structure block (58..=60); and most of the v3 (#1629)
     ///   reserved tail — `harmonic_ratio` (63, a level-invariant balance), A15 pitch (64..=65),
-    ///   A16 contrast (66..=73) — all producer-scaled to 0..1.
+    ///   A16 contrast (66..=72) — all producer-scaled to 0..1.
     /// - **Adaptive** (gated percentile ranging): the energy-like features — the 7 bands, rms (7),
-    ///   flux (10), and the A14 HPSS energies `percussive_energy` / `harmonic_energy` (61, 62),
-    ///   which are raw masked-power levels of unknown absolute scale.
+    ///   flux (10), the A14 HPSS energies `percussive_energy` / `harmonic_energy` (61, 62), and the
+    ///   A16 `timbre_flux` (73) — raw levels of unknown absolute scale.
     #[test]
     fn norm_policy_assignment() {
         for (i, def) in FEATURES.iter().enumerate() {
             let expected = match i {
                 9 | 11 | 12 | 13 | 14 => FixedRange,
                 20..=32 => ZScore,
-                8 | 15..=19 | 33..=60 | 63..=73 => Passthrough,
+                8 | 15..=19 | 33..=60 | 63..=72 => Passthrough,
                 _ => Adaptive,
             };
             assert_eq!(

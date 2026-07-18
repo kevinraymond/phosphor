@@ -181,6 +181,7 @@ impl BindingBus {
         &mut self,
         audio: Option<&AudioFeatures>,
         mel: &[f32],
+        dmfcc: &[f32; 13],
         midi: &MidiSystem,
         osc: &OscSystem,
     ) -> Vec<(String, f32)> {
@@ -194,6 +195,9 @@ impl BindingBus {
         if !mel.is_empty() {
             snapshot.extend(sources::collect_mel_bands(mel));
         }
+        // Delta-MFCC slopes (A16 `audio.dmfcc.N`, #1467) — bindings-only timbre-motion sources;
+        // zeros until the first audio frame arrives.
+        snapshot.extend(sources::collect_dmfcc_bands(dmfcc));
         snapshot.extend(sources::collect_midi(midi));
         snapshot.extend(sources::collect_osc(osc));
         snapshot.extend(sources::collect_websocket(&self.ws_bind_values));
