@@ -13,7 +13,7 @@ use super::spatial_hash::SpatialHashGrid;
 use super::sprite::SpriteAtlas;
 use super::types::{
     ImageSampleDef, ParticleAux, ParticleDef, ParticleImageSource, ParticleRenderUniforms,
-    ParticleUniforms, RDUniforms, SourceTransition,
+    ParticleUniforms, RDUniforms, SourceTransition, TrailFieldUniforms,
 };
 
 const WORKGROUP_SIZE: u32 = 256;
@@ -135,6 +135,25 @@ pub struct ParticleSystem {
     rd_steps_per_frame: u32,
     rd_grid_size: u32,
     rd_initialized: std::cell::Cell<bool>,
+
+    // Behavioral trail field (physarum / Polycephalum): ping-pong storage buffers holding
+    // `channels` per-texel scalar trails + an atomic i32 deposit buffer. A diffuse/decay compute
+    // pass runs before the sim; the sim samples via group 4 and accumulates deposits.
+    // Held to keep the GPU resources alive for the bind groups; not read directly.
+    #[allow(dead_code)]
+    trail_field_buffers: Option<[wgpu::Buffer; 2]>,
+    #[allow(dead_code)]
+    trail_field_deposit: Option<wgpu::Buffer>,
+    trail_field_uniform: Option<wgpu::Buffer>,
+    trail_field_diffuse_pipeline: Option<ComputePipeline>,
+    #[allow(dead_code)]
+    trail_field_diffuse_bgl: Option<BindGroupLayout>,
+    trail_field_diffuse_bgs: Option<[BindGroup; 2]>,
+    #[allow(dead_code)]
+    trail_field_sim_bgl: Option<BindGroupLayout>,
+    trail_field_sim_bgs: Option<[BindGroup; 2]>,
+    trail_field_current: std::cell::Cell<usize>,
+    trail_field_grid: u32,
 
     // Depth sort (bitonic merge sort on alive indices by particle size)
     #[allow(dead_code)]
@@ -532,6 +551,23 @@ impl ParticleSystem {
             (None, None, None, None, None, None, None, None, None, 0, 0)
         };
 
+        // Create behavioral trail-field resources if enabled (physarum / Polycephalum).
+        let (
+            trail_field_buffers,
+            trail_field_deposit,
+            trail_field_uniform,
+            trail_field_diffuse_pipeline,
+            trail_field_diffuse_bgl,
+            trail_field_diffuse_bgs,
+            trail_field_sim_bgl,
+            trail_field_sim_bgs,
+            trail_field_grid,
+        ) = if let Some(ref tf_def) = def.trail_field {
+            create_trail_field_resources(device, tf_def)
+        } else {
+            (None, None, None, None, None, None, None, None, 0)
+        };
+
         // Build compute pipeline layout matching compute_bind_group_layouts() logic:
         // groups 0=core, 1=flow field, 2=trails, 3=spatial hash, 4=R-D (if present)
         let mut bgl_refs: Vec<&BindGroupLayout> = vec![&compute_bgl, &flow_field_bgl];
@@ -552,6 +588,13 @@ impl ParticleSystem {
                 bgl_refs.push(&empty_bgl);
             }
             bgl_refs.push(rd_pbgl);
+        }
+        if let Some(ref tf_sbgl) = trail_field_sim_bgl {
+            // Group 4 (mutually exclusive with R-D); pad groups 2/3 to keep indices contiguous.
+            while bgl_refs.len() < 4 {
+                bgl_refs.push(&empty_bgl);
+            }
+            bgl_refs.push(tf_sbgl);
         }
 
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -955,6 +998,16 @@ impl ParticleSystem {
             rd_steps_per_frame,
             rd_grid_size,
             rd_initialized: std::cell::Cell::new(false),
+            trail_field_buffers,
+            trail_field_deposit,
+            trail_field_uniform,
+            trail_field_diffuse_pipeline,
+            trail_field_diffuse_bgl,
+            trail_field_diffuse_bgs,
+            trail_field_sim_bgl,
+            trail_field_sim_bgs,
+            trail_field_current: std::cell::Cell::new(0),
+            trail_field_grid,
             sort_key_buffer,
             sort_params_buffer,
             sort_keygen_pipeline,
@@ -1028,12 +1081,17 @@ impl ParticleSystem {
             layouts.push(trail_bgl);
         }
 
-        // Group 4: R-D texture for particle sampling
+        // Group 4: R-D texture, or the physarum trail field (mutually exclusive)
         if let Some(ref rd_pbgl) = self.rd_particle_bgl {
             while layouts.len() < 4 {
                 layouts.push(&self.empty_bgl);
             }
             layouts.push(rd_pbgl);
+        } else if let Some(ref tf_sbgl) = self.trail_field_sim_bgl {
+            while layouts.len() < 4 {
+                layouts.push(&self.empty_bgl);
+            }
+            layouts.push(tf_sbgl);
         }
 
         layouts
@@ -1312,6 +1370,45 @@ impl ParticleSystem {
             }
         }
 
+        // 0a2. Trail-field diffuse + decay (physarum) — folds the previous frame's deposits into
+        // the trail, blurs + decays, and clears the deposit buffer, then ping-pongs so the sim
+        // senses the fresh field. Runs before the particle sim (like R-D).
+        if let (Some(pipeline), Some(bgs), Some(ubuf)) = (
+            &self.trail_field_diffuse_pipeline,
+            &self.trail_field_diffuse_bgs,
+            &self.trail_field_uniform,
+        ) {
+            let tf_uniforms = TrailFieldUniforms {
+                grid_w: self.trail_field_grid,
+                grid_h: self.trail_field_grid,
+                channels: 12,
+                deposit_scale: 256.0,
+                // Behavioral trail erosion. Kept well below the visual trail_decay: if deposited
+                // highways persist too long they become an absorbing state (agents keep winning
+                // their own front sensor and lock into static parallel lanes), so the field must
+                // continuously fade and be re-earned to keep the network reorganizing.
+                decay: (0.74 + self.uniforms.effect_params[4] * 0.12).clamp(0.5, 0.94),
+                diffuse: self.uniforms.effect_params[5],
+                time: self.uniforms.time,
+                _pad: 0.0,
+            };
+            queue.write_buffer(ubuf, 0, bytemuck::bytes_of(&tf_uniforms));
+
+            let wg = self.trail_field_grid.div_ceil(8);
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("trail-field-diffuse"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, &bgs[self.trail_field_current.get()], &[]);
+                pass.dispatch_workgroups(wg, wg, 1);
+            }
+            // Flip ping-pong so the sim reads the freshly written field.
+            self.trail_field_current
+                .set(1 - self.trail_field_current.get());
+        }
+
         // 0b. Spatial hash (if interaction enabled) — build before sim
         if let Some(hash) = &self.spatial_hash {
             // Read from the input buffer (current side of ping-pong)
@@ -1329,19 +1426,24 @@ impl ParticleSystem {
             pass.set_bind_group(1, &self.flow_field_bind_group, &[]);
             if let Some(trail_bg) = &self.trail_compute_bind_group {
                 pass.set_bind_group(2, trail_bg, &[]);
-            } else if self.spatial_hash.is_some() || self.rd_particle_bgs.is_some() {
+            } else if self.spatial_hash.is_some()
+                || self.rd_particle_bgs.is_some()
+                || self.trail_field_sim_bgs.is_some()
+            {
                 // Groups 3/4 require group 2 to exist (contiguous indices)
                 pass.set_bind_group(2, &self.empty_bind_group, &[]);
             }
             if let Some(hash) = &self.spatial_hash {
                 pass.set_bind_group(3, &hash.query_bind_group, &[]);
-            } else if self.rd_particle_bgs.is_some() {
+            } else if self.rd_particle_bgs.is_some() || self.trail_field_sim_bgs.is_some() {
                 // Group 4 requires group 3 to exist (contiguous)
                 pass.set_bind_group(3, &self.empty_bind_group, &[]);
             }
-            // Group 4: R-D texture for particle sampling
+            // Group 4: R-D texture, or the physarum trail field (mutually exclusive)
             if let Some(ref rd_bgs) = self.rd_particle_bgs {
                 pass.set_bind_group(4, &rd_bgs[self.rd_current.get()], &[]);
+            } else if let Some(ref tf_bgs) = self.trail_field_sim_bgs {
+                pass.set_bind_group(4, &tf_bgs[self.trail_field_current.get()], &[]);
             }
             pass.dispatch_workgroups(workgroups, 1, 1);
         }
@@ -3576,6 +3678,221 @@ fn create_rd_resources(
         Some([rd_particle_bg0, rd_particle_bg1]),
         steps,
         grid_size,
+    )
+}
+
+/// Create behavioral trail-field resources (physarum / Polycephalum).
+///
+/// The trail is `channels` per-texel scalar maps packed into ping-pong storage buffers; agents
+/// deposit into an atomic i32 accumulator (buffer, not texture — storage textures can't atomic
+/// add) that the diffuse pass folds in and clears each frame. Buffers are zero-initialized by
+/// wgpu, so the field starts empty. The diffuse pipeline owns group 0; the particle sim samples
+/// the current trail + accumulates deposits via group 4.
+#[allow(clippy::type_complexity)]
+fn create_trail_field_resources(
+    device: &Device,
+    tf_def: &super::types::TrailFieldDef,
+) -> (
+    Option<[wgpu::Buffer; 2]>, // trail ping-pong buffers
+    Option<wgpu::Buffer>,      // deposit accumulator
+    Option<wgpu::Buffer>,      // trail uniforms
+    Option<ComputePipeline>,   // diffuse pipeline
+    Option<BindGroupLayout>,   // diffuse bgl
+    Option<[BindGroup; 2]>,    // diffuse bind groups
+    Option<BindGroupLayout>,   // particle-sim group-4 bgl
+    Option<[BindGroup; 2]>,    // particle-sim group-4 bind groups
+    u32,                       // grid size
+) {
+    let grid = tf_def.grid_size.clamp(64, 2048);
+    // The shaders assume 12 channels (one per pitch class); guard against config drift.
+    let channels = tf_def.channels.max(1) as u64;
+    let cells = (grid as u64) * (grid as u64) * channels;
+    let trail_size = cells * std::mem::size_of::<f32>() as u64;
+    let deposit_size = cells * std::mem::size_of::<i32>() as u64;
+
+    let make_storage = |label: &str, size: u64| {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    };
+    let trail_a = make_storage("trail-field-a", trail_size);
+    let trail_b = make_storage("trail-field-b", trail_size);
+    let deposit = make_storage("trail-field-deposit", deposit_size);
+
+    let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("trail-field-uniforms"),
+        size: std::mem::size_of::<TrailFieldUniforms>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    let storage_entry = |binding: u32, read_only: bool| BindGroupLayoutEntry {
+        binding,
+        visibility: ShaderStages::COMPUTE,
+        ty: BindingType::Buffer {
+            ty: BufferBindingType::Storage { read_only },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
+    let uniform_bgl_entry = |binding: u32| BindGroupLayoutEntry {
+        binding,
+        visibility: ShaderStages::COMPUTE,
+        ty: BindingType::Buffer {
+            ty: BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
+
+    // --- Diffuse pass (group 0): uniforms(0) + trail_src(1,read) + trail_dst(2,rw) + deposit(3,rw)
+    let diffuse_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: Some("trail-field-diffuse-bgl"),
+        entries: &[
+            uniform_bgl_entry(0),
+            storage_entry(1, true),
+            storage_entry(2, false),
+            storage_entry(3, false),
+        ],
+    });
+    // bg[0]: src=a, dst=b ; bg[1]: src=b, dst=a (ping-pong)
+    let diffuse_bg0 = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("trail-field-diffuse-bg-0"),
+        layout: &diffuse_bgl,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: trail_a.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: trail_b.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 3,
+                resource: deposit.as_entire_binding(),
+            },
+        ],
+    });
+    let diffuse_bg1 = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("trail-field-diffuse-bg-1"),
+        layout: &diffuse_bgl,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: trail_b.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: trail_a.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 3,
+                resource: deposit.as_entire_binding(),
+            },
+        ],
+    });
+
+    let diffuse_source = if tf_def.compute_shader.is_empty() {
+        include_str!("../../../../../assets/shaders/polycephalum_diffuse.wgsl").to_string()
+    } else {
+        let path = std::path::Path::new("assets/shaders").join(&tf_def.compute_shader);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            log::warn!(
+                "Failed to load trail-field diffuse shader {}: {e}, using built-in",
+                path.display()
+            );
+            include_str!("../../../../../assets/shaders/polycephalum_diffuse.wgsl").to_string()
+        })
+    };
+    let diffuse_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("trail-field-diffuse-shader"),
+        source: wgpu::ShaderSource::Wgsl(diffuse_source.into()),
+    });
+    let diffuse_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("trail-field-diffuse-layout"),
+        bind_group_layouts: &[&diffuse_bgl],
+        push_constant_ranges: &[],
+    });
+    let diffuse_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("trail-field-diffuse-pipeline"),
+        layout: Some(&diffuse_layout),
+        module: &diffuse_shader,
+        entry_point: Some("main"),
+        compilation_options: PipelineCompilationOptions::default(),
+        cache: None,
+    });
+
+    // --- Particle sim group 4: trail(0,read) + deposit(1,rw atomic) + uniforms(2) ---
+    let sim_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: Some("trail-field-sim-bgl"),
+        entries: &[
+            storage_entry(0, true),
+            storage_entry(1, false),
+            uniform_bgl_entry(2),
+        ],
+    });
+    // sim reads the buffer the diffuse just wrote (current after flip): bg[0]->a, bg[1]->b
+    let sim_bg0 = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("trail-field-sim-bg-0"),
+        layout: &sim_bgl,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: trail_a.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: deposit.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+        ],
+    });
+    let sim_bg1 = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("trail-field-sim-bg-1"),
+        layout: &sim_bgl,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: trail_b.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: deposit.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+        ],
+    });
+
+    (
+        Some([trail_a, trail_b]),
+        Some(deposit),
+        Some(uniform_buffer),
+        Some(diffuse_pipeline),
+        Some(diffuse_bgl),
+        Some([diffuse_bg0, diffuse_bg1]),
+        Some(sim_bgl),
+        Some([sim_bg0, sim_bg1]),
+        grid,
     )
 }
 
