@@ -477,6 +477,30 @@ fn default_rd_steps() -> u32 {
     16
 }
 
+/// Multi-channel behavioral trail field for physarum-style agent sims (Polycephalum).
+///
+/// Unlike `ReactionDiffusionDef` (a self-evolving Gray-Scott field), this is a set of
+/// `channels` scalar trail maps (one per species) that agents *deposit into* (via an atomic
+/// deposit buffer) and *sense*, plus a per-frame diffuse+decay compute pass. Stored as plain
+/// storage buffers (not textures) to keep sensing/deposit portable across backends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrailFieldDef {
+    #[serde(default = "default_trail_grid_size")]
+    pub grid_size: u32,
+    #[serde(default = "default_trail_channels")]
+    pub channels: u32,
+    /// Diffuse/decay compute shader (relative to shaders dir). If empty, uses built-in.
+    #[serde(default)]
+    pub compute_shader: String,
+}
+
+fn default_trail_grid_size() -> u32 {
+    512
+}
+fn default_trail_channels() -> u32 {
+    12
+}
+
 /// Reaction-diffusion uniforms: 32 bytes.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
@@ -488,6 +512,23 @@ pub struct RDUniforms {
     pub time: f32,
     pub onset: f32,
     pub drop_radius: f32,
+    pub _pad: f32,
+}
+
+/// Trail-field uniforms (physarum): 32 bytes. Shared by the diffuse pass and the particle sim.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+pub struct TrailFieldUniforms {
+    pub grid_w: u32,
+    pub grid_h: u32,
+    pub channels: u32,
+    /// Fixed-point scale for the atomic i32 deposit buffer.
+    pub deposit_scale: f32,
+    /// Per-frame trail decay multiplier (< 1.0).
+    pub decay: f32,
+    /// Blur mix toward the 4-neighbour mean (0 = none, 1 = full box blur).
+    pub diffuse: f32,
+    pub time: f32,
     pub _pad: f32,
 }
 
@@ -660,6 +701,10 @@ pub struct ParticleDef {
     /// Reaction-diffusion configuration (optional)
     #[serde(default)]
     pub reaction_diffusion: Option<ReactionDiffusionDef>,
+
+    /// Multi-channel behavioral trail field (physarum / Polycephalum) (optional)
+    #[serde(default)]
+    pub trail_field: Option<TrailFieldDef>,
 
     /// Render mode: "billboard" (default), "compute" (atomic framebuffer), or "auto"
     #[serde(default = "default_render_mode")]

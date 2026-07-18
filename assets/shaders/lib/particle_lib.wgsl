@@ -153,6 +153,10 @@ struct Particle {
     flags: vec4f,     // x=age, y=lifetime, z=effect-specific, w=effect-specific
 }
 
+// Species convention (multi-species sims: Symbiosis, Polycephalum): the species/organism id is
+// carried in `flags.z` as f32 (read back with `u32(p.flags.z)`), NOT `flags.x` (which is age).
+// Polycephalum uses one species per pitch class 0..11 and stores its heading angle in `flags.w`.
+
 struct ParticleAux {
     home: vec4f,  // xy=home position, z=packed RGBA (bitcast u32->f32), w=sprite_index
 }
