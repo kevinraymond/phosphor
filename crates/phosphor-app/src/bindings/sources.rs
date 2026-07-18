@@ -128,6 +128,23 @@ pub fn collect_mel_bands(mel: &[f32]) -> SourceSnapshot {
     map
 }
 
+/// Collect delta-MFCC slopes into source snapshot as `audio.dmfcc.N` (A16 #1467).
+///
+/// `dmfcc` is the newest [`crate::audio::AudioSystem::latest_dmfcc`] — raw bipolar per-coefficient
+/// slopes, not part of the `AudioFeatures` ABI (bindings-only, to save the uniform budget), so the
+/// values drop straight in with no schema/normalizer involvement (the binding graph range-maps).
+pub fn collect_dmfcc_bands(dmfcc: &[f32; 13]) -> SourceSnapshot {
+    let raw = |v: f32| SourceRaw {
+        display: format!("{:.3}", v),
+        numeric: v as f64,
+    };
+    let mut map = HashMap::with_capacity(dmfcc.len());
+    for (i, &val) in dmfcc.iter().enumerate() {
+        map.insert(format!("audio.dmfcc.{i}"), (val, raw(val)));
+    }
+    map
+}
+
 /// Collect MIDI CC values into source snapshot.
 pub fn collect_midi(midi: &MidiSystem) -> SourceSnapshot {
     let mut map = HashMap::with_capacity(midi.last_cc_values.len());
@@ -246,6 +263,17 @@ mod tests {
         assert!(!snap.contains_key("audio.mel.64"));
         // Empty column yields no sources (before the first audio frame arrives).
         assert!(collect_mel_bands(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_collect_dmfcc_bands() {
+        // 13 delta-MFCC slopes -> audio.dmfcc.0..12 (A16, #1467), bindings-only.
+        let dmfcc = [0.0f32; 13];
+        let snap = collect_dmfcc_bands(&dmfcc);
+        assert_eq!(snap.len(), 13);
+        assert!(snap.contains_key("audio.dmfcc.0"));
+        assert!(snap.contains_key("audio.dmfcc.12"));
+        assert!(!snap.contains_key("audio.dmfcc.13"));
     }
 
     #[test]

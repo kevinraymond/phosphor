@@ -18,6 +18,7 @@ pub mod schema;
 pub mod smoother;
 pub mod stereo;
 pub mod structure;
+pub mod timbre;
 #[cfg(target_os = "windows")]
 pub mod wasapi_capture;
 
@@ -36,6 +37,10 @@ pub struct AudioFrame {
     /// One mel-spectrogram column, [`analyzer::SPECTROGRAM_MELS`] bands in 0..1
     /// (scrolls into the `audio_spectrogram` texture).
     pub mel: Box<[f32]>,
+    /// A16 (#1467): the 13 delta-MFCC slopes for this hop, feeding the bindings-only
+    /// `audio.dmfcc.N` sources. Carried alongside `mel` (not in [`AudioFeatures`] — bindings-only,
+    /// to save the uniform budget).
+    pub dmfcc: [f32; 13],
     /// A5 sample-clock time this hop was analyzed at (`samples_consumed / sample_rate`),
     /// seconds. Frames are exactly [`ANALYSIS_HOP`] apart; the A8 render playhead (#1459)
     /// interpolates between frames on this clock.
@@ -79,6 +84,7 @@ use self::smoother::FeatureSmoother;
 use self::stereo::StereoAnalyzer;
 pub use self::structure::StructureConfig;
 use self::structure::StructureTracker;
+use self::timbre::DeltaMfccAnalyzer;
 use crate::settings::BandScale;
 
 /// Holds the capture backend, keeping it alive while the audio processing thread runs.
@@ -232,6 +238,9 @@ pub struct AudioSystem {
     /// `latest_spectrum`) so the binding bus can expose `audio.mel.N` sources without
     /// stealing columns from the draining spectrogram-texture path (`pending_mel`).
     latest_mel: Vec<f32>,
+    /// Newest delta-MFCC slopes received (A16 `audio.dmfcc.N`, #1467). Held between polls like
+    /// `latest_mel` so the binding bus can expose the sources; bindings-only (not in the ABI).
+    latest_dmfcc: [f32; 13],
     pub device_name: String,
     pub active: bool,
     pub last_error: Option<String>,
@@ -416,6 +425,7 @@ impl AudioSystem {
                     latest_spectrum: vec![0.0; analyzer::SPECTRUM_BINS],
                     pending_mel: Vec::new(),
                     latest_mel: Vec::new(),
+                    latest_dmfcc: [0.0; 13],
                     device_name: opened.device_name,
                     active: true,
                     last_error: None,
@@ -475,6 +485,7 @@ impl AudioSystem {
                     latest_spectrum: vec![0.0; analyzer::SPECTRUM_BINS],
                     pending_mel: Vec::new(),
                     latest_mel: Vec::new(),
+                    latest_dmfcc: [0.0; 13],
                     device_name: requested.unwrap_or("Default").to_string(),
                     active: false,
                     last_error: Some(e),
@@ -590,6 +601,7 @@ impl AudioSystem {
         self.latest_spectrum = std::mem::take(&mut new.latest_spectrum);
         self.pending_mel.clear();
         self.latest_mel.clear();
+        self.latest_dmfcc = [0.0; 13];
         self.device_name = std::mem::take(&mut new.device_name);
         self.active = new.active;
         self.last_error = new.last_error.take();
@@ -757,6 +769,8 @@ impl AudioSystem {
             // it onto the drain-once texture queue.
             self.latest_mel.clear();
             self.latest_mel.extend_from_slice(&frame.mel);
+            // A16 (#1467): newest delta-MFCC slopes for the `audio.dmfcc.N` binding sources.
+            self.latest_dmfcc = frame.dmfcc;
             self.pending_mel.push(frame.mel);
             got_frame = true;
         }
@@ -844,6 +858,13 @@ impl AudioSystem {
     /// drain — the render thread's spectrogram-texture path is unaffected.
     pub fn latest_mel(&self) -> &[f32] {
         &self.latest_mel
+    }
+
+    /// Newest delta-MFCC slopes (A16 `audio.dmfcc.N` binding sources, #1467), 13 coefficients.
+    /// Call after `latest_features` each frame; zeros until the first frame arrives. Bindings-only
+    /// (not part of the `AudioFeatures` ABI).
+    pub fn latest_dmfcc(&self) -> &[f32; 13] {
+        &self.latest_dmfcc
     }
 
     /// Take the mel-spectrogram columns accumulated since the last call (oldest first),
@@ -1158,6 +1179,7 @@ fn audio_thread(
     let mut stereo_analyzer = StereoAnalyzer::new();
     let mut hpss_analyzer = HpssAnalyzer::new();
     let mut pitch_analyzer = PitchAnalyzer::new(sample_rate);
+    let mut dmfcc_analyzer = DeltaMfccAnalyzer::new();
     // A13 (#1464): the capture ring yields interleaved L,R. `read_buf` reads it raw; `mono_scratch`
     // holds the mono mix derived from it (fed to the recording mirror + FFT, exactly as before).
     let mut read_buf = vec![0.0f32; 8192]; // 4096 stereo frames; larger for the 4096-pt FFT
@@ -1256,6 +1278,24 @@ fn audio_thread(
             let pitch = pitch_analyzer.process(analyzer.time_domain(), loud_silent);
             raw.pitch = pitch.pitch;
             raw.pitch_confidence = pitch.pitch_confidence;
+
+            // A16 (#1467): spectral contrast — per-octave peak-vs-valley tonality on the large
+            // (4096-pt) magnitude, producer-mapped 0-60 dB -> 0..1 (Passthrough, silence-gated
+            // inside the analyzer, so it survives normalize/smooth unrescaled).
+            let contrast = analyzer.spectral_contrast(loud_silent);
+            raw.contrast_0 = contrast[0];
+            raw.contrast_1 = contrast[1];
+            raw.contrast_2 = contrast[2];
+            raw.contrast_3 = contrast[3];
+            raw.contrast_4 = contrast[4];
+            raw.contrast_5 = contrast[5];
+            raw.contrast_mean = contrast[6];
+            // A16 (#1467): delta-MFCC timbre dynamics from this hop's (pre-normalization) MFCCs.
+            // `timbre_flux` (L2 of the delta over coeffs 1..12) is a raw level set before normalize()
+            // so the adaptive normalizer ranges it like `flux` (Adaptive); the full slope vector
+            // rides the frame for the bindings-only `audio.dmfcc.N` sources.
+            let timbre = dmfcc_analyzer.process(&raw.mfcc, loud_silent);
+            raw.timbre_flux = timbre.timbre_flux;
 
             // A3 (#1454): fill `kick` now that the silence flag is known — a single
             // detector-owned P95 normalizer, gated so noise-floor log-flux can't fire. Set
@@ -1363,6 +1403,8 @@ fn audio_thread(
                 features: smoothed,
                 spectrum: Box::new(analyzer.log_spectrum_512()),
                 mel: Box::new(analyzer.spectrogram_column()),
+                // A16 (#1467): this hop's delta-MFCC slopes for the `audio.dmfcc.N` sources.
+                dmfcc: timbre.dmfcc,
                 timestamp,
                 // Mirrors the silence gate in `BeatDetector::process` exactly: it pins
                 // phase at 0 under perceptual silence, so A8's local oscillator must follow

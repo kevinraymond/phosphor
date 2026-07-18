@@ -97,6 +97,16 @@ impl OscSender {
             crate::audio::pitch::norm_to_hz(f.pitch),
         );
         self.send_float("/phosphor/audio/pitch_confidence", f.pitch_confidence);
+        // A16 spectral contrast (#1467): per-octave peak-vs-valley tonality (0..1) + mean.
+        self.send_float("/phosphor/audio/contrast_0", f.contrast_0);
+        self.send_float("/phosphor/audio/contrast_1", f.contrast_1);
+        self.send_float("/phosphor/audio/contrast_2", f.contrast_2);
+        self.send_float("/phosphor/audio/contrast_3", f.contrast_3);
+        self.send_float("/phosphor/audio/contrast_4", f.contrast_4);
+        self.send_float("/phosphor/audio/contrast_5", f.contrast_5);
+        self.send_float("/phosphor/audio/contrast_mean", f.contrast_mean);
+        // A16 timbre dynamics (#1467): L2 of the delta-MFCC (coeffs 1..12), adaptively normalized.
+        self.send_float("/phosphor/audio/timbre_flux", f.timbre_flux);
     }
 
     /// Send current state (active layer, effect name).

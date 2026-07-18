@@ -208,6 +208,28 @@ fn amp_to_db01(amp: f32) -> f32 {
     ((db + 80.0) / 80.0).clamp(0.0, 1.0)
 }
 
+/// A16 (#1467): peak-vs-valley contrast of one band's linear magnitudes, mapped 0-60 dB → 0..1.
+/// Takes the mean of the top and bottom 2% of bins (≥1 each, librosa's `alpha`); `scratch` is
+/// sorted in place and `band` is left untouched. An empty band or a near-silent one (both means at
+/// the floor) yields 0; a lone peak over a silent floor saturates to 1.
+fn band_contrast(band: &[f32], scratch: &mut Vec<f32>) -> f32 {
+    let n = band.len();
+    if n == 0 {
+        return 0.0;
+    }
+    scratch.clear();
+    scratch.extend_from_slice(band);
+    scratch.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let k = ((n as f32 * 0.02).ceil() as usize).clamp(1, n);
+    let valley = scratch[..k].iter().sum::<f32>() / k as f32;
+    let peak = scratch[n - k..].iter().sum::<f32>() / k as f32;
+    // Floor the means so a near-silent band (both ≈ 0) gives a ~0 dB gap rather than NaN/±inf.
+    const EPS: f32 = 1e-10;
+    let peak_db = 20.0 * (peak + EPS).log10();
+    let valley_db = 20.0 * (valley + EPS).log10();
+    ((peak_db - valley_db) / 60.0).clamp(0.0, 1.0)
+}
+
 /// Multi-resolution FFT analyzer with 7 frequency bands and spectral features.
 pub struct FftAnalyzer {
     large: FftResolution,  // 4096-pt for bass
@@ -719,6 +741,39 @@ impl FftAnalyzer {
         (geometric_mean / arithmetic_mean).clamp(0.0, 1.0) as f32
     }
 
+    /// A16 (#1467): spectral contrast — per-octave peak-vs-valley tonality (Jiang 2002 /
+    /// librosa). For each of six octave bands (200-400, 400-800, … 6400-Nyquist Hz) on the large
+    /// (4096-pt) magnitude, `contrast = dB(mean top 2%) − dB(mean bottom 2%)`, mapped 0-60 dB →
+    /// 0..1: a sharp harmonic (sine, voiced vowel) reads high, flat noise reads low. Returns
+    /// `[contrast_0..5, contrast_mean]`.
+    ///
+    /// The large spectrum (10.8 Hz/bin) is used for every band so even the 200-400 Hz octave has
+    /// ~18 bins to take a 2% quantile over (the medium spectrum gives only ~4). Contrast is a
+    /// tonality measure, not a transient, so the 93 ms window is fine.
+    ///
+    /// `loud_silent` (A10) returns all-zero: the fields are Passthrough — the normalizer won't gate
+    /// them, so the producer must, since the noise floor has its own spurious peak/valley structure
+    /// (mirrors A13/A14 self-gating).
+    pub fn spectral_contrast(&self, loud_silent: bool) -> [f32; 7] {
+        if loud_silent {
+            return [0.0; 7];
+        }
+        const LO_HZ: [f32; 6] = [200.0, 400.0, 800.0, 1600.0, 3200.0, 6400.0];
+        let nyquist = self.sample_rate * 0.5;
+        let mut out = [0.0f32; 7];
+        let mut scratch: Vec<f32> = Vec::new(); // sorted per band; reused across the six bands
+        let mut sum = 0.0f32;
+        for b in 0..6 {
+            let hi_hz = if b < 5 { LO_HZ[b + 1] } else { nyquist };
+            let (lo, hi) = self.large.bin_range(LO_HZ[b], hi_hz);
+            let c = band_contrast(&self.large.magnitude[lo..hi], &mut scratch);
+            out[b] = c;
+            sum += c;
+        }
+        out[6] = sum / 6.0;
+        out
+    }
+
     /// A4 (#1455): frequency below which `ROLLOFF_PERCENTILE` of the spectral power lies
     /// (skipping DC; percentage now a named const rather than a hardcoded 0.85).
     fn spectral_rolloff(&self) -> f32 {
@@ -1085,5 +1140,51 @@ mod tests {
             high > low,
             "rolloff should rise with tone frequency: low={low}, high={high}"
         );
+    }
+
+    /// A16 (#1467): spectral contrast reads high for a sharp harmonic (a tonal peak over a quiet
+    /// floor) and lower for broadband noise, in the band carrying the energy. Every band stays 0..1.
+    #[test]
+    fn spectral_contrast_tone_vs_noise() {
+        // A 1000 Hz sine lands in band 2 (800-1600 Hz).
+        let mut a = FftAnalyzer::new(SR, BandScale::Db);
+        analyze_sine(&mut a, 1000.0);
+        let tone = a.spectral_contrast(false);
+        for (b, &c) in tone.iter().enumerate() {
+            assert!((0.0..=1.0).contains(&c), "contrast[{b}] out of range: {c}");
+        }
+
+        let mut n = FftAnalyzer::new(SR, BandScale::Db);
+        let mut state: u32 = 0x9e37_79b9;
+        for _ in 0..4 {
+            let block: Vec<f32> = (0..FFT_LARGE)
+                .map(|_| {
+                    state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+                })
+                .collect();
+            n.analyze(&block);
+        }
+        let noise = n.spectral_contrast(false);
+        assert!(
+            tone[2] > 0.5,
+            "a sharp tonal peak should read high contrast, got {}",
+            tone[2]
+        );
+        assert!(
+            tone[2] > noise[2],
+            "tone contrast ({}) should exceed noise contrast ({}) in the shared band",
+            tone[2],
+            noise[2]
+        );
+    }
+
+    /// A16 (#1467): the perceptual-silence gate zeroes every contrast band — they are Passthrough,
+    /// so the normalizer won't gate them and the producer must.
+    #[test]
+    fn spectral_contrast_silence_gate_is_zero() {
+        let mut a = FftAnalyzer::new(SR, BandScale::Db);
+        analyze_sine(&mut a, 1000.0);
+        assert_eq!(a.spectral_contrast(true), [0.0; 7]);
     }
 }
