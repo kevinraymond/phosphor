@@ -31,7 +31,7 @@ Thanks for checking this project out! I've gone through a couple experimental pr
 
 I hope this project is genuinely useful. I've tried to make it as easy to use as possible, but I'm no kind of performer so I'm open to suggestions for improvements (drop an issue)!
 
-Everything below here is AI-assisted, like this entire project, except for this first section. I started writing software during the time of C-64 and TRaSh-80 ... even so, I never imagined it would be at this point. Wild times.
+I started writing software during the time of C-64 and TRaSh-80, and even with the field of AI "before it was cool" ... even so, I never imagined we would get to the point where I can architect and design and not need to write out everything. Wild times.
 
 Give it a try! Let me know how I can make it better for you.
 
@@ -80,6 +80,8 @@ cargo run --release --features depth   # requires: libssl-dev, libclang-dev (inc
 </details>
 
 **New to Fosfora?** Check out the [Tutorials](TUTORIALS.md) for in-depth guides on every feature — effects, audio, layers, MIDI, OSC, and more.
+
+**Curious what Fosfora is actually hearing?** [AUDIO-FEATURES.md](AUDIO-FEATURES.md) explains all 74 audio features in plain English, with a link to the research behind each one.
 
 ## Make it yours
 
@@ -264,7 +266,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, the effect creati
 - [Inigo Quilez](https://iquilezles.org/) — Smooth Worley noise (log-sum-exp) in Storm
 - Beer-Lambert law — Volumetric light absorption in Storm
 - Curl noise — Divergence-free particle advection in Flux
-- MFCC / Chroma — Mel-frequency cepstral coefficients and pitch-class energy features
+- Audio analysis — SuperFlux onsets, YIN pitch, constant-Q chroma, Krumhansl-Kessler key profiles, Fitzgerald median-filter HPSS, Foote novelty, EBU R128 loudness, MFCC and spectral contrast. Full citations in [AUDIO-FEATURES.md](AUDIO-FEATURES.md#further-reading)
 - Beat detection pipeline ported from [EASEy-GLYPH](https://github.com/kevinraymond/easey-glyph)
 
 **Fonts (SIL Open Font License 1.1)**
