@@ -218,7 +218,9 @@ On Linux, Fosfora uses PulseAudio/PipeWire for monitor capture (loopback of syst
 
 ### What Gets Detected
 
-Fosfora extracts **74 audio features** from multi-resolution FFT analysis. The core set below is joined by eight detector groups — loudness, key, downbeat, stereo, structure, harmonic/percussive split, pitch, and spectral contrast — that fill the shader ABI's reserved tail (see [Detector features](#reserved-features)):
+Fosfora extracts **74 audio features** from multi-resolution FFT analysis. The list below is a quick index — for what each feature *means* musically, what to hook it to, and the research behind it, see [AUDIO-FEATURES.md](AUDIO-FEATURES.md).
+
+The core set below is joined by eight detector groups — loudness, key, downbeat, stereo, structure, harmonic/percussive split, pitch, and spectral contrast — that fill the shader ABI's reserved tail (see [Detector features](#reserved-features)):
 
 **7 Frequency Bands** (normalized 0–1):
 | Band | Range | Typical Content |
@@ -258,10 +260,10 @@ Fosfora extracts **74 audio features** from multi-resolution FFT analysis. The c
 - **pan / stereo_width / stereo_corr** — stereo field
 - **section_novelty / buildup / drop** — song-structure cues
 
-The remaining three groups were reserved by the shader ABI v3 bump. The harmonic/percussive split is live as of the A14 detector; pitch and spectral contrast read `0.0` until their detectors land:
+The remaining three groups fill the shader ABI v3 tail. All three are live as of the A14, A15 and A16 detectors:
 - **percussive_energy / harmonic_energy / harmonic_ratio** — harmonic/percussive split (A14): drum-vs-tone energy and their 0–1 balance, for routing transients to strobes and sustained tones to color washes
-- **pitch / pitch_confidence** — monophonic pitch estimate (A15, reserved)
-- **contrast_0 … contrast_5 / contrast_mean / timbre_flux** — spectral contrast + timbre dynamics (A16, reserved)
+- **pitch / pitch_confidence** — monophonic pitch estimate (A15): YIN fundamental frequency over five octaves, plus a voiced/unvoiced confidence to gate it
+- **contrast_0 … contrast_5 / contrast_mean / timbre_flux** — spectral contrast + timbre dynamics (A16): per-octave peak-vs-valley tonality, plus a volume-independent measure of timbre change
 
 Alongside these, three live audio *textures* let effects read the signal directly, for oscilloscopes, spectrum bars and waterfalls — sample them with the built-in helpers:
 - **`waveform(x)`** → `vec2f` (min, max) of the raw PCM at horizontal position `x` — a min/max-decimated, zero-crossing-triggered scope trace.
@@ -270,10 +272,13 @@ Alongside these, three live audio *textures* let effects read the signal directl
 
 ### Adaptive Normalization
 
-All features use per-feature running min/max normalization. This means:
+Features are auto-leveled so you never touch a gain knob. Energy-like features (the seven bands, `rms`, `flux`) use gated percentile ranging: the 5th and 95th percentile of the last few seconds are stretched to fill 0–1, with a soft knee above the 95th so an unusually big hit still reads as bigger instead of clipping. This means:
 - Quiet music still produces full 0–1 range features
 - No fixed gain knobs to adjust manually
 - The system adapts over a few seconds to changing input levels
+- One loud spike can't flatten everything after it
+
+Not every feature is auto-leveled — spectral shape features are already on a meaningful scale, MFCCs are centered on their own average, and detector outputs like key, pitch and the beat group are passed through untouched. See [How the Numbers Are Tamed](AUDIO-FEATURES.md#how-the-numbers-are-tamed) for the full picture.
 
 ---
 
@@ -330,9 +335,9 @@ pan, stereo_width, stereo_corr                // stereo field
 section_novelty, buildup, drop                // song-structure cues
 
 // Shader ABI v3 tail
-percussive_energy, harmonic_energy, harmonic_ratio  // harmonic/percussive split (A14, live)
-pitch, pitch_confidence                             // monophonic pitch (A15, reserved — reads 0.0)
-contrast_0, contrast_1, contrast_2, contrast_3,     // spectral contrast (A16, reserved — reads 0.0)
+percussive_energy, harmonic_energy, harmonic_ratio  // harmonic/percussive split (A14)
+pitch, pitch_confidence                             // monophonic pitch (A15)
+contrast_0, contrast_1, contrast_2, contrast_3,     // spectral contrast (A16)
 contrast_4, contrast_5, contrast_mean, timbre_flux
 
 // Audio textures — read the signal directly
@@ -342,6 +347,8 @@ spectrogram(uv)       // scrolling mel-band history
 ```
 
 The 20 scalar fields above plus `dominant_chroma`, the 13 MFCCs, the 12 chroma values, and the 28 detector scalars (listed above) are the full set of **74 audio features** — all available in every effect shader. MFCC and chroma are packed as `array<vec4f>` internally, so read them through the `mfcc(i)` / `chroma_val(i)` helpers rather than by field name.
+
+Not sure what one of these means, or which to reach for? Every field is explained in plain English in [AUDIO-FEATURES.md](AUDIO-FEATURES.md), including a [pick-by-what-you-want table](AUDIO-FEATURES.md#pick-a-feature-by-what-you-want).
 
 ### Common Patterns
 

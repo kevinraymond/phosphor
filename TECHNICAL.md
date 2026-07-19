@@ -322,6 +322,8 @@ All fields with types and defaults:
 
 ## Audio Pipeline
 
+This section covers how the pipeline is built. For what each feature *means* and the papers behind it, see [AUDIO-FEATURES.md](AUDIO-FEATURES.md).
+
 **Capture:** cpal grabs audio from the default input device. Samples flow through a lock-free ring buffer to a dedicated audio thread.
 
 **Multi-resolution FFT:** Three FFT sizes target different frequency ranges:
@@ -331,7 +333,9 @@ All fields with types and defaults:
 
 Bass bands use linear RMS, mid/high bands use dB scaling (80 dB range).
 
-**Adaptive normalization:** Per-feature running min/max with 0.005 decay replaces all fixed gain multipliers. Every audio feature auto-scales to the 0-1 range based on recent history.
+**Adaptive normalization:** Gated percentile ranging replaces all fixed gain multipliers — `(v - P5) / (P95 - P5)` over a ~344-frame (~4 s) window, with a soft knee at 0.85 so transients above P95 asymptote toward 1 instead of hard-clipping. A spike ages out of the ring rather than needing a decay heuristic. Silence-gated, with the window frozen so silence can't rescale it.
+
+Per-feature policy (`NormPolicy`) lives in the `FEATURES` table in `audio/schema.rs`, alongside decay, smoothing and interpolation policy — four modes: `Adaptive` (7 bands, `rms`, `flux`, `timbre_flux`, the two HPSS energies), `FixedRange` (`centroid`, `flatness`, `rolloff`, `bandwidth`, `zcr` — clamped, held on silence), `ZScore` (the 13 MFCCs — running mean/variance, tanh at ±3σ), and `Passthrough` (everything else: producer-owned, copied untouched).
 
 **3-stage beat detection:**
 1. **OnsetDetector** — log-magnitude multi-band spectral flux with adaptive threshold

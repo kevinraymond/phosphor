@@ -127,6 +127,8 @@ Four toggleable effects (per-effect overridable):
 | 5 | Presence   | PR   | 4-6 kHz       | Definition, edge           |
 | 6 | Brilliance | BR   | 6-20 kHz      | Air, sparkle, cymbals      |
 
+Full glossary of all 74 audio features, in plain English: [AUDIO-FEATURES.md](AUDIO-FEATURES.md).
+
 ---
 
 ## MIDI
