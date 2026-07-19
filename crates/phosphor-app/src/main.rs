@@ -383,6 +383,7 @@ impl ApplicationHandler for PhosphorApp {
                         .filter(|ps| ps.lattice_enabled)
                         .map(|ps| crate::ui::panels::lattice_panel::LatticeInfo {
                             params: ps.lattice_params,
+                            defaults: ps.lattice_defaults,
                         });
 
                     // Get obstacle info from active layer

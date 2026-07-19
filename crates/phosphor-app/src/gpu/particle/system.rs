@@ -192,6 +192,9 @@ pub struct ParticleSystem {
     lattice: Option<LatticeSim>,
     pub lattice_enabled: bool,
     pub lattice_params: LatticeParams,
+    /// The effect's `.pfx`-derived params, kept pristine so the panel's "Reset to
+    /// defaults" restores the preset's look — not the hard-coded base defaults.
+    pub lattice_defaults: LatticeParams,
     lattice_needs_seed: std::cell::Cell<bool>,
     // Fractional generations-per-second accumulator (drained each frame into an
     // integer step count) — keeps CA speed frame-rate stable. `&self` dispatch, so
@@ -1061,6 +1064,11 @@ impl ParticleSystem {
                 .map(|ld| LatticeSim::new(device, hdr_format, ld.grid_res)),
             lattice_enabled: def.lattice.is_some(),
             lattice_params: def
+                .lattice
+                .as_ref()
+                .map(LatticeParams::from)
+                .unwrap_or_default(),
+            lattice_defaults: def
                 .lattice
                 .as_ref()
                 .map(LatticeParams::from)
@@ -2701,7 +2709,7 @@ impl ParticleSystem {
     /// embedded render params + this frame's audio/time).
     fn build_lattice_render_uniforms(&self) -> VolumetricUniforms {
         let u = &self.uniforms;
-        self.lattice_params.render.build_uniforms(
+        let mut vu = self.lattice_params.render.build_uniforms(
             u.resolution,
             u.time,
             u.beat,
@@ -2709,7 +2717,12 @@ impl ParticleSystem {
             u.rms,
             u.beat_phase,
             u.dominant_chroma,
-        )
+        );
+        // Tie the marcher's boundary-fade shape to the CA domain, so the panel's
+        // Domain (Cube/Sphere) choice actually changes the silhouette instead of
+        // everything reading as a sphere from the hard-wired spherical envelope.
+        vu.env_shape = self.lattice_params.domain_mode.min(1);
+        vu
     }
 
     /// Resize the compute rasterizer framebuffer (call from PassExecutor::resize).

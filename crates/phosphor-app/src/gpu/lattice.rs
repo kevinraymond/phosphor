@@ -1535,6 +1535,9 @@ mod tests {
             if let Ok(g) = std::env::var("LATTICE_PREVIEW_GRID") {
                 params.grid_res = clamp_grid_res(g.parse().unwrap_or(params.grid_res));
             }
+            if let Ok(d) = std::env::var("LATTICE_DOMAIN") {
+                params.domain_mode = d.parse().unwrap_or(params.domain_mode).min(1);
+            }
 
             let sim = LatticeSim::new(&device, fmt, params.grid_res);
             let mut fc =
@@ -1570,6 +1573,7 @@ mod tests {
                     .render
                     .build_uniforms([w as f32, h as f32], 2.2, 0.0, 0.0, 0.0, 0.0, 0.0);
             ru.grid_res = params.grid_res;
+            ru.env_shape = params.domain_mode.min(1); // mirror the app's domain→envelope tie
             sim.upload_render_uniforms(&queue, &ru);
             let mut enc = device.create_command_encoder(&Default::default());
             {

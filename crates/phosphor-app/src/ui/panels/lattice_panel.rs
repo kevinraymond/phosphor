@@ -13,6 +13,9 @@ use crate::gpu::lattice::{GRID_RES_CHOICES, LatticeParams, PRESET_RULES};
 #[derive(Clone)]
 pub struct LatticeInfo {
     pub params: LatticeParams,
+    /// The effect's `.pfx` defaults, so "Reset to defaults" restores the preset's
+    /// look rather than the hard-coded base defaults.
+    pub defaults: LatticeParams,
 }
 
 /// Edit emitted by the panel, applied to the active effect in `main.rs`.
@@ -247,7 +250,15 @@ pub fn draw_lattice_panel(ui: &mut Ui, info: &LatticeInfo) {
     ui.horizontal(|ui| {
         ui.label("Cam distance");
         changed |= ui
-            .add(egui::Slider::new(&mut p.render.cam_distance, 1.5..=6.0))
+            .add(egui::Slider::new(&mut p.render.cam_distance, 1.0..=6.0))
+            .changed();
+    });
+    ui.horizontal(|ui| {
+        ui.label("Zoom (FOV)");
+        // Magnifies the structure without moving the camera into it — the reliable
+        // way to fill the frame when the structure is small inside the domain.
+        changed |= ui
+            .add(egui::Slider::new(&mut p.render.fov, 1.0..=5.0))
             .changed();
     });
     ui.horizontal(|ui| {
@@ -280,11 +291,12 @@ pub fn draw_lattice_panel(ui: &mut Ui, info: &LatticeInfo) {
 
     ui.add_space(6.0);
     if ui.button("Reset to defaults").clicked() {
-        // Preserve the grid resolution (a rebuild is expensive); reset everything else.
+        // Restore the effect's `.pfx` defaults (rule, look, domain — everything),
+        // preserving only the current grid resolution to avoid a rebuild.
         let grid = p.grid_res;
         p = LatticeParams {
             grid_res: grid,
-            ..LatticeParams::default()
+            ..info.defaults
         };
         changed = true;
         reseed = true;
