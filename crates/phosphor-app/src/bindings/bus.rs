@@ -87,6 +87,26 @@ impl BindingBus {
         id
     }
 
+    /// Clone a binding under a fresh id (same scope/source/target/transforms).
+    pub fn duplicate_binding(&mut self, id: &str) -> Option<BindingId> {
+        let src = self.get_binding(id)?.clone();
+        let new_id = format!("b_{:03}", self.next_id_counter);
+        self.next_id_counter += 1;
+        let name = if src.name.is_empty() {
+            String::new() // keep the auto Source -> Target display
+        } else {
+            format!("{} copy", src.name)
+        };
+        self.runtimes.insert(new_id.clone(), BindingRuntime::new());
+        self.bindings.push(Binding {
+            id: new_id.clone(),
+            name,
+            ..src
+        });
+        self.mark_dirty();
+        Some(new_id)
+    }
+
     /// Remove a binding by ID. Saves immediately.
     pub fn remove_binding(&mut self, id: &str) {
         self.bindings.retain(|b| b.id != id);
@@ -371,6 +391,24 @@ mod tests {
             target: "layer.0.opacity".into(),
             transforms: Vec::new(),
         }
+    }
+
+    #[test]
+    fn duplicate_binding_clones_under_fresh_id() {
+        let mut bus = empty_bus();
+        let id = bus.add_binding(
+            "audio.kick".into(),
+            "layer.0.opacity".into(),
+            BindingScope::Global,
+        );
+        let new_id = bus.duplicate_binding(&id).unwrap();
+        assert_ne!(new_id, id);
+        assert_eq!(bus.bindings.len(), 2);
+        let clone = bus.get_binding(&new_id).unwrap();
+        assert_eq!(clone.source, "audio.kick");
+        assert_eq!(clone.target, "layer.0.opacity");
+        assert_eq!(clone.scope, BindingScope::Global);
+        assert!(bus.runtimes.contains_key(&new_id));
     }
 
     #[test]

@@ -38,6 +38,8 @@ pub struct BindingMatrixState {
     pub source_viewport: Rect,
     pub card_viewport: Rect,
     pub target_viewport: Rect,
+    /// Card under the pointer this frame — its cables brighten, others dim.
+    pub hovered_binding_id: Option<String>,
     pub flow_phase: f32,
     /// Cached texture handles for WS bridge preview thumbnails.
     pub preview_textures: HashMap<String, egui::TextureHandle>,
@@ -57,6 +59,7 @@ impl BindingMatrixState {
             source_viewport: Rect::NOTHING,
             card_viewport: Rect::NOTHING,
             target_viewport: Rect::NOTHING,
+            hovered_binding_id: None,
             flow_phase: 0.0,
             preview_textures: HashMap::new(),
         }
@@ -87,6 +90,7 @@ pub fn draw_binding_matrix(
     state.source_positions.clear();
     state.target_positions.clear();
     state.card_positions.clear();
+    state.hovered_binding_id = None;
 
     #[allow(deprecated)]
     let screen = ctx.input(|i| i.screen_rect());
@@ -304,10 +308,29 @@ fn draw_header(
             )
             .clicked()
         };
-        if tab_btn(ui, "Effect", state.scope_tab == ScopeTab::Effect) {
+        let (fx_on, gl_on) = bus.bindings.iter().fold((0usize, 0usize), |(f, g), b| {
+            if !b.enabled {
+                (f, g)
+            } else if b.scope == BindingScope::Preset {
+                (f + 1, g)
+            } else {
+                (f, g + 1)
+            }
+        });
+        let fx_label = if fx_on > 0 {
+            format!("Effect ({fx_on})")
+        } else {
+            "Effect".to_string()
+        };
+        let gl_label = if gl_on > 0 {
+            format!("Global ({gl_on})")
+        } else {
+            "Global".to_string()
+        };
+        if tab_btn(ui, &fx_label, state.scope_tab == ScopeTab::Effect) {
             state.scope_tab = ScopeTab::Effect;
         }
-        if tab_btn(ui, "Global", state.scope_tab == ScopeTab::Global) {
+        if tab_btn(ui, &gl_label, state.scope_tab == ScopeTab::Global) {
             state.scope_tab = ScopeTab::Global;
         }
 
@@ -328,6 +351,9 @@ fn draw_header(
                             info.active_effect_name(),
                             info.active_param_names(),
                         );
+                        // Templates are Preset-scoped; land the user where the
+                        // new cards actually are instead of a silent no-op view.
+                        state.scope_tab = ScopeTab::Effect;
                     }
                 }
             });
@@ -1251,12 +1277,16 @@ fn draw_center_column(
                 ScopeTab::Global => BindingScope::Global,
             };
 
-            let binding_ids: Vec<String> = bus
+            // Group cards by target (untargeted last) so multiple bindings
+            // driving one parameter sit together; ties keep id order.
+            let mut binding_meta: Vec<(bool, String, String)> = bus
                 .bindings
                 .iter()
                 .filter(|b| b.scope == scope_filter)
-                .map(|b| b.id.clone())
+                .map(|b| (b.target.is_empty(), b.target.clone(), b.id.clone()))
                 .collect();
+            binding_meta.sort();
+            let binding_ids: Vec<String> = binding_meta.into_iter().map(|(_, _, id)| id).collect();
 
             if binding_ids.is_empty() {
                 ui.add_space(20.0);
@@ -1289,6 +1319,11 @@ fn draw_center_column(
                     }
                     CardAction::ArmDelete => {
                         new_pending = Some((id.clone(), now));
+                    }
+                    CardAction::Duplicate => {
+                        if let Some(new_id) = bus.duplicate_binding(id) {
+                            state.expanded_binding_id = Some(new_id);
+                        }
                     }
                     CardAction::None => {}
                 }
@@ -1362,6 +1397,7 @@ enum CardAction {
     Collapse,
     Delete,
     ArmDelete,
+    Duplicate,
 }
 
 /// Short icon for a transform type (matching JSX mockup).
@@ -1698,6 +1734,10 @@ fn draw_binding_card(
         }
     }
 
+    if frame_resp.response.contains_pointer() {
+        state.hovered_binding_id = Some(id.to_string());
+    }
+
     // Record card position for bezier lines
     let rect = frame_resp.response.rect;
     state.card_positions.insert(
@@ -1772,6 +1812,21 @@ fn draw_expanded_content(
                 } else {
                     *action = CardAction::ArmDelete;
                 }
+            }
+
+            if ui
+                .add(
+                    egui::Button::new(
+                        RichText::new("Duplicate")
+                            .size(8.0)
+                            .color(tc.text_secondary),
+                    )
+                    .frame(false),
+                )
+                .on_hover_text("Clone this binding (same source/target/transforms)")
+                .clicked()
+            {
+                *action = CardAction::Duplicate;
             }
         });
     });
@@ -2585,16 +2640,21 @@ fn draw_connections(ctx: &Context, state: &BindingMatrixState, bus: &BindingBus)
         .expand(4.0);
     let painter = ctx.layer_painter(line_layer).with_clip_rect(clip);
 
+    let hovered_id = state.hovered_binding_id.as_deref();
     for binding in &bus.bindings {
         let src_pos = state.source_positions.get(&binding.source);
         let card_pos = state.card_positions.get(&binding.id);
         let tgt_pos = state.target_positions.get(&binding.target);
 
         let src_color = source_color(&binding.source);
-        let (stroke_width, alpha) = if binding.enabled {
-            (1.5_f32, 0.6_f32)
+        let is_hovered = hovered_id == Some(binding.id.as_str());
+        // Hovering a card spotlights its cables and dims every other cable.
+        let (stroke_width, alpha) = if is_hovered {
+            (2.0_f32, 0.9_f32)
+        } else if binding.enabled {
+            (1.5_f32, if hovered_id.is_some() { 0.15 } else { 0.6 })
         } else {
-            (1.0_f32, 0.12)
+            (1.0_f32, if hovered_id.is_some() { 0.06 } else { 0.12 })
         };
 
         let stroke_color = if binding.enabled {
