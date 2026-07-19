@@ -204,6 +204,17 @@ impl BindingBus {
         effect_name: &str,
         param_names: &[String],
     ) {
+        // Substitute a live MIDI device for `*` source placeholders: evaluation
+        // is exact-match on snapshot keys, so a literal `midi.*.cc.…` binding
+        // can never fire. If no MIDI source has been seen yet, the `*` stays —
+        // the card then shows the no-signal chip until the user re-Learns it.
+        let midi_device: Option<String> = self
+            .last_snapshot
+            .keys()
+            .find(|k| k.starts_with("midi."))
+            .and_then(|k| k.split('.').nth(1))
+            .map(str::to_string);
+
         for entry in template.entries {
             let mut target = entry.target_pattern.replace("{effect}", effect_name);
 
@@ -217,7 +228,11 @@ impl BindingBus {
                 continue;
             }
 
-            let id = self.add_binding(entry.source.to_string(), target, entry.scope.clone());
+            let mut source = entry.source.to_string();
+            if let (true, Some(dev)) = (source.contains('*'), midi_device.as_deref()) {
+                source = source.replace('*', dev);
+            }
+            let id = self.add_binding(source, target, entry.scope.clone());
 
             // Apply transforms
             if let Some(b) = self.get_binding_mut(&id) {
@@ -270,6 +285,37 @@ mod tests {
         bus.apply_template(&SPECTRAL_BANDS, "Phosphor", &params);
         // Should only create 2 bindings (bands 0 and 1), skip 2-6
         assert_eq!(bus.bindings.len(), 2);
+    }
+
+    #[test]
+    fn midi_faders_substitutes_live_device() {
+        use crate::bindings::types::SourceRaw;
+        let mut bus = test_bus();
+        bus.last_snapshot.insert(
+            "midi.MPD218.cc.0.1".to_string(),
+            (
+                0.5,
+                SourceRaw {
+                    display: "0.5".into(),
+                    numeric: 0.5,
+                },
+            ),
+        );
+        let params: Vec<String> = (0..8).map(|i| format!("p{i}")).collect();
+        bus.apply_template(&MIDI_FADERS, "Phosphor", &params);
+        assert_eq!(bus.bindings.len(), 8);
+        for (i, b) in bus.bindings.iter().enumerate() {
+            assert_eq!(b.source, format!("midi.MPD218.cc.0.{}", i + 1));
+        }
+    }
+
+    #[test]
+    fn midi_faders_keeps_wildcard_without_live_device() {
+        let mut bus = test_bus();
+        let params: Vec<String> = (0..8).map(|i| format!("p{i}")).collect();
+        bus.apply_template(&MIDI_FADERS, "Phosphor", &params);
+        // No live MIDI source: the placeholder survives so the UI can flag it.
+        assert_eq!(bus.bindings[0].source, "midi.*.cc.0.1");
     }
 
     #[test]
