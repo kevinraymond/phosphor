@@ -32,6 +32,12 @@ pub struct BindingMatrixState {
     pub source_positions: HashMap<String, Pos2>,
     pub target_positions: HashMap<String, Pos2>,
     pub card_positions: HashMap<String, (Pos2, Pos2)>,
+    /// Visible band of each column's scroll area this frame — curve endpoints
+    /// are clamped into these so scrolled-off rows don't paint cables across
+    /// the header/footer.
+    pub source_viewport: Rect,
+    pub card_viewport: Rect,
+    pub target_viewport: Rect,
     pub flow_phase: f32,
     /// Cached texture handles for WS bridge preview thumbnails.
     pub preview_textures: HashMap<String, egui::TextureHandle>,
@@ -48,6 +54,9 @@ impl BindingMatrixState {
             source_positions: HashMap::new(),
             target_positions: HashMap::new(),
             card_positions: HashMap::new(),
+            source_viewport: Rect::NOTHING,
+            card_viewport: Rect::NOTHING,
+            target_viewport: Rect::NOTHING,
             flow_phase: 0.0,
             preview_textures: HashMap::new(),
         }
@@ -88,9 +97,14 @@ pub fn draw_binding_matrix(
     let painter = ctx.layer_painter(backdrop_layer);
     painter.rect_filled(screen, 0.0, tc.backdrop);
 
-    // Escape closes
+    // Reads LAST frame's popup state (sampled before this frame's widgets),
+    // so the click/Esc that dismisses a popup — source picker, target combo,
+    // "+ Add", all of which overhang the panel — can't also close the overlay.
+    let popup_was_open = egui::Popup::is_any_open(ctx);
+
+    // Escape closes (egui itself closes an open popup on Escape)
     let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-    if esc_pressed {
+    if esc_pressed && !popup_was_open {
         state.open = false;
         return;
     }
@@ -222,7 +236,7 @@ pub fn draw_binding_matrix(
                     .interact_pos()
                     .is_some_and(|pos| !area_resp.response.rect.contains(pos))
         });
-        if clicked_outside {
+        if clicked_outside && !popup_was_open {
             state.open = false;
         }
     }
@@ -402,6 +416,7 @@ fn draw_source_column(ui: &mut egui::Ui, state: &mut BindingMatrixState, bus: &B
     ScrollArea::vertical()
         .id_salt("matrix_sources")
         .show(ui, |ui| {
+            state.source_viewport = ui.clip_rect();
             ui.set_width(ui.available_width());
 
             // Build source groups
@@ -987,6 +1002,7 @@ fn draw_target_column(
     ScrollArea::vertical()
         .id_salt("matrix_targets")
         .show(ui, |ui| {
+            state.target_viewport = ui.clip_rect();
             ui.set_width(ui.available_width());
 
             let mut current_group: &str = "";
@@ -1227,6 +1243,7 @@ fn draw_center_column(
     ScrollArea::vertical()
         .id_salt("matrix_bindings")
         .show(ui, |ui| {
+            state.card_viewport = ui.clip_rect();
             ui.set_width(ui.available_width());
 
             let scope_filter = match state.scope_tab {
@@ -2559,7 +2576,14 @@ fn draw_matrix_source_picker(
 fn draw_connections(ctx: &Context, state: &BindingMatrixState, bus: &BindingBus) {
     let tc = theme_colors(ctx);
     let line_layer = egui::LayerId::new(Order::Foreground, Id::new("matrix_lines"));
-    let painter = ctx.layer_painter(line_layer);
+    // Hard-stop all cables at the column area (union covers the inter-column
+    // gaps the curves cross) so nothing paints over the header or footer.
+    let clip = state
+        .source_viewport
+        .union(state.card_viewport)
+        .union(state.target_viewport)
+        .expand(4.0);
+    let painter = ctx.layer_painter(line_layer).with_clip_rect(clip);
 
     for binding in &bus.bindings {
         let src_pos = state.source_positions.get(&binding.source);
@@ -2590,37 +2614,78 @@ fn draw_connections(ctx: &Context, state: &BindingMatrixState, bus: &BindingBus)
         };
         let stroke = Stroke::new(stroke_width, stroke_color);
 
+        // A clamped (scrolled-off) endpoint draws as a faded stub — mirrors the
+        // collapsed-group behavior of snapping to a fixed anchor — and its
+        // segment skips the flow dot (an animated dot on a stub reads wrong).
+        let faded = Stroke::new(stroke_width, stroke_color.gamma_multiply(0.4));
+
         // Source → card left edge
         if let (Some(&from), Some(&(card_left, _))) = (src_pos, card_pos) {
-            draw_bezier_connection(&painter, from, card_left, stroke);
+            let (from_c, fe) = clamp_endpoint(from, state.source_viewport);
+            let (to_c, te) = clamp_endpoint(card_left, state.card_viewport);
+            // Both endpoints off the same edge: nothing of the curve is visible.
+            if fe == 0 || fe != te {
+                let visible = fe == 0 && te == 0;
+                draw_bezier_connection(
+                    &painter,
+                    from_c,
+                    to_c,
+                    if visible { stroke } else { faded },
+                );
 
-            // Flow dot for enabled bindings with nonzero output
-            if binding.enabled {
-                let runtime = bus.runtime(&binding.id);
-                let output = runtime.and_then(|r| r.last_output).unwrap_or(0.0);
-                if output > 0.001 {
-                    let t = state.flow_phase;
-                    let dot_pos = eval_cubic_bezier(from, card_left, t);
-                    painter.circle_filled(dot_pos, 3.0, src_color.linear_multiply(0.8));
+                // Flow dot for enabled bindings with nonzero output
+                if visible && binding.enabled {
+                    let runtime = bus.runtime(&binding.id);
+                    let output = runtime.and_then(|r| r.last_output).unwrap_or(0.0);
+                    if output > 0.001 {
+                        let t = state.flow_phase;
+                        let dot_pos = eval_cubic_bezier(from_c, to_c, t);
+                        painter.circle_filled(dot_pos, 3.0, src_color.linear_multiply(0.8));
+                    }
                 }
             }
         }
 
         // Card right edge → target
         if let (Some(&(_, card_right)), Some(&to)) = (card_pos, tgt_pos) {
-            draw_bezier_connection(&painter, card_right, to, stroke);
+            let (from_c, fe) = clamp_endpoint(card_right, state.card_viewport);
+            let (to_c, te) = clamp_endpoint(to, state.target_viewport);
+            if fe == 0 || fe != te {
+                let visible = fe == 0 && te == 0;
+                draw_bezier_connection(
+                    &painter,
+                    from_c,
+                    to_c,
+                    if visible { stroke } else { faded },
+                );
 
-            // Flow dot
-            if binding.enabled {
-                let runtime = bus.runtime(&binding.id);
-                let output = runtime.and_then(|r| r.last_output).unwrap_or(0.0);
-                if output > 0.001 {
-                    let t = (state.flow_phase + 0.3) % 1.0;
-                    let dot_pos = eval_cubic_bezier(card_right, to, t);
-                    painter.circle_filled(dot_pos, 3.0, src_color.linear_multiply(0.8));
+                // Flow dot
+                if visible && binding.enabled {
+                    let runtime = bus.runtime(&binding.id);
+                    let output = runtime.and_then(|r| r.last_output).unwrap_or(0.0);
+                    if output > 0.001 {
+                        let t = (state.flow_phase + 0.3) % 1.0;
+                        let dot_pos = eval_cubic_bezier(from_c, to_c, t);
+                        painter.circle_filled(dot_pos, 3.0, src_color.linear_multiply(0.8));
+                    }
                 }
             }
         }
+    }
+}
+
+/// Clamp a curve endpoint's y into its column's visible band.
+/// Returns the clamped point and where the original sat: -1 above, 0 inside,
+/// +1 below the viewport.
+fn clamp_endpoint(pos: Pos2, viewport: Rect) -> (Pos2, i8) {
+    let top = viewport.top() + 4.0;
+    let bottom = viewport.bottom() - 4.0;
+    if pos.y < top {
+        (pos2(pos.x, top), -1)
+    } else if pos.y > bottom {
+        (pos2(pos.x, bottom), 1)
+    } else {
+        (pos, 0)
     }
 }
 
