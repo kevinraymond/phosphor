@@ -557,6 +557,13 @@ pub fn draw_panels(
                                 ui.add(egui::Slider::new(&mut p.cam_distance, 1.5..=6.0));
                             });
                             ui.horizontal(|ui| {
+                                ui.label("Cam yaw");
+                                ui.add(egui::Slider::new(
+                                    &mut p.cam_yaw,
+                                    0.0..=std::f32::consts::TAU,
+                                ));
+                            });
+                            ui.horizontal(|ui| {
                                 ui.label("Cam pitch");
                                 ui.add(egui::Slider::new(&mut p.cam_pitch, -1.2..=1.2));
                             });

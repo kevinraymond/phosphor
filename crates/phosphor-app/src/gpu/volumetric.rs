@@ -82,6 +82,9 @@ pub struct VolumetricParams {
     /// Saturation gain applied in `resolve` (`density = 1 - exp(-gain * occupancy)`),
     /// mapping mean particles-per-voxel to a bounded, count-robust `[0,1)` density.
     pub density_gain: f32,
+    /// Base camera yaw. The marcher orbits at `cam_yaw + time * cam_orbit_speed`, so
+    /// this sets the viewing angle when the orbit is stopped (`cam_orbit_speed == 0`).
+    pub cam_yaw: f32,
     pub cam_pitch: f32,
     pub cam_distance: f32,
     pub cam_orbit_speed: f32,
@@ -101,6 +104,7 @@ impl Default for VolumetricParams {
             volume_depth: 0.8,
             density_scale: 256.0,
             density_gain: 0.15,
+            cam_yaw: 0.0,
             cam_pitch: 0.35,
             cam_distance: 3.2,
             cam_orbit_speed: 0.15,
@@ -123,6 +127,7 @@ impl VolumetricParams {
             "volume_depth" => self.volume_depth = value,
             "density_scale" => self.density_scale = value,
             "density_gain" => self.density_gain = value,
+            "cam_yaw" => self.cam_yaw = value,
             "cam_pitch" => self.cam_pitch = value,
             "cam_distance" => self.cam_distance = value,
             "cam_orbit_speed" => self.cam_orbit_speed = value,
@@ -158,7 +163,7 @@ impl VolumetricParams {
             density_threshold: self.density_threshold,
             volume_depth: self.volume_depth,
             density_scale: self.density_scale.max(1.0),
-            cam_yaw: 0.0,
+            cam_yaw: self.cam_yaw,
             cam_pitch: self.cam_pitch,
             cam_distance: self.cam_distance,
             cam_orbit_speed: self.cam_orbit_speed,
