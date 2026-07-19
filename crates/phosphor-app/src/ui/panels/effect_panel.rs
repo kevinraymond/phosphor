@@ -437,11 +437,7 @@ fn draw_footer(
 // ── Helpers ──────────────────────────────────────────────────────────
 
 fn truncate_name(name: &str, max_len: usize) -> String {
-    if name.len() <= max_len {
-        name.to_string()
-    } else {
-        format!("{}\u{2026}", &name[..max_len - 1])
-    }
+    crate::ui::widgets::truncate_chars(name, max_len)
 }
 
 /// Format a particle count for display: 1000 → "1K", 70000 → "70K", 1000000 → "1M".

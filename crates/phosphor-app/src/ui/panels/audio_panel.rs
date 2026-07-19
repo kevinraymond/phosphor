@@ -140,11 +140,7 @@ fn chroma_color(pitch_class: usize, energy: f32) -> Color32 {
 }
 
 fn truncate_device_name(name: &str, max: usize) -> String {
-    if name.len() <= max {
-        name.to_string()
-    } else {
-        format!("{}...", &name[..max - 3])
-    }
+    crate::ui::widgets::truncate_chars(name, max)
 }
 
 /// Interpolate MFCC value (0..1) to dark blue → cyan → white.

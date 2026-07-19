@@ -294,9 +294,12 @@ fn abbreviate_address(addr: &str) -> String {
             return short;
         }
     }
-    if addr.len() <= 14 {
+    let count = addr.chars().count();
+    if count <= 14 {
         addr.to_string()
     } else {
-        format!("..{}", &addr[addr.len() - 12..])
+        // Keep the tail — the discriminating part of an OSC address (char-safe).
+        let tail: String = addr.chars().skip(count - 12).collect();
+        format!("..{tail}")
     }
 }
