@@ -61,15 +61,9 @@ fn format_mapping_label(msg_type: MidiMsgType, cc: u8) -> String {
     }
 }
 
-/// Format a float value compactly: no trailing zeros, max 2 decimal places.
+/// Shared compact float formatting, f32-flavored for this panel's values.
 fn fmt_val(v: f32) -> String {
-    if v == v.round() {
-        format!("{:.0}", v)
-    } else if (v * 10.0).round() == v * 10.0 {
-        format!("{:.1}", v)
-    } else {
-        format!("{:.2}", v)
-    }
+    crate::ui::widgets::fmt_val(f64::from(v))
 }
 
 pub fn draw_param_panel(

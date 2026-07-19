@@ -1,3 +1,5 @@
+pub mod rows;
+
 use egui::{
     Color32, CornerRadius, Frame, Margin, RichText, Shape, Stroke, Ui,
     collapsing_header::CollapsingState, pos2,
@@ -5,6 +7,29 @@ use egui::{
 
 use super::theme::colors::theme_colors;
 use super::theme::tokens::*;
+
+/// Format a float value compactly: no trailing zeros, max 2 decimal places.
+pub fn fmt_val(v: f64) -> String {
+    if v == v.round() {
+        format!("{v:.0}")
+    } else if (v * 10.0).round() == v * 10.0 {
+        format!("{v:.1}")
+    } else {
+        format!("{v:.2}")
+    }
+}
+
+/// Char-safe truncation with an ellipsis. Safe on multibyte names (a byte-indexed
+/// `&name[..n]` panics on a UTF-8 boundary — several panels used to do exactly that).
+pub fn truncate_chars(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+        out.push('\u{2026}');
+        out
+    }
+}
 
 /// Styled card frame for panel sections.
 pub fn card_frame(ui: &Ui) -> Frame {
@@ -234,5 +259,38 @@ pub fn draw_diagonal_stripes(
         let to = egui::pos2(rect.left() + offset + h, rect.top());
         clipped.line_segment([from, to], stroke);
         offset += spacing;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fmt_val_compact() {
+        assert_eq!(fmt_val(3.0), "3");
+        assert_eq!(fmt_val(0.5), "0.5");
+        assert_eq!(fmt_val(0.85), "0.85");
+        assert_eq!(fmt_val(0.333), "0.33");
+        assert_eq!(fmt_val(-2.2), "-2.2");
+    }
+
+    #[test]
+    fn truncate_chars_short_passthrough() {
+        assert_eq!(truncate_chars("Beam", 10), "Beam");
+        assert_eq!(truncate_chars("exactly-10", 10), "exactly-10");
+    }
+
+    #[test]
+    fn truncate_chars_truncates_with_ellipsis() {
+        assert_eq!(truncate_chars("Lattice Architecture", 10), "Lattice A…");
+    }
+
+    #[test]
+    fn truncate_chars_multibyte_safe() {
+        // A byte-indexed slice at 10 would panic inside the multibyte char.
+        let s = "Ätherwellen — Über";
+        assert_eq!(truncate_chars(s, 10), "Ätherwell…");
+        assert_eq!(truncate_chars("日本語テスト名前長い", 5), "日本語テ…");
     }
 }
