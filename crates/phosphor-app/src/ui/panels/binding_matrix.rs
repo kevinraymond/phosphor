@@ -1946,17 +1946,10 @@ fn draw_expanded_content(
                     );
 
                     let popup_id = Id::new(format!("matrix_add_xform_popup_{id}"));
-                    if add_resp.clicked() {
-                        #[allow(deprecated)]
-                        ui.memory_mut(|m| m.toggle_popup(popup_id));
-                    }
-                    #[allow(deprecated)]
-                    egui::popup_below_widget(
-                        ui,
-                        popup_id,
-                        &add_resp,
-                        egui::PopupCloseBehavior::CloseOnClick,
-                        |ui| {
+                    egui::Popup::from_toggle_button_response(&add_resp)
+                        .id(popup_id)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+                        .show(|ui| {
                             ui.set_min_width(110.0);
                             let items = [
                                 ("~ Smooth", TransformDef::Smooth { factor: 0.8 }),
@@ -2002,8 +1995,7 @@ fn draw_expanded_content(
                                     }
                                 }
                             }
-                        },
-                    );
+                        });
                 });
 
                 ui.add_space(2.0);
