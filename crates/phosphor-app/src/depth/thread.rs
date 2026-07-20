@@ -18,7 +18,10 @@ struct DepthRequest {
 /// Result of depth estimation.
 #[derive(Debug)]
 pub struct DepthFrame {
-    pub data: Vec<u8>, // 256×256 grayscale
+    /// Aspect-correct grayscale depth map, `width`×`height` — the model's
+    /// square output cropped to the source's letterboxed valid region
+    /// (e.g. 256×144 for a 16:9 webcam frame, #1790).
+    pub data: Vec<u8>,
     pub width: u32,
     pub height: u32,
 }
@@ -58,12 +61,11 @@ impl DepthThread {
                     match request_rx.recv_timeout(Duration::from_millis(100)) {
                         Ok(req) => {
                             match estimator.estimate(&req.data, req.width, req.height) {
-                                Ok(depth_data) => {
-                                    let size = super::estimator::DEPTH_SIZE;
+                                Ok((depth_data, w, h)) => {
                                     let frame = DepthFrame {
                                         data: depth_data,
-                                        width: size,
-                                        height: size,
+                                        width: w,
+                                        height: h,
                                     };
                                     // Drop old result if main thread hasn't consumed it yet
                                     let _ = result_tx.try_send(frame);

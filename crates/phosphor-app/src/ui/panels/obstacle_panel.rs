@@ -1,14 +1,16 @@
 use egui::{RichText, Ui};
 
-use crate::gpu::particle::ObstacleMode;
+use crate::gpu::particle::{ObstacleFit, ObstacleMode};
 use crate::ui::theme::colors::theme_colors;
 use crate::ui::theme::tokens::*;
+use crate::ui::widgets::rows::combo_row;
 
 /// Snapshot of obstacle state, collected before UI borrow to avoid borrow conflicts.
 #[derive(Clone)]
 pub struct ObstacleInfo {
     pub enabled: bool,
     pub mode: ObstacleMode,
+    pub fit: ObstacleFit,
     pub threshold: f32,
     pub elasticity: f32,
     /// "image", "webcam", "depth", or "" (none)
@@ -33,6 +35,7 @@ pub enum ObstacleCommand {
     None,
     SetEnabled(bool),
     SetMode(ObstacleMode),
+    SetFit(ObstacleFit),
     SetThreshold(f32),
     SetElasticity(f32),
     LoadImage,
@@ -288,6 +291,31 @@ pub fn draw_obstacle_panel(ui: &mut Ui, info: &ObstacleInfo) {
                 }
             });
     });
+
+    // Fit dropdown (#1790): how the obstacle map is aspect-fitted to the screen.
+    let mut fit = info.fit;
+    combo_row(
+        ui,
+        "obstacle_fit",
+        "Fit",
+        Some(
+            "How the obstacle map is fitted to the screen: Fill crops to cover, Fit letterboxes, Stretch distorts (legacy)",
+        ),
+        fit.label(),
+        |ui| {
+            for f in [
+                ObstacleFit::Cover,
+                ObstacleFit::Contain,
+                ObstacleFit::Stretch,
+            ] {
+                if ui.selectable_value(&mut fit, f, f.label()).changed() {
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("obstacle_cmd"), ObstacleCommand::SetFit(fit));
+                    });
+                }
+            }
+        },
+    );
 
     // Threshold slider — compact row
     let mut threshold = info.threshold;

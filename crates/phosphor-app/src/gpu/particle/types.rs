@@ -157,8 +157,10 @@ pub struct ParticleUniforms {
     // A12 bar clock (batched ABI bump #1505) — 0.0 until the downbeat detector lands.
     // Consumes one of the two spare pad slots left after V0, so the struct stays 832B.
     pub bar_phase: f32, // 0-1 sawtooth over the current bar
-    pub _pad_zcr: f32,
-    // Total = 832 bytes
+    // Obstacle fit mode (#1790) — consumes the last spare pad slot (832B preserved).
+    // Lives here rather than in the obstacle block at [384..399] to keep offsets stable.
+    pub obstacle_fit: u32, // 0=stretch (legacy), 1=contain ("Fit"), 2=cover ("Fill") — see ObstacleFit
+                           // Total = 832 bytes
 }
 
 /// Obstacle collision mode.
@@ -186,6 +188,36 @@ impl ObstacleMode {
             Self::Stick => "Stick",
             Self::Flow => "Flow Around",
             Self::Contain => "Contain",
+        }
+    }
+}
+
+/// Obstacle texture fit mode: how the map is aspect-fitted to the viewport (#1790).
+/// UI labels avoid "Contain" to not clash with `ObstacleMode::Contain`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ObstacleFit {
+    /// Legacy: texture stretched over the full viewport (aspect-distorting).
+    Stretch = 0,
+    /// Aspect-preserving, letterboxed inside the viewport ("Fit").
+    Contain = 1,
+    /// Aspect-preserving, cropped to fill the viewport ("Fill").
+    Cover = 2,
+}
+
+impl ObstacleFit {
+    pub fn from_u32(v: u32) -> Self {
+        match v {
+            0 => Self::Stretch,
+            1 => Self::Contain,
+            _ => Self::Cover,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Stretch => "Stretch",
+            Self::Contain => "Fit",
+            Self::Cover => "Fill",
         }
     }
 }

@@ -16,4 +16,4 @@ pub use source_loader::{
     ParticleSourceLoader, ParticleSourceResult, builtin_raster_images, builtin_raster_path,
 };
 pub use system::ParticleSystem;
-pub use types::{ObstacleMode, ParticleImageSource, SourceTransition};
+pub use types::{ObstacleFit, ObstacleMode, ParticleImageSource, SourceTransition};

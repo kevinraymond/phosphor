@@ -65,9 +65,13 @@ pub struct LayerPreset {
     /// Obstacle collision image path.
     #[serde(default)]
     pub obstacle_image_path: Option<String>,
-    /// Obstacle collision mode (0=bounce, 1=stick, 2=flow).
+    /// Obstacle collision mode (0=bounce, 1=stick, 2=flow, 3=contain).
     #[serde(default)]
     pub obstacle_mode: Option<u32>,
+    /// Obstacle fit mode (0=stretch, 1=contain/"Fit", 2=cover/"Fill", #1790).
+    /// `None` (pre-fit presets) restores as Cover — the aspect-correct default.
+    #[serde(default)]
+    pub obstacle_fit: Option<u32>,
     /// Obstacle alpha threshold.
     #[serde(default)]
     pub obstacle_threshold: Option<f32>,
@@ -575,6 +579,7 @@ mod tests {
                 particle_image_path: None,
                 obstacle_image_path: None,
                 obstacle_mode: None,
+                obstacle_fit: None,
                 obstacle_threshold: None,
                 obstacle_elasticity: None,
                 obstacle_depth: None,
@@ -600,12 +605,14 @@ mod tests {
             "effect_name": "Cascade",
             "obstacle_image_path": "/tmp/logo.png",
             "obstacle_mode": 2,
+            "obstacle_fit": 1,
             "obstacle_threshold": 0.3,
             "obstacle_elasticity": 0.8
         }"#;
         let lp: LayerPreset = serde_json::from_str(json).unwrap();
         assert_eq!(lp.obstacle_image_path, Some("/tmp/logo.png".to_string()));
         assert_eq!(lp.obstacle_mode, Some(2));
+        assert_eq!(lp.obstacle_fit, Some(1));
         assert!((lp.obstacle_threshold.unwrap() - 0.3).abs() < 1e-6);
         assert!((lp.obstacle_elasticity.unwrap() - 0.8).abs() < 1e-6);
     }
@@ -620,6 +627,8 @@ mod tests {
         let lp: LayerPreset = serde_json::from_str(json).unwrap();
         assert!(lp.obstacle_image_path.is_none());
         assert!(lp.obstacle_mode.is_none());
+        // Pre-#1790 preset: no fit field -> restore keeps the Cover default.
+        assert!(lp.obstacle_fit.is_none());
         assert!(lp.obstacle_threshold.is_none());
         assert!(lp.obstacle_elasticity.is_none());
         assert!(lp.obstacle_depth.is_none());
@@ -721,6 +730,7 @@ mod tests {
             particle_image_path: None,
             obstacle_image_path: None,
             obstacle_mode: None,
+            obstacle_fit: None,
             obstacle_threshold: None,
             obstacle_elasticity: None,
             obstacle_depth: None,

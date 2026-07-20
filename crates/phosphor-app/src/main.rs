@@ -448,6 +448,7 @@ impl ApplicationHandler for PhosphorApp {
                                     crate::ui::panels::obstacle_panel::ObstacleInfo {
                                         enabled: ps.obstacle_enabled,
                                         mode: ps.obstacle_mode,
+                                        fit: ps.obstacle_fit,
                                         threshold: ps.obstacle_threshold,
                                         elasticity: ps.obstacle_elasticity,
                                         source: ps.obstacle_source.clone(),
@@ -472,6 +473,7 @@ impl ApplicationHandler for PhosphorApp {
                                     crate::ui::panels::obstacle_panel::ObstacleInfo {
                                         enabled: false,
                                         mode: crate::gpu::particle::ObstacleMode::Bounce,
+                                        fit: crate::gpu::particle::ObstacleFit::Cover,
                                         threshold: 0.5,
                                         elasticity: 0.7,
                                         source: String::new(),
@@ -1702,6 +1704,9 @@ impl ApplicationHandler for PhosphorApp {
                                         }
                                         ObstacleCommand::SetMode(mode) => {
                                             ps.obstacle_mode = mode;
+                                        }
+                                        ObstacleCommand::SetFit(fit) => {
+                                            ps.obstacle_fit = fit;
                                         }
                                         ObstacleCommand::SetThreshold(t) => {
                                             ps.obstacle_threshold = t;

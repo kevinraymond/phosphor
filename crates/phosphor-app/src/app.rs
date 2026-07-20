@@ -1175,6 +1175,7 @@ impl App {
                     ps.uniforms.obstacle_threshold = ps.obstacle_threshold;
                     ps.uniforms.obstacle_mode = ps.obstacle_mode as u32;
                     ps.uniforms.obstacle_elasticity = ps.obstacle_elasticity;
+                    ps.uniforms.obstacle_fit = ps.obstacle_fit as u32;
                     let audio = self.latest_audio.unwrap_or_default();
                     ps.update_audio(&audio);
 
@@ -2458,6 +2459,9 @@ impl App {
                 let obstacle_mode = ps_ref
                     .filter(|ps| ps.obstacle_enabled)
                     .map(|ps| ps.obstacle_mode as u32);
+                let obstacle_fit = ps_ref
+                    .filter(|ps| ps.obstacle_enabled)
+                    .map(|ps| ps.obstacle_fit as u32);
                 let obstacle_threshold = ps_ref
                     .filter(|ps| ps.obstacle_enabled)
                     .map(|ps| ps.obstacle_threshold);
@@ -2501,6 +2505,7 @@ impl App {
                     particle_image_path,
                     obstacle_image_path,
                     obstacle_mode,
+                    obstacle_fit,
                     obstacle_threshold,
                     obstacle_elasticity,
                     obstacle_depth,
@@ -2942,6 +2947,12 @@ impl App {
                                             ps.obstacle_mode =
                                                 crate::gpu::particle::ObstacleMode::from_u32(mode);
                                         }
+                                        // None (pre-#1790 preset) keeps the constructor
+                                        // default Cover — aspect-correct, user-approved.
+                                        if let Some(fit) = lp.obstacle_fit {
+                                            ps.obstacle_fit =
+                                                crate::gpu::particle::ObstacleFit::from_u32(fit);
+                                        }
                                         if let Some(threshold) = lp.obstacle_threshold {
                                             ps.obstacle_threshold = threshold;
                                         }
@@ -2996,6 +3007,10 @@ impl App {
                                 if let Some(mode) = lp.obstacle_mode {
                                     ps.obstacle_mode =
                                         crate::gpu::particle::ObstacleMode::from_u32(mode);
+                                }
+                                if let Some(fit) = lp.obstacle_fit {
+                                    ps.obstacle_fit =
+                                        crate::gpu::particle::ObstacleFit::from_u32(fit);
                                 }
                                 if let Some(threshold) = lp.obstacle_threshold {
                                     ps.obstacle_threshold = threshold;

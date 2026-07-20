@@ -87,6 +87,7 @@ pub struct ParticleSystem {
     // Obstacle collision state
     pub obstacle_enabled: bool,
     pub obstacle_mode: super::types::ObstacleMode,
+    pub obstacle_fit: super::types::ObstacleFit,
     pub obstacle_threshold: f32,
     pub obstacle_elasticity: f32,
     /// "image", "video", "webcam", or "" (none)
@@ -996,6 +997,7 @@ impl ParticleSystem {
             flow_field_bind_group,
             obstacle_enabled: false,
             obstacle_mode: super::types::ObstacleMode::Bounce,
+            obstacle_fit: super::types::ObstacleFit::Cover,
             obstacle_threshold: 0.5,
             obstacle_elasticity: 0.7,
             obstacle_source: String::new(),

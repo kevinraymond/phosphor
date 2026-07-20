@@ -93,10 +93,10 @@ struct ParticleUniforms {
     effect_params_0: vec4f,
     effect_params_1: vec4f,
 
-    // Obstacle collision
+    // Obstacle collision (obstacle_fit lives in the trailing zcr block)
     obstacle_enabled: f32,    // 0.0 or 1.0
     obstacle_threshold: f32,  // alpha cutoff
-    obstacle_mode: u32,       // 0=bounce, 1=stick, 2=flow
+    obstacle_mode: u32,       // 0=bounce, 1=stick, 2=flow, 3=contain
     obstacle_elasticity: f32, // restitution/friction
 
     // MFCC + Chroma audio features
@@ -120,7 +120,7 @@ struct ParticleUniforms {
     bpm: f32,           // BPM / 300 (normalized 0-1)
     beat_strength: f32, // Strength of the detected beat
     bar_phase: f32,     // A12 0-1 sawtooth over the current bar (#1505; 0.0 until DSP)
-    _pad_zcr_g: f32,
+    obstacle_fit: u32,  // 0=stretch (legacy), 1=contain ("Fit"), 2=cover ("Fill") (#1790)
 }
 
 // Access effect param by index (mirrors fragment shader's param() function).
@@ -217,10 +217,29 @@ fn sample_flow_field(pos: vec2f) -> vec2f {
 @group(1) @binding(2) var obstacle_tex: texture_2d<f32>;
 @group(1) @binding(3) var obstacle_sampler: sampler;
 
-// Map clip-space position [-1,1] to obstacle UV [0,1].
+// Per-axis clip→screen direction scale (larger axis normalized to 1).
+// Only the x:y ratio matters for the collision reflection math (#1790).
+fn obstacle_aspect() -> vec2f {
+    let res = max(u.resolution, vec2f(1.0));
+    return res / max(res.x, res.y);
+}
+
+// Size of the fitted obstacle rect in screen-normalized [0,1] units, centered.
+// Stretch=(1,1) legacy; Contain fits inside (letterbox); Cover fills (crop).
+fn obstacle_fit_size() -> vec2f {
+    if u.obstacle_fit == 0u { return vec2f(1.0); }
+    let res = max(u.resolution, vec2f(1.0));
+    let dims = max(vec2f(textureDimensions(obstacle_tex)), vec2f(1.0));
+    let fit = res / dims;
+    let s = select(min(fit.x, fit.y), max(fit.x, fit.y), u.obstacle_fit == 2u);
+    return dims * s / res;
+}
+
+// Map clip-space position [-1,1] to obstacle UV [0,1] honoring the fit mode.
 // Clip Y is up (+1=top), texture V is down (0=top), so flip Y.
 fn obstacle_uv(pos: vec2f) -> vec2f {
-    return vec2f(pos.x * 0.5 + 0.5, -pos.y * 0.5 + 0.5);
+    let s = vec2f(pos.x * 0.5 + 0.5, -pos.y * 0.5 + 0.5);
+    return (s - 0.5) / obstacle_fit_size() + 0.5;
 }
 
 // Sample obstacle alpha at clip-space position. Returns 0 if disabled.
@@ -231,12 +250,19 @@ fn obstacle_alpha(pos: vec2f) -> f32 {
     return textureSampleLevel(obstacle_tex, obstacle_sampler, uv, 0.0).a;
 }
 
-// Compute outward surface normal from alpha gradient (central differences).
+// Outward surface normal from the alpha gradient (central differences).
+// Returned in SCREEN space (x right, y up): equal pixel-length eps steps per
+// axis make the difference vector proportional to the true on-screen gradient
+// regardless of texture aspect or fit mode (#1790 — the old version stepped
+// equal UV distances, yielding anisotropic normals, and returned texture-space
+// y-down vectors that the y-up collision math consumed unflipped).
 fn obstacle_normal(pos: vec2f) -> vec2f {
-    let dims = vec2f(textureDimensions(obstacle_tex));
-    let texel = 1.0 / dims;
-    // Central differences in UV space, converted from clip space
-    let eps = texel * 2.0; // 2 texels for smoother gradient
+    let res = max(u.resolution, vec2f(1.0));
+    let dims = max(vec2f(textureDimensions(obstacle_tex)), vec2f(1.0));
+    let size = obstacle_fit_size();
+    let tex_px = size * res / dims;           // screen pixels per texel, per axis
+    let h_px = 2.0 * max(tex_px.x, tex_px.y); // >= 2-texel step on both axes
+    let eps = vec2f(h_px / (res.x * size.x), h_px / (res.y * size.y));
     let uv = obstacle_uv(pos);
 
     let ax = textureSampleLevel(obstacle_tex, obstacle_sampler, uv + vec2f(eps.x, 0.0), 0.0).a;
@@ -244,11 +270,17 @@ fn obstacle_normal(pos: vec2f) -> vec2f {
     let ay = textureSampleLevel(obstacle_tex, obstacle_sampler, uv + vec2f(0.0, eps.y), 0.0).a;
     let by = textureSampleLevel(obstacle_tex, obstacle_sampler, uv - vec2f(0.0, eps.y), 0.0).a;
 
-    // Gradient of alpha field (points toward higher alpha = into obstacle)
-    let grad = vec2f(ax - bx, ay - by);
+    // Screen-space gradient, y-up: +eps.y in V is DOWN-screen, hence (by - ay).
+    let grad = vec2f(ax - bx, by - ay);
     let len = length(grad);
-    if len < 0.001 { return vec2f(0.0, -1.0); } // fallback normal
-    // Outward normal = negative gradient direction
+    if len < 0.001 {
+        // Degenerate gradient: push toward screen center (sensible for the
+        // alpha-0 letterbox bars in Contain mode); straight up if at center.
+        let to_center = -pos * obstacle_aspect();
+        if length(to_center) < 0.001 { return vec2f(0.0, 1.0); }
+        return normalize(to_center);
+    }
+    // Outward normal = away from higher alpha.
     return -grad / len;
 }
 
@@ -286,17 +318,25 @@ fn apply_obstacle_collision(pos: vec2f, vel: vec2f, prev_pos: vec2f) -> vec4f {
             lo = mid;
         }
     }
-    // Place particle just before the surface along its trajectory
-    let safe_pos = mix(prev_pos, pos, lo) + normal * 0.002;
+    // Place particle just before the surface along its trajectory, nudged out
+    // along the clip direction whose on-screen image is `normal`.
+    let asp = obstacle_aspect();
+    let safe_pos = mix(prev_pos, pos, lo) + normalize(normal / asp) * 0.002;
 
+    // Response math runs in SCREEN space (y-up) so reflections look right on
+    // a non-square viewport — reflection is not affine-invariant, so doing it
+    // in clip space would skew every deflection angle (#1790). At elasticity
+    // 1.0 the preserved quantity is screen-space speed.
+    let v_s = vel * asp;
     switch u.obstacle_mode {
-        // Bounce: reflect velocity along normal, scale by elasticity
-        case 0u: {
-            let v_dot_n = dot(vel, normal);
+        // Bounce (0): reflect off the obstacle surface.
+        // Contain (3): identical reflection, normal already inverted above.
+        case 0u, 3u: {
+            let v_dot_n = dot(v_s, normal);
             // Only reflect if moving into the obstacle
             if v_dot_n >= 0.0 { return vec4f(safe_pos, vel); }
-            let reflected = vel - normal * 2.0 * v_dot_n;
-            return vec4f(safe_pos, reflected * u.obstacle_elasticity);
+            let reflected = v_s - normal * 2.0 * v_dot_n;
+            return vec4f(safe_pos, (reflected / asp) * u.obstacle_elasticity);
         }
         // Stick: zero velocity, hold at surface
         case 1u: {
@@ -304,22 +344,15 @@ fn apply_obstacle_collision(pos: vec2f, vel: vec2f, prev_pos: vec2f) -> vec4f {
         }
         // Flow: redirect into tangential direction, preserving energy
         case 2u: {
-            let v_dot_n = dot(vel, normal);
+            let v_dot_n = dot(v_s, normal);
             if v_dot_n >= 0.0 { return vec4f(safe_pos, vel); }
             // Tangent: 90-degree rotation of normal
             let tangent = vec2f(-normal.y, normal.x);
             // Pick tangent direction matching existing motion
-            let tangent_dir = select(-tangent, tangent, dot(vel, tangent) >= 0.0);
+            let tangent_dir = select(-tangent, tangent, dot(v_s, tangent) >= 0.0);
             // Existing tangential speed + redirected normal speed
-            let tangent_vel = tangent_dir * (abs(dot(vel, tangent_dir)) + abs(v_dot_n) * u.obstacle_elasticity);
-            return vec4f(safe_pos, tangent_vel);
-        }
-        // Contain: bounce off outside of obstacle shape (particles trapped inside)
-        case 3u: {
-            let v_dot_n = dot(vel, normal);
-            if v_dot_n >= 0.0 { return vec4f(safe_pos, vel); }
-            let reflected = vel - normal * 2.0 * v_dot_n;
-            return vec4f(safe_pos, reflected * u.obstacle_elasticity);
+            let tangent_vel = tangent_dir * (abs(dot(v_s, tangent_dir)) + abs(v_dot_n) * u.obstacle_elasticity);
+            return vec4f(safe_pos, tangent_vel / asp);
         }
         default: {
             return vec4f(pos, vel);
