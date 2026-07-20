@@ -625,6 +625,11 @@ impl ApplicationHandler for PhosphorApp {
                     // Collect scene info before mutable borrows
                     let scene_info = Some(app.scene_info());
 
+                    // Snapshot global volumetric state so a slider drag in the
+                    // panel below (which mutates it by &mut) marks the preset
+                    // dirty, like the other panels do.
+                    let vol_before = (app.volumetric_enabled, app.volumetric_params);
+
                     // Get active layer's param_store (mutable for MIDI badges)
                     let active_params = app.layer_stack.active_mut();
                     if let Some(layer) = active_params {
@@ -660,6 +665,9 @@ impl ApplicationHandler for PhosphorApp {
                         }
                         // Sync global postprocess enabled from layer
                         app.post_process.enabled = layer.postprocess.enabled;
+                    }
+                    if (app.volumetric_enabled, app.volumetric_params) != vol_before {
+                        app.preset_store.mark_dirty();
                     }
 
                     // Draw shader editor overlay (on top of everything)
@@ -2211,6 +2219,9 @@ impl ApplicationHandler for PhosphorApp {
                         || size.is_some()
                         || drag.is_some()
                     {
+                        // Panel edit → preset is now unsaved (particle-sim edits
+                        // round-trip via LayerPreset.particle_sim).
+                        app.preset_store.mark_dirty();
                         if let Some(layer) = app.layer_stack.active_mut() {
                             if let Some(effect) = layer.as_effect_mut() {
                                 let eidx = effect.effect_index;

@@ -250,6 +250,7 @@ mod tests {
             layers: vec![],
             active_layer: 0,
             postprocess: Default::default(),
+            volumetric: None,
         };
 
         loader.request_load(0, preset.clone(), vec![], "Test".into());
@@ -266,6 +267,7 @@ mod tests {
             layers: vec![],
             active_layer: 0,
             postprocess: Default::default(),
+            volumetric: None,
         };
 
         loader.request_load(3, preset, vec![], "My Preset".into());
@@ -289,6 +291,7 @@ mod tests {
             layers: vec![],
             active_layer: 0,
             postprocess: Default::default(),
+            volumetric: None,
         };
 
         loader.request_load(0, preset, vec![], "Empty".into());
@@ -311,6 +314,7 @@ mod tests {
             layers: vec![],
             active_layer: 0,
             postprocess: Default::default(),
+            volumetric: None,
         };
 
         let jobs = vec![(0, PathBuf::from("/nonexistent/fake_image.png"))];
@@ -335,6 +339,7 @@ mod tests {
             layers: vec![],
             active_layer: 0,
             postprocess: Default::default(),
+            volumetric: None,
         };
 
         // Send first request

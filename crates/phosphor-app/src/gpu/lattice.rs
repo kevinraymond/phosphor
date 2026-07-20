@@ -244,7 +244,8 @@ pub struct LatticeUniforms {
 /// built from the `.pfx` [`LatticeDef`] at load and edited live via the contextual
 /// Lattice panel. Embeds a [`VolumetricParams`] for the reused camera / palette /
 /// marcher controls.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LatticeParams {
     /// Camera / palette / look — reuses the R3 marcher's tunables.
     pub render: VolumetricParams,

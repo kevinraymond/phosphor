@@ -21,6 +21,7 @@
 //! samples via manual trilinear `textureLoad` (no sampler).
 
 use bytemuck::{Pod, Zeroable};
+use serde::{Deserialize, Serialize};
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingType, BufferBindingType, ColorTargetState, CommandEncoder,
@@ -75,7 +76,8 @@ pub struct VolumetricUniforms {
 
 /// Tunable volumetric parameters (host-side). Owned globally by the app and
 /// pushed onto the active particle layer each frame.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct VolumetricParams {
     pub march_steps: u32,
     pub absorption: f32,

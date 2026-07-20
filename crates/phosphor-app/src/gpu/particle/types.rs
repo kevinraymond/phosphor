@@ -735,19 +735,19 @@ fn default_blend() -> String {
 fn default_max_count() -> u32 {
     10000
 }
-fn default_lifetime() -> f32 {
+pub(crate) fn default_lifetime() -> f32 {
     3.0
 }
-fn default_initial_speed() -> f32 {
+pub(crate) fn default_initial_speed() -> f32 {
     0.3
 }
-fn default_initial_size() -> f32 {
+pub(crate) fn default_initial_size() -> f32 {
     0.02
 }
-fn default_drag() -> f32 {
+pub(crate) fn default_drag() -> f32 {
     0.98
 }
-fn default_emit_rate() -> f32 {
+pub(crate) fn default_emit_rate() -> f32 {
     100.0
 }
 fn default_flow_strength() -> f32 {
