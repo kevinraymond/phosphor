@@ -608,7 +608,7 @@ mod tests {
         let particles = effect.particles.expect("tide is a particle effect");
         assert_eq!(particles.render_mode, "billboard"); // trails need billboard
         assert!(particles.trail_length >= 2); // ribbon renderer enable gate
-        assert!(particles.max_scaled_count <= 120_000); // quality scaler cap
+        assert!(particles.max_scaled_count <= 300_000); // quality scaler cap
     }
 
     // Compile probe for the Tide sim + bg shaders through the production

@@ -52,9 +52,12 @@ fn tide_color(pos: vec2f, vel: vec2f, foamy: f32) -> vec3f {
     var col = phosphor_audio_palette(hue_t, 0.6 + 0.4 * clamp(u.centroid, 0.0, 1.0), u.time * 0.02);
     col = mix(col, vec3f(0.10, 0.35, 0.60), 0.45);
     let speed_glow = clamp(length(vel) * 1.6, 0.0, 1.0);
-    col *= 0.08 + 0.35 * speed_glow + 0.15 * u.rms;
+    // rms term kept small: speed_glow already saturates when loud music
+    // accelerates the flow, and the additive stack + bloom amplify from
+    // there — a linear rms gain white-out the falls on real loud material.
+    col *= 0.08 + 0.32 * speed_glow + 0.06 * u.rms;
     // Foam whitens — the bright contour where water meets a silhouette.
-    return mix(col, vec3f(0.85, 0.92, 1.0) * 0.7, clamp(foamy, 0.0, 1.0) * 0.75);
+    return mix(col, vec3f(0.85, 0.92, 1.0) * 0.7, clamp(foamy, 0.0, 1.0) * 0.6);
 }
 
 fn emit_particle(idx: u32) -> Particle {

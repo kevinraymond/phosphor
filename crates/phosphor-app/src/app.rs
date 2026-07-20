@@ -494,7 +494,13 @@ impl App {
 
     pub fn update(&mut self) {
         let now = Instant::now();
-        let dt = now.duration_since(self.last_frame).as_secs_f32();
+        // Clamped: a frame hitch (mouse click stall, window drag, effect swap)
+        // otherwise integrates as one giant step — particles teleport past
+        // kill bounds, trail ribbons smear across the screen for a frame, and
+        // the emission accumulator dumps the entire stall's budget at once
+        // (#1796 live finding: every real mouse click white-flashed Tide).
+        // Momentary slow-motion during a stall beats a white flash.
+        let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.05);
         self.last_frame = now;
 
         // Auto-clear status error after 6 seconds
