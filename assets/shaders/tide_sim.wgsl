@@ -22,6 +22,26 @@
 
 const N_LANES: f32 = 64.0;
 
+// Integer hash (lowbias32) for per-index randomness — the lib's fract-sin
+// hash() degenerates on GPU for idx-scaled args (finding #1856): a band of
+// indices rolls near-constant tiny values that pass ANY threshold every
+// re-roll. Harmless here while the splash gate was fed a dead percussive
+// feature; once #1857 brought HPSS to life those slots became permanent
+// foam — standing white streaks in the falls (live finding).
+fn uhash(x: u32) -> u32 {
+    var h = x;
+    h = h ^ (h >> 16u);
+    h = h * 0x7feb352du;
+    h = h ^ (h >> 15u);
+    h = h * 0x846ca68bu;
+    h = h ^ (h >> 16u);
+    return h;
+}
+
+fn uhash_f(x: u32) -> f32 {
+    return f32(uhash(x)) / 4294967296.0;
+}
+
 // Shared laminar velocity field: base fall + divergence-free meander +
 // field-coherent whitewater breakup. Deterministic in position so the
 // sheet forms streamlines, never per-particle dither.
@@ -39,8 +59,13 @@ fn tide_field(pos: vec2f, lane_x: f32, agitation: f32) -> vec2f {
 
     // Whitewater: finer curl scrolling down with the flow; gain from
     // percussive_energy (drums make the sheet break) + local agitation.
+    // The percussive term is thresholded above the live sustained floor
+    // (#1857: the feature idles ~0.63 on dense grooves, peaks ~0.85 —
+    // it never reads 0 on busy material as the original tune assumed, and
+    // the raw term held the sheet at ~5x its designed baseline breakup).
     let ww = curl_noise_2d(pos * vec2f(6.0, 2.5) + vec2f(0.0, -u.time * 1.2));
-    let ww_amp = (0.02 + 0.10 * param(2u)) * (0.25 + 1.5 * u.percussive_energy + agitation);
+    let ww_amp = (0.02 + 0.10 * param(2u))
+        * (0.25 + 1.5 * smoothstep(0.62, 0.95, u.percussive_energy) + agitation);
     v += ww * ww_amp;
     return v;
 }
@@ -51,8 +76,13 @@ fn tide_color(pos: vec2f, vel: vec2f, foamy: f32) -> vec3f {
     let hue_t = fract(u.dominant_chroma * 0.15 + param(5u) * 0.25 + 0.52 + pos.y * 0.05);
     var col = phosphor_audio_palette(hue_t, 0.6 + 0.4 * clamp(u.centroid, 0.0, 1.0), u.time * 0.02);
     col = mix(col, vec3f(0.10, 0.35, 0.60), 0.45);
-    let speed_glow = clamp(length(vel) * 1.6, 0.0, 1.0);
-    // rms term kept small: speed_glow already saturates when loud music
+    // Compressive, not clamped: the linear clamp(x*1.6) saturated at exactly
+    // the fall speeds loud music produces (rms-driven flow ~1.07 -> 1.71,
+    // clipped to 1), so on loud material EVERY particle sat at identical max
+    // gain and the dense additive sheet fused into a flat white band (live
+    // look). The exponential keeps a brightness gradient at any speed.
+    let speed_glow = 1.0 - exp(-length(vel) * 2.2);
+    // rms term kept small: speed_glow already tops out when loud music
     // accelerates the flow, and the additive stack + bloom amplify from
     // there — a linear rms gain white-out the falls on real loud material.
     col *= 0.08 + 0.32 * speed_glow + 0.06 * u.rms;
@@ -198,11 +228,22 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     // --- Percussive splash: a hashed subset sprays upward as foam on hits.
     // Gated on HPSS percussive energy ONLY — the kick band false-fires on
     // sustained low sines (pads), and HPSS is precisely the pad/drum
-    // discriminator this effect is built around.
-    let hit = u.percussive_energy;
-    if hit > 0.6 && hash(f32(idx) * 7.7 + floor(u.time * 20.0)) < (hit - 0.6) * (0.1 + 0.3 * param(2u)) {
-        let a = (hash(f32(idx) + u.time) - 0.5) * 2.6;
-        vel += vec2f(sin(a) * 0.6, abs(cos(a))) * 0.35 * hit * (0.5 + agitation);
+    // discriminator this effect is built around. Gate band 0.72..0.92 sits
+    // ABOVE the sustained-groove floor (#1857: live percussive idles ~0.63,
+    // peaks ~0.85 — the old `> 0.6` was open the whole groove and, with the
+    // #1856 degenerate hash, white-washed the falls into standing foam).
+    // LEVEL is not enough on drum-dense material: loud sections park the
+    // feature above ANY band for seconds, and an uncapped per-particle roll
+    // foams the entire sheet ~3x/s — a white wall (live look, twice). The
+    // onset factor syncs conversion to attacks and the small coefficient
+    // keeps the sprayed subset a SUBSET (~25% coverage at the hardest
+    // moments, sparks not sheets).
+    let hit = smoothstep(0.72, 0.92, u.percussive_energy);
+    let attack = 0.25 + 0.75 * clamp(u.onset, 0.0, 1.0);
+    if uhash_f(idx + uhash(u32(u.time * 20.0))) < hit * attack * (0.03 + 0.08 * param(2u)) {
+        let a = (uhash_f(idx ^ uhash(u32(u.time * 977.0))) - 0.5) * 2.6;
+        vel += vec2f(sin(a) * 0.6, abs(cos(a))) * 0.35
+            * (0.6 + 0.4 * hit) * (0.5 + agitation);
         foam = 1.0;
     }
     foam *= exp(-dt * 2.2);
@@ -224,7 +265,20 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let size = init_size * eval_size_curve(life_frac);
     let fade_in = smoothstep(0.0, 0.04, life_frac);
     let fade_out = 1.0 - smoothstep(0.85, 1.0, life_frac);
-    let alpha = 0.09 * fade_in * fade_out * eval_opacity_curve(life_frac);
+    // Trail-coverage compensation — the term three rounds of color/alpha
+    // tuning missed (live looks): a particle's 16-point trail deposits
+    // light along a screen length PROPORTIONAL TO ITS SPEED, so total
+    // sheet light goes as N x alpha x color x |vel|. Loud music drives the
+    // flow ~1.6x faster, multiplying total light by 1.6 even with color
+    // and alpha held flat — the falls washed white exactly when loud.
+    // Normalizing alpha by speed makes deposited light speed-invariant
+    // (faster water = longer, thinner, dimmer streaks — motion blur,
+    // physically right); silence sits at compensation ~1.0 so the approved
+    // idle look is untouched. The rms dim on top gives loud sections a
+    // little extra headroom for bloom + splash foam.
+    let speed_comp = clamp(0.9 / (0.25 + length(vel)), 0.35, 1.2);
+    let loud_dim = 1.0 - 0.4 * smoothstep(0.55, 0.95, u.rms);
+    let alpha = 0.09 * speed_comp * loud_dim * fade_in * fade_out * eval_opacity_curve(life_frac);
     let col = tide_color(pos, vel, foam + agitation * 0.6);
 
     // Stall drain: water pooled on a large silhouette otherwise sits out its
