@@ -126,7 +126,7 @@ struct ParticleUniforms {
     percussive_energy: f32, // transient (percussive-masked) energy, dB-mapped 0-1
     harmonic_energy: f32,   // sustained (harmonic-masked) energy, dB-mapped 0-1
     harmonic_ratio: f32,    // harmonic vs percussive balance, 0-1
-    _pad_hpss: f32,
+    frame_index: u32,       // trail ring head counter (see trail_write)
 }
 
 // Access effect param by index (mirrors fragment shader's param() function).
@@ -377,12 +377,12 @@ fn trail_write(idx: u32, trail_point: vec4f) {
     if u.trail_length < 2u {
         return;
     }
-    // Ring buffer: write to slot = frame_index % trail_length
-    // frame_index is passed via reserved field in flags
-    // We use a simple approach: write to (global frame counter % trail_length)
-    // The frame counter is embedded in the seed's integer part
-    let frame = u32(u.time * 60.0); // ~60fps frame counter
-    let slot = frame % u.trail_length;
+    // Ring buffer slot from the frame counter — NEVER wall-clock time: a
+    // compositor hiccup (e.g. focus change) jumps time several slots in one
+    // frame, so the head leaps past slots still holding quarter-second-stale
+    // points and every ribbon flashes a long segment to them (#1796).
+    // The renderer reads the same counter via RenderUniforms.frame_index.
+    let slot = u.frame_index % u.trail_length;
     let base = idx * u.trail_length + slot;
     trail_buffer[base] = trail_point;
 }

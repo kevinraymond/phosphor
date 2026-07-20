@@ -62,9 +62,10 @@ fn vs_main(
         return out;
     }
 
-    // Ring buffer head: current frame's write slot
-    let frame = u32(ru.time * 60.0);
-    let head_slot = frame % trail_len;
+    // Ring buffer head: current frame's write slot. Reads the same frame
+    // counter the compute writer uses — deriving this from wall-clock time
+    // desyncs from the ring on any frame hiccup and flashes stale segments.
+    let head_slot = ru.frame_index % trail_len;
 
     // Trail points: head is newest, iterate backward for older points
     // Point A (newer) and Point B (older) for this segment

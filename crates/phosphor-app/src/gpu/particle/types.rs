@@ -166,8 +166,14 @@ pub struct ParticleUniforms {
     pub percussive_energy: f32, // transient (percussive-masked) energy, dB-mapped 0-1
     pub harmonic_energy: f32,   // sustained (harmonic-masked) energy, dB-mapped 0-1
     pub harmonic_ratio: f32,    // harmonic vs percussive balance, 0-1
-    pub _pad_hpss: f32,         // spare slot for the next batched feature
-                                // Total = 848 bytes
+    /// Frame counter for the trail ring-buffer head (wraps). MUST match the
+    /// value in `ParticleRenderUniforms.frame_index` for the same frame: the
+    /// writer (`trail_write`) and reader (trail renderer) index the ring with
+    /// it. Wall-clock time is NOT usable here — a compositor hiccup (focus
+    /// change) jumps time several slots in one frame and every ribbon draws
+    /// to a stale point: a full-screen white flash (#1796 live finding).
+    pub frame_index: u32,
+    // Total = 848 bytes
 }
 
 /// Obstacle collision mode.

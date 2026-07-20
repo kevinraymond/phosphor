@@ -1322,6 +1322,9 @@ impl ParticleSystem {
         self.render_uniforms.frame_index = self.frame_index;
         self.render_uniforms.trail_length = self.trail_length;
         self.render_uniforms.trail_width = self.trail_width;
+        // Same counter into the compute uniforms: trail_write's ring slot and
+        // the trail renderer's head must agree for the same frame.
+        self.uniforms.frame_index = self.frame_index;
     }
 
     /// Copy audio features into particle uniforms.
