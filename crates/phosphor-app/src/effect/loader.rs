@@ -593,4 +593,84 @@ mod tests {
         assert_eq!(count, 1); // only the one in source
         assert!(result.contains("// lib code"));
     }
+
+    // Discovery silently drops a .pfx that fails to deserialize
+    // (scan_effects_directory warn-logs and moves on), so a schema typo in a
+    // shipped builtin would just make it vanish from the browser. Parse the
+    // real file in CI instead.
+    #[test]
+    fn tide_pfx_parses_as_builtin() {
+        let effect: PfxEffect =
+            serde_json::from_str(include_str!("../../../../assets/effects/tide.pfx"))
+                .expect("tide.pfx must deserialize");
+        assert!(EffectLoader::is_builtin(&effect));
+        assert_eq!(effect.inputs.len(), 8); // exactly the 8 compute param slots
+        let particles = effect.particles.expect("tide is a particle effect");
+        assert_eq!(particles.render_mode, "billboard"); // trails need billboard
+        assert!(particles.trail_length >= 2); // ribbon renderer enable gate
+        assert!(particles.max_scaled_count <= 120_000); // quality scaler cap
+    }
+
+    // Compile probe for the Tide sim + bg shaders through the production
+    // concatenation (lib_source = noise + palette, then particle_lib for
+    // compute). Catches WGSL errors without launching the app.
+    // Run: cargo test -p phosphor-app -- --ignored tide_shaders_compile
+    #[test]
+    #[ignore = "requires a GPU/software adapter"]
+    fn tide_shaders_compile() {
+        let noise = include_str!("../../../../assets/shaders/lib/noise.wgsl");
+        let palette = include_str!("../../../../assets/shaders/lib/palette.wgsl");
+        let plib = include_str!("../../../../assets/shaders/lib/particle_lib.wgsl");
+        let sim = include_str!("../../../../assets/shaders/tide_sim.wgsl");
+        let bg = include_str!("../../../../assets/shaders/tide_bg.wgsl");
+
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            ..Default::default()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
+        .expect("no wgpu adapter");
+        eprintln!("probe adapter: {:?}", adapter.get_info());
+        let (device, _queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("tide-compile-probe"),
+                required_features: wgpu::Features::empty(),
+                required_limits: adapter.limits(),
+                experimental_features: wgpu::ExperimentalFeatures::default(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                trace: wgpu::Trace::Off,
+            }))
+            .expect("no wgpu device");
+
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let sim_src = format!("{noise}\n{palette}\n{plib}\n{sim}");
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("tide-sim-probe"),
+            source: wgpu::ShaderSource::Wgsl(sim_src.into()),
+        });
+        // Pipeline creation forces full validation (entry point, bindings).
+        let _ = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("tide-sim-probe"),
+            layout: None,
+            module: &module,
+            entry_point: Some("cs_main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let err = pollster::block_on(device.pop_error_scope());
+        assert!(err.is_none(), "tide_sim.wgsl failed validation: {err:?}");
+
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let bg_src = format!("{UNIFORM_BLOCK}\n{noise}\n{palette}\n{bg}");
+        let _ = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("tide-bg-probe"),
+            source: wgpu::ShaderSource::Wgsl(bg_src.into()),
+        });
+        let err = pollster::block_on(device.pop_error_scope());
+        assert!(err.is_none(), "tide_bg.wgsl failed validation: {err:?}");
+    }
 }
