@@ -68,8 +68,10 @@ libloading = "0.8"
 nokhwa = { version = "0.10", features = ["input-native"], optional = true }
 # ONNX Runtime for depth estimation (MiDaS) — load-dynamic: runtime dylib loading, no build-time linking
 ort = { version = "=2.0.0-rc.11", optional = true, default-features = false, features = ["load-dynamic"] }
-# HTTP client for model + runtime download
-ureq = { version = "3", features = ["native-tls"], optional = true }
+# HTTP client for downloads (depth model + runtime, splat demo scene #1800).
+# Unconditional: a feature-gated one-click demo for the flagship Splat effect
+# would silently vanish in default builds — worse than the ~100s-KB size cost.
+ureq = { version = "3", features = ["native-tls"] }
 # Archive extraction for ONNX Runtime download (tgz on Linux/macOS, zip on Windows)
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
@@ -110,6 +112,6 @@ default = []
 video = []
 ndi = []
 webcam = ["nokhwa"]
-depth = ["webcam", "ort", "ureq", "flate2", "tar", "zip"]
+depth = ["webcam", "ort", "flate2", "tar", "zip"]
 profiling = ["wgpu-profiler"]
 wgpu-profiler = ["dep:wgpu-profiler"]

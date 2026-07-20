@@ -59,17 +59,82 @@ pub struct SplatCloud {
     pub transform: SplatTransform,
 }
 
-/// A downloadable demo scene. `file` lives under [`splat_dir`]. The download
-/// URL lands in Stage 2 once the bespoke capture is hosted (board #1859).
+/// A downloadable demo scene. `file` lives under [`splat_dir`].
 pub struct DemoScene {
     pub name: &'static str,
     pub file: &'static str,
+    /// Download URL. EMPTY until the bespoke captured scene is hosted
+    /// (board #1859 — a stable GitHub-release-asset URL is the plan); the
+    /// panel hides the Download button and shows a placement hint instead.
+    pub url: &'static str,
+    /// Approximate size shown in the confirm dialog.
+    pub size_mb: u32,
 }
 
 pub const DEMO_SCENES: &[DemoScene] = &[DemoScene {
     name: "default",
     file: "phosphor_demo.splat",
+    url: "",
+    size_mb: 64,
 }];
+
+pub fn demo_scene(name: &str) -> Option<&'static DemoScene> {
+    DEMO_SCENES.iter().find(|d| d.name == name)
+}
+
+/// Is the named demo scene already on disk?
+pub fn demo_scene_cached(name: &str) -> bool {
+    demo_scene(name).is_some_and(|d| splat_dir().join(d.file).is_file())
+}
+
+/// Download the named demo scene on a background thread (mirrors
+/// `depth::model::download_model`): .tmp → rename, cancellable, progress
+/// 0–100 / 101 complete / 102 error.
+pub fn download_demo_scene(name: &str) -> Arc<crate::download::DownloadProgress> {
+    let progress = crate::download::DownloadProgress::new();
+    let progress_clone = Arc::clone(&progress);
+    let demo = demo_scene(name);
+    let (url, file) = match demo {
+        Some(d) if !d.url.is_empty() => (d.url.to_string(), d.file.to_string()),
+        _ => {
+            if let Ok(mut msg) = progress.error_message.lock() {
+                *msg = Some(format!("demo scene '{name}' has no published URL yet"));
+            }
+            progress
+                .progress
+                .store(102, std::sync::atomic::Ordering::Relaxed);
+            return progress;
+        }
+    };
+
+    std::thread::Builder::new()
+        .name("splat-demo-dl".into())
+        .spawn(move || {
+            let run = || -> anyhow::Result<()> {
+                let dir = splat_dir();
+                std::fs::create_dir_all(&dir)?;
+                crate::download::download_file(&url, &dir.join(&file), &file, &progress_clone)?;
+                Ok(())
+            };
+            match run() {
+                Ok(()) => progress_clone
+                    .progress
+                    .store(101, std::sync::atomic::Ordering::Relaxed),
+                Err(e) => {
+                    log::error!("Splat demo download failed: {e}");
+                    if let Ok(mut msg) = progress_clone.error_message.lock() {
+                        *msg = Some(e.to_string());
+                    }
+                    progress_clone
+                        .progress
+                        .store(102, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+        })
+        .ok();
+
+    progress
+}
 
 /// Where downloaded demo scenes live: `~/.config/phosphor/splats/`
 /// (mirrors `depth::model::model_dir`).
@@ -672,6 +737,12 @@ pub struct SplatSceneLoader {
     generation: u64,
     cancel: Arc<AtomicBool>,
     pub progress: Arc<AtomicU8>,
+    /// A load (or picker dialog) is in flight — panel spinner state.
+    pub loading: bool,
+    /// Filename being decoded (or "choosing file…"), for the panel.
+    pub loading_name: String,
+    /// Most recent load failure, cleared by the next successful load.
+    pub last_error: Option<String>,
 }
 
 impl SplatSceneLoader {
@@ -682,7 +753,20 @@ impl SplatSceneLoader {
             generation: 0,
             cancel: Arc::new(AtomicBool::new(false)),
             progress: Arc::new(AtomicU8::new(0)),
+            loading: false,
+            loading_name: String::new(),
+            last_error: None,
         }
+    }
+
+    fn begin_request(&mut self, name: String) -> u64 {
+        self.cancel.store(true, Ordering::Relaxed); // abort any previous load
+        self.cancel = Arc::new(AtomicBool::new(false));
+        self.generation += 1;
+        self.progress.store(0, Ordering::Relaxed);
+        self.loading = true;
+        self.loading_name = name;
+        self.generation
     }
 
     /// Start loading a scene in the background for `layer_idx`, subsampled to
@@ -695,11 +779,11 @@ impl SplatSceneLoader {
         rotation_degrees: [f32; 3],
         layer_idx: usize,
     ) {
-        self.cancel.store(true, Ordering::Relaxed); // abort any previous load
-        self.cancel = Arc::new(AtomicBool::new(false));
-        self.generation += 1;
-        let load_gen = self.generation;
-        self.progress.store(0, Ordering::Relaxed);
+        let load_gen = self.begin_request(
+            path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default(),
+        );
 
         let (tx, rx) = bounded(1);
         self.result_rx = rx;
@@ -728,13 +812,72 @@ impl SplatSceneLoader {
             .expect("failed to spawn splat scene loader thread");
     }
 
+    /// Open a file dialog (background thread, `ParticleSourceLoader` pattern)
+    /// then decode the chosen scene. A cancelled dialog drops the sender →
+    /// `try_recv` sees Disconnected and resets `loading`.
+    pub fn open_dialog(
+        &mut self,
+        target_count: u32,
+        scene_scale: f32,
+        rotation_degrees: [f32; 3],
+        layer_idx: usize,
+    ) {
+        let load_gen = self.begin_request("choosing file…".to_string());
+
+        let (tx, rx) = bounded(1);
+        self.result_rx = rx;
+        let cancel = Arc::clone(&self.cancel);
+        let progress = Arc::clone(&self.progress);
+
+        thread::Builder::new()
+            .name("splat-scene-dialog".into())
+            .spawn(move || {
+                let dialog = rfd::FileDialog::new()
+                    .set_title("Load Gaussian Splat Scene")
+                    .add_filter("Splat scenes", &["ply", "splat"]);
+                if let Some(path) = dialog.pick_file() {
+                    let result = match load_splat_file(
+                        &path,
+                        target_count,
+                        scene_scale,
+                        rotation_degrees,
+                        &progress,
+                        &cancel,
+                    ) {
+                        Ok(cloud) => SplatLoadResult::Loaded {
+                            layer_idx,
+                            cloud: Box::new(cloud),
+                        },
+                        Err(message) => SplatLoadResult::Error { layer_idx, message },
+                    };
+                    let _ = tx.send((load_gen, result));
+                }
+            })
+            .expect("failed to spawn splat scene dialog thread");
+    }
+
     /// Check for a completed load. Stale results from cancelled loads are
-    /// dropped by generation.
+    /// dropped by generation; a cancelled dialog resets the loading state.
     pub fn try_recv(&mut self) -> Option<SplatLoadResult> {
         match self.result_rx.try_recv() {
-            Ok((load_gen, result)) if load_gen == self.generation => Some(result),
+            Ok((load_gen, result)) if load_gen == self.generation => {
+                self.loading = false;
+                self.loading_name.clear();
+                match &result {
+                    SplatLoadResult::Loaded { .. } => self.last_error = None,
+                    SplatLoadResult::Error { message, .. } => {
+                        self.last_error = Some(message.clone());
+                    }
+                }
+                Some(result)
+            }
             Ok(_) => None,
-            Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => {
+                self.loading = false;
+                self.loading_name.clear();
+                None
+            }
         }
     }
 }

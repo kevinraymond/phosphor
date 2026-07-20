@@ -3,6 +3,7 @@ mod audio;
 mod bindings;
 #[cfg(feature = "depth")]
 mod depth;
+mod download;
 mod effect;
 mod gpu;
 mod media;
@@ -282,6 +283,28 @@ impl ApplicationHandler for PhosphorApp {
                                 source_loading: false, // set below
                                 source_loading_name: String::new(),
                                 builtin_images: Vec::new(), // set below
+                                has_splat: ps.def.splat.is_some(),
+                                splat_scene_name: ps
+                                    .splat_scene_path
+                                    .as_deref()
+                                    .and_then(|p| {
+                                        std::path::Path::new(p)
+                                            .file_name()
+                                            .map(|n| n.to_string_lossy().to_string())
+                                    })
+                                    .unwrap_or_default(),
+                                splat_count: ps.splat_loaded_count,
+                                splat_total: ps.splat_total_count,
+                                // Loader + demo state overlaid below (app-level)
+                                splat_loading: false,
+                                splat_loading_name: String::new(),
+                                splat_progress: 0,
+                                splat_error: None,
+                                splat_demo_available: false,
+                                splat_demo_cached: false,
+                                splat_demo_size_mb: 0,
+                                splat_demo_downloading: false,
+                                splat_demo_progress: 0,
                                 has_morph: ps.morph_state.is_some(),
                                 morph_target_count: ps
                                     .morph_state
@@ -369,6 +392,25 @@ impl ApplicationHandler for PhosphorApp {
                         if pi.has_image_source {
                             pi.builtin_images =
                                 crate::gpu::particle::builtin_raster_images().to_vec();
+                        }
+                        if pi.has_splat {
+                            use crate::gpu::particle::splat_source;
+                            pi.splat_loading = app.splat_loader.loading;
+                            pi.splat_loading_name = app.splat_loader.loading_name.clone();
+                            pi.splat_progress = app
+                                .splat_loader
+                                .progress
+                                .load(std::sync::atomic::Ordering::Relaxed);
+                            pi.splat_error = app.splat_loader.last_error.clone();
+                            if let Some(demo) = splat_source::demo_scene("default") {
+                                pi.splat_demo_available = !demo.url.is_empty();
+                                pi.splat_demo_cached = splat_source::demo_scene_cached("default");
+                                pi.splat_demo_size_mb = demo.size_mb;
+                            }
+                            if let Some(ref dl) = app.splat_demo_download {
+                                pi.splat_demo_downloading = dl.is_downloading();
+                                pi.splat_demo_progress = dl.percent();
+                            }
                         }
                     }
                     let particle_count = particle_info.as_ref().map(|p| p.max_count);
@@ -2325,6 +2367,84 @@ impl ApplicationHandler for PhosphorApp {
                         }
                     }
 
+                    // Splat scene picker + demo download (#1800)
+                    {
+                        let load_scene: Option<bool> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("splat_load_scene")));
+                        if load_scene.is_some() && !app.splat_loader.loading {
+                            // The runtime override lives in ParticleSystem
+                            // state (the .pfx stays read-only); the load
+                            // needs the active layer's splat transform.
+                            let job = app
+                                .layer_stack
+                                .active()
+                                .and_then(|l| l.as_effect())
+                                .and_then(|e| e.pass_executor.particle_system.as_ref())
+                                .and_then(|ps| {
+                                    ps.def.splat.as_ref().map(|s| {
+                                        (ps.max_particles, s.scene_scale, s.rotation_degrees)
+                                    })
+                                });
+                            if let Some((target, scale, rot)) = job {
+                                app.splat_loader.open_dialog(
+                                    target,
+                                    scale,
+                                    rot,
+                                    app.layer_stack.active_layer,
+                                );
+                                app.preset_store.mark_dirty();
+                            }
+                        }
+
+                        let dl_demo: Option<bool> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("splat_download_demo")));
+                        if dl_demo.is_some() && app.splat_demo_download.is_none() {
+                            app.splat_demo_download = Some(
+                                crate::gpu::particle::splat_source::download_demo_scene("default"),
+                            );
+                        }
+                    }
+
+                    // Poll the demo download: on completion, load the cached
+                    // scene onto the active splat layer.
+                    if let Some(dl) = app.splat_demo_download.clone() {
+                        if dl.is_complete() {
+                            app.splat_demo_download = None;
+                            let job = app
+                                .layer_stack
+                                .active()
+                                .and_then(|l| l.as_effect())
+                                .and_then(|e| e.pass_executor.particle_system.as_ref())
+                                .and_then(|ps| {
+                                    ps.def.splat.as_ref().map(|s| {
+                                        (ps.max_particles, s.scene_scale, s.rotation_degrees)
+                                    })
+                                });
+                            if let (Ok(path), Some((target, scale, rot))) = (
+                                crate::gpu::particle::splat_source::resolve_source("demo:default"),
+                                job,
+                            ) {
+                                app.splat_loader.load(
+                                    path,
+                                    target,
+                                    scale,
+                                    rot,
+                                    app.layer_stack.active_layer,
+                                );
+                            }
+                        } else if dl.is_error() {
+                            app.splat_demo_download = None;
+                            let msg = dl
+                                .error_message
+                                .lock()
+                                .ok()
+                                .and_then(|m| m.clone())
+                                .unwrap_or_else(|| "demo download failed".to_string());
+                            log::error!("Splat demo download failed: {msg}");
+                            app.splat_loader.last_error = Some(msg);
+                        }
+                    }
+
                     // Set webcam as particle source (instant — no decode needed)
                     #[cfg(feature = "webcam")]
                     {
@@ -2687,6 +2807,9 @@ impl ApplicationHandler for PhosphorApp {
                                     .filter(|ps| ps.def.splat.is_some());
                                 if let Some(ps) = ps {
                                     ps.upload_splat_cloud(&app.gpu.device, &app.gpu.queue, &cloud);
+                                    // The scene path round-trips through the
+                                    // preset — light the unsaved-changes bar.
+                                    app.preset_store.mark_dirty();
                                 } else {
                                     log::info!(
                                         "Splat scene for layer {layer_idx} arrived after the layer changed — dropped"

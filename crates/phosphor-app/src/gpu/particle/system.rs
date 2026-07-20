@@ -242,6 +242,8 @@ pub struct ParticleSystem {
     pub splat_scene_path: Option<String>,
     /// Splat count in the source file before subsampling (status UI).
     pub splat_total_count: u32,
+    /// Splats actually uploaded after cull + subsample (status UI).
+    pub splat_loaded_count: u32,
 
     // Symbiosis (particle-life) force matrix state
     pub symbiosis_state: Option<super::symbiosis::SymbiosisState>,
@@ -1196,6 +1198,7 @@ impl ParticleSystem {
             splat_ui_params: [0.0; 4],
             splat_scene_path: None,
             splat_total_count: 0,
+            splat_loaded_count: 0,
             symbiosis_state: if def.symbiosis {
                 Some(super::symbiosis::SymbiosisState::new(4))
             } else {
@@ -2054,6 +2057,7 @@ impl ParticleSystem {
         self.splat_bind_group = Some(bg);
         self.splat_scene_path = Some(cloud.source_path.clone());
         self.splat_total_count = cloud.total_in_file;
+        self.splat_loaded_count = packed.len() as u32;
         log::info!(
             "Splat scene loaded: {} splats ({} in file) from {}",
             packed.len(),

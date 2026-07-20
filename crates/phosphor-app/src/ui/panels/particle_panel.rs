@@ -45,6 +45,23 @@ pub struct ParticleInfo {
     pub source_loading_name: String,
     /// Built-in image names (e.g. "skull", "phoenix") available for quick select.
     pub builtin_images: Vec<String>,
+    // Splat scene state (#1800)
+    pub has_splat: bool,
+    /// Loaded scene filename, or empty when no scene has landed yet.
+    pub splat_scene_name: String,
+    /// Splats uploaded (post cull/subsample) / splats in the source file.
+    pub splat_count: u32,
+    pub splat_total: u32,
+    pub splat_loading: bool,
+    pub splat_loading_name: String,
+    pub splat_progress: u8,
+    pub splat_error: Option<String>,
+    /// The demo scene has a published download URL (board #1859).
+    pub splat_demo_available: bool,
+    pub splat_demo_cached: bool,
+    pub splat_demo_size_mb: u32,
+    pub splat_demo_downloading: bool,
+    pub splat_demo_progress: u8,
     // Morph state
     pub has_morph: bool,
     pub morph_target_count: u32,
@@ -140,6 +157,102 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             feature_badge(ui, "COMPUTE", egui::Color32::from_rgb(0x40, 0xC0, 0xC0));
         }
     });
+
+    // Splat scene section (#1800, shown only for splat effects)
+    if info.has_splat {
+        ui.add_space(6.0);
+        rows::group_label(ui, "SPLAT SCENE");
+
+        // Scene status row
+        if info.splat_scene_name.is_empty() {
+            ui.label(
+                RichText::new("no scene loaded")
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+            );
+        } else {
+            ui.label(
+                RichText::new(format!(
+                    "{} — {} / {} splats",
+                    info.splat_scene_name,
+                    format_count(info.splat_count),
+                    format_count(info.splat_total)
+                ))
+                .size(SMALL_SIZE)
+                .color(tc.text_primary),
+            );
+        }
+
+        if info.splat_loading {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(
+                    RichText::new(format!(
+                        "Loading {} ({}%)",
+                        info.splat_loading_name, info.splat_progress
+                    ))
+                    .size(SMALL_SIZE)
+                    .color(tc.text_secondary),
+                );
+            });
+        }
+        if let Some(ref err) = info.splat_error {
+            ui.label(
+                RichText::new(err)
+                    .size(SMALL_SIZE)
+                    .color(egui::Color32::from_rgb(0xC0, 0x50, 0x50)),
+            );
+        }
+
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if ui
+                .add(
+                    egui::Button::new(RichText::new("Load Scene…").size(SMALL_SIZE))
+                        .min_size(egui::vec2(0.0, 24.0)),
+                )
+                .on_hover_text("Load a 3DGS capture (.ply or .splat)")
+                .clicked()
+            {
+                ui.ctx()
+                    .data_mut(|d| d.insert_temp(egui::Id::new("splat_load_scene"), true));
+            }
+
+            if info.splat_demo_downloading {
+                ui.add(
+                    egui::ProgressBar::new(info.splat_demo_progress as f32 / 100.0)
+                        .desired_width(90.0)
+                        .text(RichText::new("demo…").size(SMALL_SIZE)),
+                );
+            } else if info.splat_demo_available && !info.splat_demo_cached {
+                if ui
+                    .add(
+                        egui::Button::new(RichText::new("Download Demo").size(SMALL_SIZE))
+                            .min_size(egui::vec2(0.0, 24.0)),
+                    )
+                    .on_hover_text(format!(
+                        "Fetch the demo capture (~{} MB, cached locally)",
+                        info.splat_demo_size_mb
+                    ))
+                    .clicked()
+                {
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(egui::Id::new("splat_download_demo"), true));
+                }
+            }
+        });
+        if !info.splat_demo_available && !info.splat_demo_cached && info.splat_scene_name.is_empty()
+        {
+            ui.label(
+                RichText::new(
+                    "No demo published yet — use Load Scene… or drop a file at \
+                     ~/.config/phosphor/splats/phosphor_demo.splat",
+                )
+                .size(SMALL_SIZE)
+                .color(tc.text_secondary),
+            );
+        }
+    }
 
     // Image source section (shown only for image emitter effects)
     if info.has_image_source {

@@ -132,6 +132,9 @@ pub struct App {
     /// Background Gaussian-splat scene loader (#1800): decodes .ply/.splat off
     /// the main thread; results drained in main.rs → `upload_splat_cloud`.
     pub splat_loader: crate::gpu::particle::SplatSceneLoader,
+    /// In-flight Splat demo-scene download (#1800), polled by main.rs; on
+    /// completion the cached file is loaded onto the active splat layer.
+    pub splat_demo_download: Option<std::sync::Arc<crate::download::DownloadProgress>>,
     // Depth estimation (feature-gated)
     #[cfg(feature = "depth")]
     pub depth_thread: Option<crate::depth::thread::DepthThread>,
@@ -463,6 +466,7 @@ impl App {
             use_ffmpeg_webcam,
             particle_source_loader: crate::gpu::particle::ParticleSourceLoader::new(),
             splat_loader: crate::gpu::particle::SplatSceneLoader::new(),
+            splat_demo_download: None,
             #[cfg(feature = "depth")]
             depth_thread: None,
             #[cfg(feature = "depth")]
@@ -2540,6 +2544,9 @@ impl App {
                     }
                 });
                 let particle_image_path = ps_ref.and_then(|ps| ps.static_image_path.clone());
+                // Splat scene (#1800): persist the absolute path; restore
+                // re-decodes in the background like media layers.
+                let splat_scene_path = ps_ref.and_then(|ps| ps.splat_scene_path.clone());
                 // Capture obstacle info
                 let obstacle_image_path = ps_ref.and_then(|ps| ps.obstacle_image_path.clone());
                 let obstacle_mode = ps_ref
@@ -2589,6 +2596,7 @@ impl App {
                     particle_video_looping,
                     particle_webcam,
                     particle_image_path,
+                    splat_scene_path,
                     obstacle_image_path,
                     obstacle_mode,
                     obstacle_fit,
@@ -3005,6 +3013,38 @@ impl App {
                         }
                     } else {
                         log::warn!("Particle image '{}' not found for layer {}", img_path, i);
+                    }
+                }
+            }
+
+            // Restore the Gaussian-splat scene (#1800) — a BACKGROUND load
+            // (scenes reach ~1.5 GB, unlike the synchronous image restore
+            // above); the layer renders its .pfx default (or empty) until
+            // the decode lands via the main.rs drain.
+            if let Some(ref scene_path) = lp.splat_scene_path {
+                let ps_ref = self
+                    .layer_stack
+                    .layers
+                    .get(i)
+                    .and_then(|l| l.as_effect())
+                    .and_then(|e| e.pass_executor.particle_system.as_ref());
+                let splat_def = ps_ref.and_then(|ps| ps.def.splat.clone());
+                let target = ps_ref.map(|ps| ps.max_particles);
+                let already_loaded =
+                    ps_ref.and_then(|ps| ps.splat_scene_path.as_ref()) == Some(scene_path);
+                if let (Some(splat), Some(target)) = (splat_def, target) {
+                    let path = std::path::PathBuf::from(scene_path);
+                    if !path.exists() {
+                        // Same UX as missing media: warn and keep going.
+                        log::warn!("Splat scene '{scene_path}' not found for layer {i}");
+                    } else if !already_loaded {
+                        self.splat_loader.load(
+                            path,
+                            target,
+                            splat.scene_scale,
+                            splat.rotation_degrees,
+                            i,
+                        );
                     }
                 }
             }

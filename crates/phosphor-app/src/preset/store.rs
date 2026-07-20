@@ -62,6 +62,10 @@ pub struct LayerPreset {
     /// Absolute path to static image used as particle source.
     #[serde(default)]
     pub particle_image_path: Option<String>,
+    /// Absolute path to the Gaussian-splat scene loaded on this layer
+    /// (#1800). Restored via a BACKGROUND load — files can be ~1.5 GB.
+    #[serde(default)]
+    pub splat_scene_path: Option<String>,
     /// Obstacle collision image path.
     #[serde(default)]
     pub obstacle_image_path: Option<String>,
@@ -546,6 +550,25 @@ mod tests {
     }
 
     #[test]
+    fn layer_preset_splat_scene_path_serde() {
+        // Round-trip + back-compat: pre-Splat presets deserialize with None.
+        let json = r#"{
+            "effect_name": "Splat",
+            "splat_scene_path": "/home/user/scenes/studio.ply"
+        }"#;
+        let lp: LayerPreset = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            lp.splat_scene_path.as_deref(),
+            Some("/home/user/scenes/studio.ply")
+        );
+        let lp2: LayerPreset = serde_json::from_str(&serde_json::to_string(&lp).unwrap()).unwrap();
+        assert_eq!(lp2.splat_scene_path, lp.splat_scene_path);
+
+        let old: LayerPreset = serde_json::from_str(r#"{"effect_name": "Splat"}"#).unwrap();
+        assert!(old.splat_scene_path.is_none());
+    }
+
+    #[test]
     fn layer_preset_particle_webcam_serde() {
         let json = r#"{
             "effect_name": "Raster",
@@ -577,6 +600,7 @@ mod tests {
                 particle_video_looping: None,
                 particle_webcam: None,
                 particle_image_path: None,
+                splat_scene_path: None,
                 obstacle_image_path: None,
                 obstacle_mode: None,
                 obstacle_fit: None,
@@ -728,6 +752,7 @@ mod tests {
             particle_video_looping: None,
             particle_webcam: None,
             particle_image_path: None,
+            splat_scene_path: None,
             obstacle_image_path: None,
             obstacle_mode: None,
             obstacle_fit: None,
