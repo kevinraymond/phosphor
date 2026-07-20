@@ -2457,6 +2457,20 @@ impl App {
                 let obstacle_depth = ps_ref
                     .filter(|ps| ps.obstacle_enabled && ps.obstacle_source == "depth")
                     .map(|_| true);
+                // Capture live Lattice / particle-sim panel edits so they
+                // round-trip through the preset instead of snapping back to
+                // the effect's `.pfx` defaults on reload.
+                let lattice = ps_ref
+                    .filter(|ps| ps.lattice_enabled)
+                    .map(|ps| ps.lattice_params);
+                let particle_sim = ps_ref.map(|ps| crate::preset::ParticleSimPreset {
+                    emit_rate: ps.def.emit_rate,
+                    burst_on_beat: ps.def.burst_on_beat,
+                    lifetime: ps.def.lifetime,
+                    initial_speed: ps.def.initial_speed,
+                    initial_size: ps.def.initial_size,
+                    drag: ps.def.drag,
+                });
                 LayerPreset {
                     effect_name,
                     params: l.param_store.values.clone(),
@@ -2480,6 +2494,8 @@ impl App {
                     obstacle_threshold,
                     obstacle_elasticity,
                     obstacle_depth,
+                    lattice,
+                    particle_sim,
                 }
             })
             .collect();
@@ -2492,11 +2508,18 @@ impl App {
         }
 
         let postprocess = self.current_postprocess();
+        // Volumetric (R3) is a global mode, not a per-layer property — persist
+        // it at preset scope like `postprocess`.
+        let volumetric = Some(crate::preset::VolumetricPreset {
+            enabled: self.volumetric_enabled,
+            params: self.volumetric_params,
+        });
         match self.preset_store.save(
             name,
             layer_presets,
             self.layer_stack.active_layer,
             &postprocess,
+            volumetric,
         ) {
             Ok(idx) => {
                 log::info!("Saved preset '{}' at index {}", name, idx);
@@ -2977,6 +3000,10 @@ impl App {
                 }
             }
 
+            // Cloned before the layer borrow below so the lattice rebuild can
+            // reach the GPU device while `layer_stack` is mutably borrowed.
+            let device = self.gpu.device.clone();
+            let hdr = crate::gpu::GpuContext::hdr_format();
             if let Some(layer) = self.layer_stack.layers.get_mut(i) {
                 for (name, value) in &lp.params {
                     if layer.param_store.values.contains_key(name) {
@@ -2989,6 +3016,31 @@ impl App {
                 layer.locked = lp.locked;
                 layer.pinned = lp.pinned;
                 layer.custom_name = lp.custom_name.clone();
+                // Restore live particle-sim / Lattice panel edits over the
+                // `.pfx` defaults that `ParticleSystem::new` just reset (runs
+                // after the effect reload above, so this is the final word).
+                if let Some(ps) = layer
+                    .as_effect_mut()
+                    .and_then(|e| e.pass_executor.particle_system.as_mut())
+                {
+                    if let Some(sim) = &lp.particle_sim {
+                        ps.emit_rate = sim.emit_rate;
+                        ps.def.emit_rate = sim.emit_rate;
+                        ps.burst_on_beat = sim.burst_on_beat;
+                        ps.def.burst_on_beat = sim.burst_on_beat;
+                        ps.def.lifetime = sim.lifetime;
+                        ps.def.initial_speed = sim.initial_speed;
+                        ps.def.initial_size = sim.initial_size;
+                        ps.def.drag = sim.drag;
+                    }
+                    // Only `lattice_params` — never `lattice_defaults`, which the
+                    // panel "Reset" restores from. `init_lattice` rebuilds the
+                    // sim buffers if `grid_res` changed, else is a no-op.
+                    if let Some(lat) = lp.lattice {
+                        ps.lattice_params = lat;
+                        ps.init_lattice(&device, hdr);
+                    }
+                }
             }
         }
 
@@ -3001,6 +3053,16 @@ impl App {
             layer.postprocess = preset.postprocess.clone();
         }
         self.post_process.enabled = preset.postprocess.enabled;
+        // Restore the global Volumetric (R3) mode. Disable when the preset has
+        // no volumetric block so an earlier preset's volumetric can't bleed into
+        // one saved without it. The per-frame copy onto the active layer then
+        // propagates this on the next frame.
+        if let Some(vol) = &preset.volumetric {
+            self.volumetric_enabled = vol.enabled;
+            self.volumetric_params = vol.params;
+        } else {
+            self.volumetric_enabled = false;
+        }
         self.preset_store.current_preset = Some(index);
         self.preset_store.dirty = false;
         // Reset param changed flags so loading doesn't immediately mark dirty

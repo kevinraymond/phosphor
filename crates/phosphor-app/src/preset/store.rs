@@ -5,7 +5,12 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::effect::format::PostProcessDef;
+use crate::gpu::lattice::LatticeParams;
 use crate::gpu::layer::BlendMode;
+use crate::gpu::particle::types::{
+    default_drag, default_emit_rate, default_initial_size, default_initial_speed, default_lifetime,
+};
+use crate::gpu::volumetric::VolumetricParams;
 use crate::params::ParamValue;
 
 // Embedded built-in presets
@@ -72,6 +77,52 @@ pub struct LayerPreset {
     /// True if obstacle source is depth estimation.
     #[serde(default)]
     pub obstacle_depth: Option<bool>,
+    /// Live Lattice (3D CA) tunables captured from the contextual panel; `None`
+    /// for non-lattice effects and old presets. Includes the embedded `render`
+    /// camera/palette look, so a Lattice effect round-trips fully.
+    #[serde(default)]
+    pub lattice: Option<LatticeParams>,
+    /// Live particle-sim knobs edited in the right panel (emit/lifetime/etc.).
+    /// `None` for old presets; restored over the `.pfx` defaults on load.
+    #[serde(default)]
+    pub particle_sim: Option<ParticleSimPreset>,
+}
+
+/// The six particle-sim knobs exposed by the contextual particle panel, grouped
+/// so they round-trip through the preset independent of the effect's `.pfx`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ParticleSimPreset {
+    pub emit_rate: f32,
+    pub burst_on_beat: u32,
+    pub lifetime: f32,
+    pub initial_speed: f32,
+    pub initial_size: f32,
+    pub drag: f32,
+}
+
+impl Default for ParticleSimPreset {
+    fn default() -> Self {
+        // Mirror ParticleDef's serde defaults so a partial/hand-edited block
+        // never yields a dead emitter.
+        Self {
+            emit_rate: default_emit_rate(),
+            burst_on_beat: 0,
+            lifetime: default_lifetime(),
+            initial_speed: default_initial_speed(),
+            initial_size: default_initial_size(),
+            drag: default_drag(),
+        }
+    }
+}
+
+/// Global Volumetric (R3) state, persisted at preset scope like `postprocess`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VolumetricPreset {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub params: VolumetricParams,
 }
 
 fn default_opacity() -> f32 {
@@ -89,6 +140,10 @@ pub struct Preset {
     pub active_layer: usize,
     #[serde(default)]
     pub postprocess: PostProcessDef,
+    /// Global Volumetric (R3) mode state — a global like `postprocess`, not a
+    /// per-layer property. `None` for old presets.
+    #[serde(default)]
+    pub volumetric: Option<VolumetricPreset>,
 }
 
 #[derive(Default)]
@@ -249,6 +304,7 @@ impl PresetStore {
         layers: Vec<LayerPreset>,
         active_layer: usize,
         postprocess: &PostProcessDef,
+        volumetric: Option<VolumetricPreset>,
     ) -> Result<usize> {
         let name = Self::sanitize_name(name);
         if name.is_empty() {
@@ -268,6 +324,7 @@ impl PresetStore {
             layers,
             active_layer,
             postprocess: postprocess.clone(),
+            volumetric,
         };
 
         let path = dir.join(format!("{name}.json"));
@@ -410,6 +467,7 @@ mod tests {
             layers: vec![],
             active_layer: 0,
             postprocess: PostProcessDef::default(),
+            volumetric: None,
         };
         s.presets.push(("Test Preset".into(), preset));
         s.current_preset = Some(0);
@@ -520,9 +578,12 @@ mod tests {
                 obstacle_threshold: None,
                 obstacle_elasticity: None,
                 obstacle_depth: None,
+                lattice: None,
+                particle_sim: None,
             }],
             active_layer: 0,
             postprocess: PostProcessDef::default(),
+            volumetric: None,
         };
         let json = serde_json::to_string(&preset).unwrap();
         let p2: Preset = serde_json::from_str(&json).unwrap();
@@ -617,6 +678,131 @@ mod tests {
         assert!(s.current_name().is_none());
     }
 
+    // ---- Lattice / particle-sim / volumetric persistence (#1721) ----
+
+    #[test]
+    fn layer_preset_lattice_particle_sim_backward_compat() {
+        // Old preset without the new blocks parses with None.
+        let json = r#"{ "effect_name": "Flux" }"#;
+        let lp: LayerPreset = serde_json::from_str(json).unwrap();
+        assert!(lp.lattice.is_none());
+        assert!(lp.particle_sim.is_none());
+    }
+
+    #[test]
+    fn layer_preset_lattice_serde_roundtrip() {
+        let lat = LatticeParams {
+            grid_res: 128,
+            max_age: 42,
+            render: VolumetricParams {
+                cam_distance: 4.5,
+                palette_hue: 0.25,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let lp = LayerPreset {
+            effect_name: "Clouds".into(),
+            params: HashMap::new(),
+            blend_mode: BlendMode::Normal,
+            opacity: 1.0,
+            enabled: true,
+            locked: false,
+            pinned: false,
+            custom_name: None,
+            media_path: None,
+            media_speed: None,
+            media_looping: None,
+            webcam_device: None,
+            particle_video_path: None,
+            particle_video_speed: None,
+            particle_video_looping: None,
+            particle_webcam: None,
+            particle_image_path: None,
+            obstacle_image_path: None,
+            obstacle_mode: None,
+            obstacle_threshold: None,
+            obstacle_elasticity: None,
+            obstacle_depth: None,
+            lattice: Some(lat),
+            particle_sim: None,
+        };
+        let json = serde_json::to_string(&lp).unwrap();
+        let lp2: LayerPreset = serde_json::from_str(&json).unwrap();
+        let got = lp2.lattice.expect("lattice survives round-trip");
+        assert_eq!(got.grid_res, 128);
+        assert_eq!(got.max_age, 42);
+        // The embedded `render` look nests correctly.
+        assert!((got.render.cam_distance - 4.5).abs() < 1e-6);
+        assert!((got.render.palette_hue - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn particle_sim_preset_serde_and_defaults() {
+        // Full round-trip.
+        let sim = ParticleSimPreset {
+            emit_rate: 250.0,
+            burst_on_beat: 3,
+            lifetime: 1.25,
+            initial_speed: 0.7,
+            initial_size: 0.03,
+            drag: 0.9,
+        };
+        let json = serde_json::to_string(&sim).unwrap();
+        let sim2: ParticleSimPreset = serde_json::from_str(&json).unwrap();
+        assert!((sim2.emit_rate - 250.0).abs() < 1e-6);
+        assert_eq!(sim2.burst_on_beat, 3);
+        assert!((sim2.drag - 0.9).abs() < 1e-6);
+
+        // Partial block fills the rest from ParticleDef's serde defaults (proves
+        // container #[serde(default)] — no dead emitter from a partial JSON).
+        let partial: ParticleSimPreset = serde_json::from_str(r#"{ "lifetime": 5.0 }"#).unwrap();
+        assert!((partial.lifetime - 5.0).abs() < 1e-6);
+        assert!((partial.emit_rate - default_emit_rate()).abs() < 1e-6);
+        assert!((partial.initial_speed - default_initial_speed()).abs() < 1e-6);
+        assert!((partial.drag - default_drag()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn preset_volumetric_backward_compat_and_roundtrip() {
+        // Old preset without the top-level volumetric block parses with None.
+        let json = r#"{ "layers": [], "active_layer": 0 }"#;
+        let p: Preset = serde_json::from_str(json).unwrap();
+        assert!(p.volumetric.is_none());
+
+        // Round-trip a populated volumetric block.
+        let params = VolumetricParams {
+            absorption: 0.5,
+            cam_distance: 6.0,
+            ..Default::default()
+        };
+        let preset = Preset {
+            layers: vec![],
+            active_layer: 0,
+            postprocess: PostProcessDef::default(),
+            volumetric: Some(VolumetricPreset {
+                enabled: true,
+                params,
+            }),
+        };
+        let json = serde_json::to_string(&preset).unwrap();
+        let p2: Preset = serde_json::from_str(&json).unwrap();
+        let vol = p2.volumetric.expect("volumetric survives round-trip");
+        assert!(vol.enabled);
+        assert!((vol.params.absorption - 0.5).abs() < 1e-6);
+        assert!((vol.params.cam_distance - 6.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn volumetric_params_partial_serde_fills_defaults() {
+        // A partial params block fills the rest from Default (container serde(default)).
+        let params: VolumetricParams = serde_json::from_str(r#"{ "absorption": 0.5 }"#).unwrap();
+        assert!((params.absorption - 0.5).abs() < 1e-6);
+        let def = VolumetricParams::default();
+        assert_eq!(params.march_steps, def.march_steps);
+        assert!((params.cam_distance - def.cam_distance).abs() < 1e-6);
+    }
+
     // ---- Built-in preset tests ----
 
     #[test]
@@ -641,6 +827,7 @@ mod tests {
             layers: vec![],
             active_layer: 0,
             postprocess: PostProcessDef::default(),
+            volumetric: None,
         };
         s.presets.push(("Crucible".into(), empty_preset.clone()));
         s.presets
@@ -661,6 +848,7 @@ mod tests {
             layers: vec![],
             active_layer: 0,
             postprocess: PostProcessDef::default(),
+            volumetric: None,
         };
         s.presets.push(("Crucible".into(), empty_preset));
 
@@ -677,15 +865,16 @@ mod tests {
             layers: vec![],
             active_layer: 0,
             postprocess: PostProcessDef::default(),
+            volumetric: None,
         };
         s.presets.push(("Crucible".into(), empty_preset));
 
-        let result = s.save("Crucible", vec![], 0, &PostProcessDef::default());
+        let result = s.save("Crucible", vec![], 0, &PostProcessDef::default(), None);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("built-in"));
 
         // Case-insensitive check
-        let result2 = s.save("crucible", vec![], 0, &PostProcessDef::default());
+        let result2 = s.save("crucible", vec![], 0, &PostProcessDef::default(), None);
         assert!(result2.is_err());
     }
 }
