@@ -1612,7 +1612,15 @@ mod tests {
             ps.uniforms.rms = 0.5;
             ps.uniforms.onset = if f % 20 == 0 { 0.7 } else { 0.0 };
             ps.uniforms.drop = if f % 240 == 100 { 1.0 } else { 0.0 }; // periodic worst-case explode
-            ps.uniforms.effect_params = [0.8, 0.75, 0.5, 0.5, 1.0, 1.0, 0.3, 0.33];
+            let scale_ov: f32 = std::env::var("SPLAT_PERF_SCALE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1.0);
+            let focus_ov: f32 = std::env::var("SPLAT_PERF_FOCUS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.5);
+            ps.uniforms.effect_params = [0.8, 0.75, 0.5, focus_ov, scale_ov, 1.0, 0.3, 0.33];
             ps.splat_ui_params = [0.3, 1.6, 0.15, 0.0];
             ps.update_splat_driver();
 
@@ -1632,6 +1640,9 @@ mod tests {
             ps.flip();
             if f >= 30 {
                 times_ms.push(ms); // skip warm-up (pipeline compiles, first tiled frames)
+            }
+            if f % 100 == 0 {
+                eprintln!("  frame {f}: {ms:.2} ms, alive {}", ps.alive_count);
             }
         }
         times_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());

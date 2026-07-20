@@ -9,7 +9,7 @@ struct TileUniforms {
     num_tiles_x: u32,
     num_tiles_y: u32,
     max_particles: u32,
-    _pad0: u32,
+    splat_mode: u32, // 1 = anisotropic conic footprints from flags.zw (#1800)
     _pad1: u32,
     _pad2: u32,
 }
@@ -25,6 +25,8 @@ struct TileUniforms {
 @group(0) @binding(8)  var<storage, read_write> fb_g: array<i32>;
 @group(0) @binding(9)  var<storage, read_write> fb_b: array<i32>;
 @group(0) @binding(10) var<storage, read_write> fb_a: array<i32>;
+// Particle flags (splat_mode: screen conic packed f16 A,C in .z / B in .w)
+@group(0) @binding(11) var<storage, read> flags: array<vec4f>;
 
 const TILE_SIZE: u32 = 16u;
 const TILE_PIXELS: u32 = 256u; // 16 * 16
@@ -131,6 +133,53 @@ fn cs_main(
             }
             if lx1 >= 0 && lx1 < i32(TILE_SIZE) && ly1 >= 0 && ly1 < i32(TILE_SIZE) {
                 write_pixel_shared(u32(lx1), u32(ly1), col.rgb, col.a * w11);
+            }
+        } else if u.splat_mode == 1u {
+            // Anisotropic gaussian (Splat #1800): per-splat screen conic from
+            // flags.zw, evaluated at pixel centers. Cutoff q > 12 = exp(−6).
+            // Per row, iterate only the ellipse span ∩ this tile's x window.
+            let fl = flags[particle_idx];
+            let ac = unpack2x16float(bitcast<u32>(fl.z)); // conic A, C
+            let cb = unpack2x16float(bitcast<u32>(fl.w)).x; // conic B
+            let r = min(radius_px, 8.0);
+            let r_ceil = i32(ceil(r));
+            let cx = i32(floor(px));
+            let cy = i32(floor(py));
+            let inv_a = 1.0 / max(ac.x, 1e-6);
+            let bac = cb * cb - ac.x * ac.y; // B² − AC (< 0: positive definite)
+            let tile_dx0 = i32(tile_px_x) - cx;
+            let tile_dx1 = tile_dx0 + i32(TILE_SIZE) - 1;
+
+            for (var dy = -r_ceil; dy <= r_ceil; dy++) {
+                let gy = cy + dy;
+                let ly = gy - i32(tile_px_y);
+                if ly < 0 || ly >= i32(TILE_SIZE) {
+                    continue;
+                }
+                let fy = f32(gy) + 0.5 - py;
+                let disc = fy * fy * bac + 12.0 * ac.x;
+                if disc <= 0.0 {
+                    continue; // row entirely outside the ellipse
+                }
+                let sq = sqrt(disc);
+                let dx0 = max(
+                    max(i32(floor((-cb * fy - sq) * inv_a + px - 0.5)) - cx, -r_ceil),
+                    tile_dx0
+                );
+                let dx1 = min(
+                    min(i32(ceil((-cb * fy + sq) * inv_a + px - 0.5)) - cx, r_ceil),
+                    tile_dx1
+                );
+                for (var dx = dx0; dx <= dx1; dx++) {
+                    let gx = cx + dx;
+                    let fx = f32(gx) + 0.5 - px;
+                    let q = ac.x * fx * fx + 2.0 * cb * fx * fy + ac.y * fy * fy;
+                    if q > 12.0 {
+                        continue;
+                    }
+                    let lx = gx - i32(tile_px_x);
+                    write_pixel_shared(u32(lx), u32(ly), col.rgb, col.a * exp(-0.5 * q));
+                }
             }
         } else {
             // Gaussian area splat: soft circle matching billboard renderer

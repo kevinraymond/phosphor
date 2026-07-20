@@ -2,10 +2,13 @@
 //!
 //! [`SplatStatic`] is the 32-byte per-splat attribute record the sim reads at
 //! `@group(2) @binding(1)` (binding 0 is the lib's trail-buffer declaration).
-//! Positions stay f32 (f16 quantization jitters at close zoom); scales and
-//! rotation ride f16 pairs; color+opacity are 8-bit unorm. Zero-padding is the
-//! count mechanism: slots past the scene unpack `opacity == 0` and the sim
-//! parks them dead, so no separate splat-count uniform exists.
+//! Positions stay f32 (f16 quantization jitters at close zoom); the 3D
+//! covariance is PRECOMPUTED here from the source quat+scales (Σ3 = R·S·SᵀRᵀ
+//! is camera-independent — building it per frame per splat cost ~9 ms at 2M
+//! in the sim, live perf finding) and rides six f16 halves ×[`COV_SCALE`];
+//! color+opacity are 8-bit unorm. Zero-padding is the count mechanism: slots
+//! past the scene unpack `opacity == 0` and the sim parks them dead, so no
+//! separate splat-count uniform exists.
 //!
 //! [`SplatDriver`] owns the CPU-side camera/envelope state (yaw accumulator,
 //! centroid EMA, drop-explode envelope) and writes the `cam_*`/`splat_*`
@@ -17,9 +20,15 @@ use super::splat_source::SplatCloud;
 use super::types::ParticleUniforms;
 use crate::gpu::half::f32_to_f16;
 
+/// f16 range helper for covariance entries: world-unit σ² values sit around
+/// 1e-6..1e-2 (subnormal territory for f16), so Σ3 is stored ×1024 and the
+/// sim folds 1/1024 back in after projection. Must match `COV_SCALE` in
+/// `splat_sim.wgsl`.
+pub const COV_SCALE: f32 = 1024.0;
+
 /// Packed per-splat static attributes: 32 bytes, uploaded once per scene.
 /// WGSL mirror (declared in `splat_sim.wgsl`):
-/// `struct SplatStatic { pos: vec3f, color: u32, scale_xy: u32, scale_z_e: u32, rot_xy: u32, rot_zw: u32 }`
+/// `struct SplatStatic { pos: vec3f, color: u32, cov_a: u32, cov_b: u32, cov_c: u32, _spare: u32 }`
 /// (vec3f align 16 / size 12 puts `color` at offset 12; struct stride 32 —
 /// byte-identical to this layout.)
 #[repr(C)]
@@ -29,14 +38,14 @@ pub struct SplatStatic {
     pub pos: [f32; 3],
     /// `pack4x8unorm(r, g, b, opacity)` — r in the low byte.
     pub color: u32,
-    /// `pack2x16float(scale_x, scale_y)` — linear world-unit scales.
-    pub scale_xy: u32,
-    /// `pack2x16float(scale_z, 0.0)` — `.y` spare.
-    pub scale_z_e: u32,
-    /// `pack2x16float(quat.x, quat.y)` — unit rotation, glam order.
-    pub rot_xy: u32,
-    /// `pack2x16float(quat.z, quat.w)`.
-    pub rot_zw: u32,
+    /// `pack2x16float(Σxx, Σyy)` — 3D covariance × [`COV_SCALE`].
+    pub cov_a: u32,
+    /// `pack2x16float(Σzz, Σxy)`.
+    pub cov_b: u32,
+    /// `pack2x16float(Σxz, Σyz)`.
+    pub cov_c: u32,
+    /// Reserved.
+    pub _spare: u32,
 }
 
 /// Matches WGSL `pack2x16float`: `a` in the low half.
@@ -50,21 +59,35 @@ fn pack4x8unorm(x: f32, y: f32, z: f32, w: f32) -> u32 {
     q(x) | (q(y) << 8) | (q(z) << 16) | (q(w) << 24)
 }
 
-/// Pack a decoded scene into the GPU layout. Length equals `cloud.count`;
-/// the upload path zero-fills the remaining `max_particles` slots (dead).
+/// Pack a decoded scene into the GPU layout, precomputing each splat's 3D
+/// covariance Σ3 = R·S·SᵀRᵀ (camera-independent). Length equals
+/// `cloud.count`; the upload path zero-fills the remaining `max_particles`
+/// slots (dead).
 pub fn pack_cloud(cloud: &SplatCloud) -> Vec<SplatStatic> {
     (0..cloud.count)
         .map(|i| {
             let c = cloud.colors[i];
             let s = cloud.scales[i];
             let r = cloud.rotations[i];
+            let m = glam::Mat3::from_quat(glam::Quat::from_xyzw(r[0], r[1], r[2], r[3]))
+                * glam::Mat3::from_diagonal(glam::Vec3::new(s[0], s[1], s[2]));
+            let sigma3 = m * m.transpose();
             SplatStatic {
                 pos: cloud.positions[i],
                 color: pack4x8unorm(c[0], c[1], c[2], cloud.opacities[i]),
-                scale_xy: pack2x16float(s[0], s[1]),
-                scale_z_e: pack2x16float(s[2], 0.0),
-                rot_xy: pack2x16float(r[0], r[1]),
-                rot_zw: pack2x16float(r[2], r[3]),
+                cov_a: pack2x16float(
+                    sigma3.x_axis.x * COV_SCALE, // Σxx
+                    sigma3.y_axis.y * COV_SCALE, // Σyy
+                ),
+                cov_b: pack2x16float(
+                    sigma3.z_axis.z * COV_SCALE, // Σzz
+                    sigma3.y_axis.x * COV_SCALE, // Σxy
+                ),
+                cov_c: pack2x16float(
+                    sigma3.z_axis.x * COV_SCALE, // Σxz
+                    sigma3.z_axis.y * COV_SCALE, // Σyz
+                ),
+                _spare: 0,
             }
         })
         .collect()
@@ -218,10 +241,10 @@ mod tests {
         assert_eq!(std::mem::size_of::<SplatStatic>(), 32);
         assert_eq!(offset_of!(SplatStatic, pos), 0);
         assert_eq!(offset_of!(SplatStatic, color), 12);
-        assert_eq!(offset_of!(SplatStatic, scale_xy), 16);
-        assert_eq!(offset_of!(SplatStatic, scale_z_e), 20);
-        assert_eq!(offset_of!(SplatStatic, rot_xy), 24);
-        assert_eq!(offset_of!(SplatStatic, rot_zw), 28);
+        assert_eq!(offset_of!(SplatStatic, cov_a), 16);
+        assert_eq!(offset_of!(SplatStatic, cov_b), 20);
+        assert_eq!(offset_of!(SplatStatic, cov_c), 24);
+        assert_eq!(offset_of!(SplatStatic, _spare), 28);
     }
 
     #[test]
@@ -258,12 +281,39 @@ mod tests {
         assert_eq!(packed.len(), 64);
         for (i, p) in packed.iter().enumerate() {
             assert_eq!(p.pos, cloud.positions[i]);
-            let (sx, sy) = unpack2x16(p.scale_xy);
-            assert!((sx - cloud.scales[i][0]).abs() < 1e-4);
-            assert!((sy - cloud.scales[i][1]).abs() < 1e-4);
+            // Test scene uses identity quats → Σ3 = diag(sx², sy², sz²).
+            let s = cloud.scales[i];
+            let (xx, yy) = unpack2x16(p.cov_a);
+            let (zz, xy) = unpack2x16(p.cov_b);
+            let tol = |v: f32| (v.abs() * 2e-3).max(1e-4);
+            assert!((xx - s[0] * s[0] * COV_SCALE).abs() < tol(xx), "xx");
+            assert!((yy - s[1] * s[1] * COV_SCALE).abs() < tol(yy), "yy");
+            assert!((zz - s[2] * s[2] * COV_SCALE).abs() < tol(zz), "zz");
+            assert!(xy.abs() < 1e-3, "off-diagonal must vanish for identity");
             let a = ((p.color >> 24) & 0xFF) as f32 / 255.0;
             assert!((a - cloud.opacities[i]).abs() < 1.0 / 255.0 + 1e-6);
         }
+    }
+
+    #[test]
+    fn pack_cloud_rotated_covariance() {
+        // Z+90° quat with anisotropic scales: x/y variances swap, off-diag ~0.
+        let q = std::f32::consts::FRAC_1_SQRT_2;
+        let cloud = SplatCloud {
+            count: 1,
+            positions: vec![[0.0, 0.0, 0.0]],
+            scales: vec![[0.02, 0.005, 0.005]],
+            rotations: vec![[0.0, 0.0, q, q]],
+            colors: vec![[1.0, 1.0, 1.0]],
+            opacities: vec![1.0],
+            source_path: String::new(),
+            total_in_file: 1,
+            transform: Default::default(),
+        };
+        let p = &pack_cloud(&cloud)[0];
+        let (xx, yy) = unpack2x16(p.cov_a);
+        assert!((xx - 0.005 * 0.005 * COV_SCALE).abs() < 1e-3, "xx got {xx}");
+        assert!((yy - 0.02 * 0.02 * COV_SCALE).abs() < 2e-3, "yy got {yy}");
     }
 
     #[test]

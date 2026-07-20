@@ -1014,9 +1014,12 @@ impl ParticleSystem {
                 &pos_life_buffers,
                 &vel_size_buffers,
                 &color_buffers,
+                &flags_buffers,
                 &alive_index_buffers,
                 &counter_buffer,
                 max_particles,
+                // Anisotropic conic footprints from flags.zw (#1800)
+                def.splat.is_some() && def.blend == "oit",
             ))
         } else {
             None
@@ -1222,21 +1225,33 @@ impl ParticleSystem {
     }
 
     /// Build the list of bind group layouts for compute pipeline creation.
-    /// Groups: 0=core, 1=flow field, 2=trails, 3=spatial hash, 4=R-D (if enabled).
+    /// Groups: 0=core, 1=flow field, 2=trails OR splat static (mutually
+    /// exclusive, #1800), 3=spatial hash, 4=R-D (if enabled).
+    /// MUST stay in sync with the `bgl_refs` chain in `new()` — hot-reload
+    /// rebuilds pipelines through here (live finding during #1800 bring-up:
+    /// splat missing HERE while present in `new()` = "group 2 binding 1 not
+    /// available in the pipeline layout" spam on any shader edit).
     fn compute_bind_group_layouts(&self) -> Vec<&BindGroupLayout> {
         let mut layouts: Vec<&BindGroupLayout> = vec![&self.compute_bgl, &self.flow_field_bgl];
 
+        if let Some(splat_bgl) = &self.splat_bgl {
+            layouts.push(splat_bgl);
+        }
         if let Some(hash) = &self.spatial_hash {
             // Group 3 requires group 2 to exist (contiguous indices).
             // Use trail BGL if available, otherwise empty placeholder.
-            if let Some(trail_bgl) = &self.trail_compute_bgl {
-                layouts.push(trail_bgl);
-            } else {
-                layouts.push(&self.empty_bgl);
+            if layouts.len() < 3 {
+                if let Some(trail_bgl) = &self.trail_compute_bgl {
+                    layouts.push(trail_bgl);
+                } else {
+                    layouts.push(&self.empty_bgl);
+                }
             }
             layouts.push(&hash.query_bgl);
         } else if let Some(trail_bgl) = &self.trail_compute_bgl {
-            layouts.push(trail_bgl);
+            if layouts.len() < 3 {
+                layouts.push(trail_bgl);
+            }
         }
 
         // Group 4: R-D texture, or the physarum trail field (mutually exclusive)
@@ -2935,6 +2950,7 @@ impl ParticleSystem {
                 &self.pos_life_buffers,
                 &self.vel_size_buffers,
                 &self.color_buffers,
+                &self.flags_buffers,
                 &self.alive_index_buffers,
                 &self.counter_buffer,
             );

@@ -5,7 +5,7 @@
 struct DrawUniforms {
     width: u32,
     height: u32,
-    _pad0: u32,
+    splat_mode: u32, // 1 = anisotropic conic footprints from flags.zw (#1800)
     _pad1: u32,
 }
 
@@ -23,6 +23,8 @@ struct DrawUniforms {
 @group(0) @binding(7) var<storage, read_write> fb_g: array<atomic<i32>>;
 @group(0) @binding(8) var<storage, read_write> fb_b: array<atomic<i32>>;
 @group(0) @binding(9) var<storage, read_write> fb_a: array<atomic<i32>>;
+// Particle flags (splat_mode: screen conic packed f16 A,C in .z / B in .w)
+@group(0) @binding(10) var<storage, read> flags: array<vec4f>;
 
 const PRECISION: f32 = 4096.0;
 
@@ -88,6 +90,41 @@ fn cs_draw(@builtin(global_invocation_id) gid: vec3u) {
         write_pixel(ix + 1, iy,     col.rgb, col.a * w10);
         write_pixel(ix,     iy + 1, col.rgb, col.a * w01);
         write_pixel(ix + 1, iy + 1, col.rgb, col.a * w11);
+    } else if u.splat_mode == 1u {
+        // Anisotropic gaussian (Splat #1800): evaluate the per-splat screen
+        // conic (inverse 2D covariance, packed f16 by the sim) at pixel
+        // centers. Cutoff q > 12 matches exp(−6), the circular path's tail.
+        // Per row, iterate only the ellipse's actual span (quadratic roots)
+        // instead of the square bbox — skips ~½–¾ of the evaluations.
+        let fl = flags[particle_idx];
+        let ac = unpack2x16float(bitcast<u32>(fl.z)); // conic A, C
+        let cb = unpack2x16float(bitcast<u32>(fl.w)).x; // conic B
+        let r = min(radius_px, 8.0);
+        let r_ceil = i32(ceil(r));
+        let cx = i32(floor(px));
+        let cy = i32(floor(py));
+        let inv_a = 1.0 / max(ac.x, 1e-6);
+        let bac = cb * cb - ac.x * ac.y; // B² − AC (< 0: positive definite)
+
+        for (var dy = -r_ceil; dy <= r_ceil; dy++) {
+            let fy = f32(cy + dy) + 0.5 - py;
+            // A·fx² + 2B·fy·fx + (C·fy² − 12) ≤ 0 → this row's fx interval.
+            let disc = fy * fy * bac + 12.0 * ac.x;
+            if disc <= 0.0 {
+                continue; // row entirely outside the ellipse
+            }
+            let sq = sqrt(disc);
+            let dx0 = max(i32(floor((-cb * fy - sq) * inv_a + px - 0.5)) - cx, -r_ceil);
+            let dx1 = min(i32(ceil((-cb * fy + sq) * inv_a + px - 0.5)) - cx, r_ceil);
+            for (var dx = dx0; dx <= dx1; dx++) {
+                let fx = f32(cx + dx) + 0.5 - px;
+                let q = ac.x * fx * fx + 2.0 * cb * fx * fy + ac.y * fy * fy;
+                if q > 12.0 {
+                    continue;
+                }
+                write_pixel(cx + dx, cy + dy, col.rgb, col.a * exp(-0.5 * q));
+            }
+        }
     } else {
         // Gaussian area splat: soft circle matching billboard renderer output
         let r = min(radius_px, 8.0);

@@ -16,7 +16,9 @@ const MAX_PREFIX_SUM_CELLS: u32 = 65_536;
 struct DrawUniforms {
     width: u32,
     height: u32,
-    _pad0: u32,
+    /// 1 = anisotropic gaussian footprints from the per-splat screen conic
+    /// packed in flags.zw (Splat #1800); 0 = classic isotropic glow discs.
+    splat_mode: u32,
     _pad1: u32,
 }
 
@@ -37,7 +39,8 @@ struct TileUniforms {
     num_tiles_x: u32,
     num_tiles_y: u32,
     max_particles: u32,
-    _pad0: u32,
+    /// See `DrawUniforms::splat_mode`.
+    splat_mode: u32,
     _pad1: u32,
     _pad2: u32,
 }
@@ -53,6 +56,10 @@ pub struct ComputeRasterizer {
     width: u32,
     height: u32,
     max_particles: u32,
+    /// Anisotropic-conic footprints (Splat #1800). Set once at creation from
+    /// `def.splat.is_some() && blend == "oit"`; every classic effect runs
+    /// with 0 and is bit-identical to the pre-splat rasterizer.
+    splat_mode: bool,
 
     // 4 atomic storage buffers (one per channel)
     fb_buffers: [wgpu::Buffer; 4], // R, G, B, A
@@ -115,9 +122,11 @@ impl ComputeRasterizer {
         pos_life_buffers: &[wgpu::Buffer; 2],
         vel_size_buffers: &[wgpu::Buffer; 2],
         color_buffers: &[wgpu::Buffer; 2],
+        flags_buffers: &[wgpu::Buffer; 2],
         alive_index_buffers: &[wgpu::Buffer; 2],
         counter_buffer: &wgpu::Buffer,
         max_particles: u32,
+        splat_mode: bool,
     ) -> Self {
         let pixel_count = (width * height) as u64;
         let fb_size = pixel_count * 4; // 4 bytes per i32
@@ -155,16 +164,17 @@ impl ComputeRasterizer {
         let draw_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("cr-draw-bgl"),
             entries: &[
-                storage_ro_entry(0), // pos_life
-                storage_ro_entry(1), // vel_size
-                storage_ro_entry(2), // color
-                storage_ro_entry(3), // alive_indices
-                storage_ro_entry(4), // counters
-                uniform_entry(5),    // draw uniforms
-                storage_rw_entry(6), // fb_r
-                storage_rw_entry(7), // fb_g
-                storage_rw_entry(8), // fb_b
-                storage_rw_entry(9), // fb_a
+                storage_ro_entry(0),  // pos_life
+                storage_ro_entry(1),  // vel_size
+                storage_ro_entry(2),  // color
+                storage_ro_entry(3),  // alive_indices
+                storage_ro_entry(4),  // counters
+                uniform_entry(5),     // draw uniforms
+                storage_rw_entry(6),  // fb_r
+                storage_rw_entry(7),  // fb_g
+                storage_rw_entry(8),  // fb_b
+                storage_rw_entry(9),  // fb_a
+                storage_ro_entry(10), // flags (splat_mode conic in .zw, #1800)
             ],
         });
 
@@ -197,6 +207,7 @@ impl ComputeRasterizer {
             pos_life_buffers,
             vel_size_buffers,
             color_buffers,
+            flags_buffers,
             alive_index_buffers,
             counter_buffer,
             &draw_uniform_buffer,
@@ -323,6 +334,7 @@ impl ComputeRasterizer {
                 storage_rw_entry(8),  // fb_g
                 storage_rw_entry(9),  // fb_b
                 storage_rw_entry(10), // fb_a
+                storage_ro_entry(11), // flags (splat_mode conic in .zw, #1800)
             ],
         });
 
@@ -339,6 +351,7 @@ impl ComputeRasterizer {
             pos_life_buffers,
             vel_size_buffers,
             color_buffers,
+            flags_buffers,
             &tile_offsets_buffer,
             &tile_counts_buffer,
             &tile_uniform_buffer,
@@ -428,6 +441,7 @@ impl ComputeRasterizer {
             width,
             height,
             max_particles,
+            splat_mode,
             fb_buffers,
             draw_uniform_buffer,
             resolve_uniform_buffer,
@@ -486,7 +500,7 @@ impl ComputeRasterizer {
         let uniforms = DrawUniforms {
             width: self.width,
             height: self.height,
-            _pad0: 0,
+            splat_mode: u32::from(self.splat_mode),
             _pad1: 0,
         };
         queue.write_buffer(&self.draw_uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -518,7 +532,7 @@ impl ComputeRasterizer {
             num_tiles_x: self.num_tiles_x,
             num_tiles_y: self.num_tiles_y,
             max_particles: self.max_particles,
-            _pad0: 0,
+            splat_mode: u32::from(self.splat_mode),
             _pad1: 0,
             _pad2: 0,
         };
@@ -655,6 +669,7 @@ impl ComputeRasterizer {
         pos_life_buffers: &[wgpu::Buffer; 2],
         vel_size_buffers: &[wgpu::Buffer; 2],
         color_buffers: &[wgpu::Buffer; 2],
+        flags_buffers: &[wgpu::Buffer; 2],
         alive_index_buffers: &[wgpu::Buffer; 2],
         counter_buffer: &wgpu::Buffer,
     ) -> bool {
@@ -706,6 +721,7 @@ impl ComputeRasterizer {
             pos_life_buffers,
             vel_size_buffers,
             color_buffers,
+            flags_buffers,
             alive_index_buffers,
             counter_buffer,
             &self.draw_uniform_buffer,
@@ -748,6 +764,7 @@ impl ComputeRasterizer {
             pos_life_buffers,
             vel_size_buffers,
             color_buffers,
+            flags_buffers,
             &self.tile_offsets_buffer,
             &self.tile_counts_buffer,
             &self.tile_uniform_buffer,
@@ -876,12 +893,14 @@ fn create_prefix_sum_pipeline(
     create_compute_pipeline(device, "cr-prefix-sum", &patched, bgl)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_draw_bind_groups(
     device: &Device,
     layout: &BindGroupLayout,
     pos_life_buffers: &[wgpu::Buffer; 2],
     vel_size_buffers: &[wgpu::Buffer; 2],
     color_buffers: &[wgpu::Buffer; 2],
+    flags_buffers: &[wgpu::Buffer; 2],
     alive_index_buffers: &[wgpu::Buffer; 2],
     counter_buffer: &wgpu::Buffer,
     draw_uniform_buffer: &wgpu::Buffer,
@@ -931,6 +950,10 @@ fn create_draw_bind_groups(
                 BindGroupEntry {
                     binding: 9,
                     resource: fb_buffers[3].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 10,
+                    resource: flags_buffers[idx].as_entire_binding(),
                 },
             ],
         })
@@ -1065,6 +1088,7 @@ fn create_tiled_bind_groups(
     pos_life_buffers: &[wgpu::Buffer; 2],
     vel_size_buffers: &[wgpu::Buffer; 2],
     color_buffers: &[wgpu::Buffer; 2],
+    flags_buffers: &[wgpu::Buffer; 2],
     tile_offsets_buffer: &wgpu::Buffer,
     tile_counts_buffer: &wgpu::Buffer,
     tile_uniform_buffer: &wgpu::Buffer,
@@ -1119,6 +1143,10 @@ fn create_tiled_bind_groups(
                 BindGroupEntry {
                     binding: 10,
                     resource: fb_buffers[3].as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 11,
+                    resource: flags_buffers[idx].as_entire_binding(),
                 },
             ],
         })

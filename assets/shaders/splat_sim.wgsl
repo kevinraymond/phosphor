@@ -27,14 +27,29 @@
 // (slots 8–11 are CPU-side camera params — not visible to the sim)
 
 struct SplatStatic {
-    pos: vec3f,      // world position, scene normalized (offset 0)
-    color: u32,      // pack4x8unorm(r, g, b, opacity)      (offset 12)
-    scale_xy: u32,   // pack2x16float(scale_x, scale_y)     (offset 16)
-    scale_z_e: u32,  // pack2x16float(scale_z, spare)       (offset 20)
-    rot_xy: u32,     // pack2x16float(quat.x, quat.y)       (offset 24)
-    rot_zw: u32,     // pack2x16float(quat.z, quat.w)       (offset 28)
+    pos: vec3f,   // world position, scene normalized       (offset 0)
+    color: u32,   // pack4x8unorm(r, g, b, opacity)         (offset 12)
+    cov_a: u32,   // pack2x16float(Σxx, Σyy) × COV_SCALE    (offset 16)
+    cov_b: u32,   // pack2x16float(Σzz, Σxy) × COV_SCALE    (offset 20)
+    cov_c: u32,   // pack2x16float(Σxz, Σyz) × COV_SCALE    (offset 24)
+    _spare: u32,  //                                        (offset 28)
 }
 @group(2) @binding(1) var<storage, read> splat_static: array<SplatStatic>;
+
+// Σ3 is precomputed CPU-side (R·S·SᵀRᵀ is camera-independent; building it
+// per frame per splat cost ~9 ms at 2M — live perf finding) and stored
+// ×COV_SCALE to keep world-unit σ² values out of f16 subnormals.
+const COV_SCALE: f32 = 1024.0;
+
+// Symmetric 3×3 (6 unique entries) times a vector.
+fn sym3_mul(d: vec3f, o: vec3f, v: vec3f) -> vec3f {
+    // d = (xx, yy, zz), o = (xy, xz, yz)
+    return vec3f(
+        d.x * v.x + o.x * v.y + o.y * v.z,
+        o.x * v.x + d.y * v.y + o.z * v.z,
+        o.y * v.x + o.z * v.y + d.z * v.z,
+    );
+}
 
 // Integer hash (lowbias32) — the lib's fract-sin hash() degrades on GPU for
 // idx-scaled arguments (#1856): a band of indices rolls near-constant values
@@ -61,6 +76,7 @@ fn rand_dir3(seed: u32) -> vec3f {
     let r = sqrt(max(0.0, 1.0 - z * z));
     return vec3f(r * cos(phi), z, r * sin(phi));
 }
+
 
 // Fold factor for every accumulated weight: bounds the worst case (3M splats
 // collapsing onto one pixel) inside the i32/4096 fixed-point headroom
@@ -97,10 +113,6 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     }
 
     let react = param(0u);
-    let scale3 = vec3f(
-        unpack2x16float(s.scale_xy),
-        unpack2x16float(s.scale_z_e).x
-    ) * max(param(4u), 0.05);
 
     // ---- world-space audio physics (state = vel_size_in[idx].xyz) ----
     let pin = read_particle(idx);
@@ -162,21 +174,59 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let asp = aspect();
     let ndc = vec2f(focal * t.x / (t.z * asp), focal * t.y / t.z);
 
-    // ---- isotropic footprint (stage 2 replaces with the EWA conic) ----
-    // World σ = mean 3DGS scale; projected σ_px = focal_px·σ/z. The raster's
-    // gaussian weight exp(−4·(d/r)²) has σ_px = r_px/(2√2) → r_px = 2√2·σ_px.
-    let sigma_w = (scale3.x + scale3.y + scale3.z) / 3.0;
+    // ---- anisotropic EWA footprint (3DGS): Σ2 = (J·W)·Σ3·(J·W)ᵀ ----
+    // Σ3 comes precomputed from the upload; the J·W rows are the world-space
+    // gradients of the two screen-pixel axes (aspect-symmetric because size
+    // is height-relative; the y row is negated for the raster's y-flip).
+    let cov_d = vec3f(unpack2x16float(s.cov_a), unpack2x16float(s.cov_b).x); // Σxx, Σyy, Σzz
+    let cov_o = vec3f(unpack2x16float(s.cov_b).y, unpack2x16float(s.cov_c)); // Σxy, Σxz, Σyz
     let focal_px = focal * u.resolution.y * 0.5;
-    let sigma2_core = pow(focal_px * sigma_w / t.z, 2.0);
-    // DoF circle of confusion from the centroid-driven focal plane.
+    let iz = 1.0 / t.z;
+    let jw0 = (right - fwd * (t.x * iz)) * (focal_px * iz);
+    let jw1 = (fwd * (t.y * iz) - up) * (focal_px * iz);
+    // splat_scale scales σ linearly → covariance by s²; COV_SCALE unfolds.
+    let ps4 = max(param(4u), 0.05);
+    let s2 = ps4 * ps4 * (1.0 / COV_SCALE);
+    let sv0 = sym3_mul(cov_d, cov_o, jw0);
+    var caa = dot(jw0, sv0) * s2; // Σ2 in px²
+    var cbb = dot(jw1, sv0) * s2;
+    var ccc = dot(jw1, sym3_mul(cov_d, cov_o, jw1)) * s2;
+    let det_core = max(caa * ccc - cbb * cbb, 1e-8);
+
+    // DoF circle of confusion from the centroid-driven focal plane + AA
+    // low-pass, both isotropic covariance adds; energy-conserving via the
+    // √det ratio (peak of a 2D gaussian ∝ 1/√det), so blur never brightens.
+    // The VISUAL blur is capped: beyond it, heavy defocus keeps dimming
+    // (energy comp uses the uncapped determinant) while the footprint stays
+    // bounded — far-defocus reads as fade at a fraction of the raster cost.
     let coc = param(3u) * 6.0 * abs(t.z - u.splat_focal_depth) / max(t.z, 0.1);
-    // AA low-pass (0.3 px²) + defocus blur, energy-conserving: the peak dims
-    // by the variance ratio so blur never brightens.
     let blur = 0.3 + coc * coc;
-    let sigma2 = sigma2_core + blur;
-    var alpha = base.a * param(5u) * (sigma2_core + 0.001) / (sigma2 + 0.001);
-    let r_px = min(2.8284271 * sqrt(sigma2), 8.0); // raster radius cap (3×3-tile bound)
-    let r_ndc = r_px * 2.0 / u.resolution.y;       // raster: radius_px = vel_size.w·H/2
+    let det_full = max((caa + blur) * (ccc + blur) - cbb * cbb, 1e-8);
+    let blur_vis = min(blur, 3.0);
+    caa += blur_vis;
+    ccc += blur_vis;
+    var det = max(caa * ccc - cbb * cbb, 1e-8);
+    var alpha = base.a * param(5u) * sqrt(det_core / det_full);
+
+    // Footprint radius from the major eigenvalue, cutoff q = 12 (exp(−6)).
+    // The 8px cap PRESERVES the raster's 3×3-tile scatter bound: shrink the
+    // covariance uniformly (keeps eccentricity) instead of clipping.
+    let lmax = 0.5 * (caa + ccc) + sqrt(max(0.25 * (caa - ccc) * (caa - ccc) + cbb * cbb, 0.0));
+    var r_px = sqrt(12.0 * lmax);
+    if r_px > 8.0 {
+        let shrink = (8.0 / r_px) * (8.0 / r_px);
+        caa *= shrink;
+        cbb *= shrink;
+        ccc *= shrink;
+        det = max(caa * ccc - cbb * cbb, 1e-8);
+        r_px = 8.0;
+    }
+    // Conic = inverse covariance, packed f16 for the raster (flags.zw).
+    let inv_det = 1.0 / det;
+    let conic_a = ccc * inv_det;
+    let conic_b = -cbb * inv_det;
+    let conic_c = caa * inv_det;
+    let r_ndc = r_px * 2.0 / u.resolution.y; // raster: radius_px = vel_size.w·H/2
 
     // ---- OIT weight + obstacle carve + cull ----
     // Bounded near-favoring depth weight (scene spans [dist−1, dist+1]).
@@ -200,7 +250,13 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         clamp(base.rgb * (0.5 + param(7u) * 1.5), vec3f(0.0), vec3f(1.0)),
         a_out
     );
-    p.flags = vec4f(age, u.lifetime, 0.0, 0.0); // .zw: stage-2 packed conic
+    // .zw = packed screen conic for the raster's anisotropic branch.
+    p.flags = vec4f(
+        age,
+        u.lifetime,
+        bitcast<f32>(pack2x16float(vec2f(conic_a, conic_c))),
+        bitcast<f32>(pack2x16float(vec2f(conic_b, 0.0)))
+    );
     write_particle(idx, p);
     if !culled {
         mark_alive(idx);
