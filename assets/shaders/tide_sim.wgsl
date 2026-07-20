@@ -52,7 +52,7 @@ fn tide_color(pos: vec2f, vel: vec2f, foamy: f32) -> vec3f {
     var col = phosphor_audio_palette(hue_t, 0.6 + 0.4 * clamp(u.centroid, 0.0, 1.0), u.time * 0.02);
     col = mix(col, vec3f(0.10, 0.35, 0.60), 0.45);
     let speed_glow = clamp(length(vel) * 1.6, 0.0, 1.0);
-    col *= 0.10 + 0.45 * speed_glow + 0.25 * u.rms;
+    col *= 0.08 + 0.35 * speed_glow + 0.15 * u.rms;
     // Foam whitens — the bright contour where water meets a silhouette.
     return mix(col, vec3f(0.85, 0.92, 1.0) * 0.7, clamp(foamy, 0.0, 1.0) * 0.75);
 }
@@ -166,7 +166,10 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
             let sa = sin(eddy);
             v_s = vec2f(v_s.x * ca - v_s.y * sa, v_s.x * sa + v_s.y * ca);
             vel = v_s / asp;
-            agitation = prox;
+            // Steering strength follows the anticipatory prox, but the FOAM
+            // color band uses the near tap only — a tight contour at the
+            // surface, not the whole 0.12-lookahead approach zone.
+            agitation = a1;
         }
     }
 
@@ -183,13 +186,16 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     vel *= pow(u.drag, dt * 60.0);
 
     // --- Percussive splash: a hashed subset sprays upward as foam on hits.
-    let hit = max(u.kick, u.percussive_energy);
-    if hit > 0.5 && hash(f32(idx) * 7.7 + floor(u.time * 20.0)) < (hit - 0.5) * (0.2 + 0.5 * param(2u)) {
+    // Gated on HPSS percussive energy ONLY — the kick band false-fires on
+    // sustained low sines (pads), and HPSS is precisely the pad/drum
+    // discriminator this effect is built around.
+    let hit = u.percussive_energy;
+    if hit > 0.6 && hash(f32(idx) * 7.7 + floor(u.time * 20.0)) < (hit - 0.6) * (0.1 + 0.3 * param(2u)) {
         let a = (hash(f32(idx) + u.time) - 0.5) * 2.6;
         vel += vec2f(sin(a) * 0.6, abs(cos(a))) * 0.35 * hit * (0.5 + agitation);
         foam = 1.0;
     }
-    foam *= exp(-dt * 1.5);
+    foam *= exp(-dt * 2.2);
 
     // --- Integrate + canonical collision as the hard guarantee ---
     let prev_pos = pos;
@@ -208,8 +214,8 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let size = init_size * eval_size_curve(life_frac);
     let fade_in = smoothstep(0.0, 0.04, life_frac);
     let fade_out = 1.0 - smoothstep(0.85, 1.0, life_frac);
-    let alpha = 0.12 * fade_in * fade_out * eval_opacity_curve(life_frac);
-    let col = tide_color(pos, vel, foam + agitation * 0.8);
+    let alpha = 0.09 * fade_in * fade_out * eval_opacity_curve(life_frac);
+    let col = tide_color(pos, vel, foam + agitation * 0.6);
 
     p.pos_life = vec4f(pos, 0.0, 1.0);
     p.vel_size = vec4f(vel, init_size, size);
