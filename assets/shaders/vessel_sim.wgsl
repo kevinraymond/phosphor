@@ -27,11 +27,16 @@
 const TAU: f32 = 6.2831853;
 // Soft half-width of the amphora's pseudo-alpha edge band.
 const VESSEL_EDGE: f32 = 0.03;
+// Amphora spine + radius in aspect-corrected screen space (y spans only
+// +-res.y/res.x there — ~+-0.56 on 16:9 — so these read smaller than clip).
+const AMPHORA_A: vec2f = vec2f(0.0, -0.20);
+const AMPHORA_B: vec2f = vec2f(0.0, 0.10);
+const AMPHORA_R: f32 = 0.22;
 
 // Fallback vessel: rounded capsule in aspect-corrected screen space.
 fn amphora_sd(pos: vec2f) -> f32 {
     let ps = pos * obstacle_aspect();
-    return phosphor_sd_segment2(ps, vec2f(0.0, -0.30), vec2f(0.0, 0.12)) - 0.26;
+    return phosphor_sd_segment2(ps, AMPHORA_A, AMPHORA_B) - AMPHORA_R;
 }
 
 // Unified containment field: obstacle alpha when armed, else the amphora as a
@@ -53,9 +58,8 @@ fn vessel_threshold() -> f32 {
 fn vessel_inward(pos: vec2f) -> vec2f {
     if u.obstacle_enabled > 0.5 { return -obstacle_normal(pos); }
     let ps = pos * obstacle_aspect();
-    let a = vec2f(0.0, -0.30);
-    let ba = vec2f(0.0, 0.12) - a;
-    let pa = ps - a;
+    let ba = AMPHORA_B - AMPHORA_A;
+    let pa = ps - AMPHORA_A;
     let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
     let d = pa - ba * h;
     let len = length(d);
