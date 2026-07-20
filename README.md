@@ -129,7 +129,7 @@ Trigger actions (next/prev effect, layer, preset, toggle post-processing) can al
 | 9000 | Receive | On |
 | 9001 | Transmit | Off (enable in UI) |
 
-Addresses: `/phosphor/param/{name}`, `/phosphor/trigger/{action}`, `/phosphor/layer/{n}/opacity`, `/phosphor/layer/{n}/blend`, `/phosphor/layer/{n}/enabled`, `/phosphor/postprocess/enabled`.
+Addresses: `/phosphor/param/{name}`, `/phosphor/trigger/{action}`, `/phosphor/layer/{n}/param/{name}`, `/phosphor/layer/{n}/opacity`, `/phosphor/layer/{n}/blend`, `/phosphor/layer/{n}/enabled`, `/phosphor/layer/{n}/obstacle/{enabled|mode|threshold|elasticity}` (mode: 0=Bounce 1=Stick 2=Flow 3=Contain), `/phosphor/postprocess/enabled`, `/phosphor/volumetric/enabled`, `/phosphor/volumetric/{param}`, `/phosphor/scene/{goto_cue|load|loop_mode|advance_mode}`.
 
 OSC learn works the same as MIDI learn — click the **O** button, send any message to bind.
 

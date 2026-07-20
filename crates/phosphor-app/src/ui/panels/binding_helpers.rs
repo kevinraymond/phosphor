@@ -128,6 +128,10 @@ pub fn build_target_options(info: &BindingPanelInfo) -> Vec<TargetOption> {
         ("particle.gravity_x", "Gravity X"),
         ("particle.gravity_y", "Gravity Y"),
         ("particle.vortex_strength", "Vortex strength"),
+        ("particle.obstacle_enabled", "Obstacle enabled"),
+        ("particle.obstacle_mode", "Obstacle mode"),
+        ("particle.obstacle_threshold", "Obstacle threshold"),
+        ("particle.obstacle_elasticity", "Obstacle elasticity"),
     ] {
         targets.push(TargetOption {
             id: id.into(),

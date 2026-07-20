@@ -24,6 +24,14 @@ pub enum OscInMessage {
     LayerBlend { layer: usize, value: u32 },
     /// Set layer enabled: /phosphor/layer/{n}/enabled
     LayerEnabled { layer: usize, value: bool },
+    /// Set obstacle enabled: /phosphor/layer/{n}/obstacle/enabled
+    LayerObstacleEnabled { layer: usize, value: bool },
+    /// Set obstacle mode: /phosphor/layer/{n}/obstacle/mode (0=Bounce, 1=Stick, 2=Flow, 3=Contain)
+    LayerObstacleMode { layer: usize, value: u32 },
+    /// Set obstacle alpha threshold: /phosphor/layer/{n}/obstacle/threshold
+    LayerObstacleThreshold { layer: usize, value: f32 },
+    /// Set obstacle elasticity: /phosphor/layer/{n}/obstacle/elasticity
+    LayerObstacleElasticity { layer: usize, value: f32 },
     /// Toggle post-processing: /phosphor/postprocess/enabled
     PostProcessEnabled(bool),
     /// Toggle volumetric mode: /phosphor/volumetric/enabled

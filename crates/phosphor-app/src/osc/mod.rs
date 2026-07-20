@@ -24,6 +24,10 @@ pub struct OscFrameResult {
     pub layer_opacity: Vec<(usize, f32)>,
     pub layer_blend: Vec<(usize, u32)>,
     pub layer_enabled: Vec<(usize, bool)>,
+    pub layer_obstacle_enabled: Vec<(usize, bool)>,
+    pub layer_obstacle_mode: Vec<(usize, u32)>,
+    pub layer_obstacle_threshold: Vec<(usize, f32)>,
+    pub layer_obstacle_elasticity: Vec<(usize, f32)>,
     pub postprocess_enabled: Option<bool>,
     pub volumetric_enabled: Option<bool>,
     pub volumetric_params: Vec<(String, f32)>,
@@ -43,6 +47,10 @@ impl OscFrameResult {
             layer_opacity: Vec::new(),
             layer_blend: Vec::new(),
             layer_enabled: Vec::new(),
+            layer_obstacle_enabled: Vec::new(),
+            layer_obstacle_mode: Vec::new(),
+            layer_obstacle_threshold: Vec::new(),
+            layer_obstacle_elasticity: Vec::new(),
             postprocess_enabled: None,
             volumetric_enabled: None,
             volumetric_params: Vec::new(),
@@ -268,6 +276,18 @@ impl OscSystem {
                 OscInMessage::LayerEnabled { layer, value } => {
                     result.layer_enabled.push((layer, value));
                 }
+                OscInMessage::LayerObstacleEnabled { layer, value } => {
+                    result.layer_obstacle_enabled.push((layer, value));
+                }
+                OscInMessage::LayerObstacleMode { layer, value } => {
+                    result.layer_obstacle_mode.push((layer, value));
+                }
+                OscInMessage::LayerObstacleThreshold { layer, value } => {
+                    result.layer_obstacle_threshold.push((layer, value));
+                }
+                OscInMessage::LayerObstacleElasticity { layer, value } => {
+                    result.layer_obstacle_elasticity.push((layer, value));
+                }
                 OscInMessage::PostProcessEnabled(enabled) => {
                     result.postprocess_enabled = Some(enabled);
                 }
@@ -371,6 +391,21 @@ impl OscSystem {
                 OscInMessage::LayerEnabled { layer, value } => {
                     result.layer_enabled.push((layer, value));
                 }
+                // Obstacle messages target arbitrary layers; the per-layer locked
+                // check happens at the application site, so they pass through even
+                // when the active layer is locked (#1793).
+                OscInMessage::LayerObstacleEnabled { layer, value } => {
+                    result.layer_obstacle_enabled.push((layer, value));
+                }
+                OscInMessage::LayerObstacleMode { layer, value } => {
+                    result.layer_obstacle_mode.push((layer, value));
+                }
+                OscInMessage::LayerObstacleThreshold { layer, value } => {
+                    result.layer_obstacle_threshold.push((layer, value));
+                }
+                OscInMessage::LayerObstacleElasticity { layer, value } => {
+                    result.layer_obstacle_elasticity.push((layer, value));
+                }
                 OscInMessage::LayerParam { layer, name, value } => {
                     result.layer_params.push((layer, name, value));
                 }
@@ -452,10 +487,15 @@ fn msg_value(msg: &OscInMessage) -> Option<f32> {
         OscInMessage::Param { value, .. }
         | OscInMessage::LayerParam { value, .. }
         | OscInMessage::LayerOpacity { value, .. }
+        | OscInMessage::LayerObstacleThreshold { value, .. }
+        | OscInMessage::LayerObstacleElasticity { value, .. }
         | OscInMessage::VolumetricParam { value, .. }
         | OscInMessage::Raw { value, .. } => Some(*value),
-        OscInMessage::LayerBlend { value, .. } => Some(*value as f32),
+        OscInMessage::LayerBlend { value, .. } | OscInMessage::LayerObstacleMode { value, .. } => {
+            Some(*value as f32)
+        }
         OscInMessage::LayerEnabled { value, .. }
+        | OscInMessage::LayerObstacleEnabled { value, .. }
         | OscInMessage::PostProcessEnabled(value)
         | OscInMessage::VolumetricEnabled(value)
         | OscInMessage::SceneLoopMode(value) => Some(if *value { 1.0 } else { 0.0 }),
@@ -475,6 +515,18 @@ fn msg_address(msg: &OscInMessage) -> String {
         OscInMessage::LayerOpacity { layer, .. } => format!("/phosphor/layer/{layer}/opacity"),
         OscInMessage::LayerBlend { layer, .. } => format!("/phosphor/layer/{layer}/blend"),
         OscInMessage::LayerEnabled { layer, .. } => format!("/phosphor/layer/{layer}/enabled"),
+        OscInMessage::LayerObstacleEnabled { layer, .. } => {
+            format!("/phosphor/layer/{layer}/obstacle/enabled")
+        }
+        OscInMessage::LayerObstacleMode { layer, .. } => {
+            format!("/phosphor/layer/{layer}/obstacle/mode")
+        }
+        OscInMessage::LayerObstacleThreshold { layer, .. } => {
+            format!("/phosphor/layer/{layer}/obstacle/threshold")
+        }
+        OscInMessage::LayerObstacleElasticity { layer, .. } => {
+            format!("/phosphor/layer/{layer}/obstacle/elasticity")
+        }
         OscInMessage::PostProcessEnabled(_) => "/phosphor/postprocess/enabled".to_string(),
         OscInMessage::VolumetricEnabled(_) => "/phosphor/volumetric/enabled".to_string(),
         OscInMessage::VolumetricParam { name, .. } => format!("/phosphor/volumetric/{name}"),
@@ -609,6 +661,39 @@ mod tests {
     }
 
     #[test]
+    fn msg_address_layer_obstacle_enabled() {
+        let msg = OscInMessage::LayerObstacleEnabled {
+            layer: 0,
+            value: true,
+        };
+        assert_eq!(msg_address(&msg), "/phosphor/layer/0/obstacle/enabled");
+    }
+
+    #[test]
+    fn msg_address_layer_obstacle_mode() {
+        let msg = OscInMessage::LayerObstacleMode { layer: 1, value: 2 };
+        assert_eq!(msg_address(&msg), "/phosphor/layer/1/obstacle/mode");
+    }
+
+    #[test]
+    fn msg_address_layer_obstacle_threshold() {
+        let msg = OscInMessage::LayerObstacleThreshold {
+            layer: 0,
+            value: 0.5,
+        };
+        assert_eq!(msg_address(&msg), "/phosphor/layer/0/obstacle/threshold");
+    }
+
+    #[test]
+    fn msg_address_layer_obstacle_elasticity() {
+        let msg = OscInMessage::LayerObstacleElasticity {
+            layer: 2,
+            value: 0.7,
+        };
+        assert_eq!(msg_address(&msg), "/phosphor/layer/2/obstacle/elasticity");
+    }
+
+    #[test]
     fn msg_address_postprocess_enabled() {
         let msg = OscInMessage::PostProcessEnabled(true);
         assert_eq!(msg_address(&msg), "/phosphor/postprocess/enabled");
@@ -631,6 +716,10 @@ mod tests {
         assert!(r.layer_opacity.is_empty());
         assert!(r.layer_blend.is_empty());
         assert!(r.layer_enabled.is_empty());
+        assert!(r.layer_obstacle_enabled.is_empty());
+        assert!(r.layer_obstacle_mode.is_empty());
+        assert!(r.layer_obstacle_threshold.is_empty());
+        assert!(r.layer_obstacle_elasticity.is_empty());
         assert!(r.postprocess_enabled.is_none());
         assert!(r.scene_goto_cue.is_none());
         assert!(r.scene_load_index.is_none());

@@ -694,6 +694,27 @@ impl App {
                     }
                 }
             }
+            for (layer_idx, value) in osc_result.layer_obstacle_enabled {
+                if let Some(ps) = self.osc_obstacle_target(layer_idx) {
+                    ps.obstacle_enabled = value;
+                }
+            }
+            for (layer_idx, value) in osc_result.layer_obstacle_mode {
+                if let Some(ps) = self.osc_obstacle_target(layer_idx) {
+                    // Raw-integer OSC path: 0..3 via from_u32 (bindings use from_normalized).
+                    ps.obstacle_mode = crate::gpu::particle::ObstacleMode::from_u32(value);
+                }
+            }
+            for (layer_idx, value) in osc_result.layer_obstacle_threshold {
+                if let Some(ps) = self.osc_obstacle_target(layer_idx) {
+                    ps.obstacle_threshold = value;
+                }
+            }
+            for (layer_idx, value) in osc_result.layer_obstacle_elasticity {
+                if let Some(ps) = self.osc_obstacle_target(layer_idx) {
+                    ps.obstacle_elasticity = value;
+                }
+            }
             if let Some(pp_enabled) = osc_result.postprocess_enabled {
                 self.post_process.enabled = pp_enabled;
                 if let Some(layer) = self.layer_stack.active_mut() {
@@ -2157,6 +2178,24 @@ impl App {
         }
     }
 
+    /// Resolve a per-layer OSC obstacle message to that layer's particle
+    /// system, respecting the layer lock (#1793). None for locked, missing,
+    /// or non-particle layers.
+    fn osc_obstacle_target(
+        &mut self,
+        layer_idx: usize,
+    ) -> Option<&mut crate::gpu::particle::ParticleSystem> {
+        let layer = self.layer_stack.layers.get_mut(layer_idx)?;
+        if layer.locked {
+            return None;
+        }
+        layer
+            .as_effect_mut()?
+            .pass_executor
+            .particle_system
+            .as_mut()
+    }
+
     /// Apply a single binding bus result to its target.
     fn apply_binding_target(&mut self, target: &str, value: f32, rising: bool) {
         let mut parts = target.splitn(2, '.');
@@ -2338,6 +2377,18 @@ impl App {
                                     "vortex_strength" => {
                                         ps.def.vortex_strength = -5.0 + v * 10.0;
                                     }
+                                    // Obstacle state lives on the system itself, not the
+                                    // def (system.rs), so these write ps.* only (#1793).
+                                    "obstacle_enabled" => ps.obstacle_enabled = v > 0.5,
+                                    "obstacle_mode" => {
+                                        // Bus outputs are normalized 0..1 (#1792): spread
+                                        // across all 4 modes. The raw-integer OSC path
+                                        // uses from_u32 directly.
+                                        ps.obstacle_mode =
+                                            crate::gpu::particle::ObstacleMode::from_normalized(v);
+                                    }
+                                    "obstacle_threshold" => ps.obstacle_threshold = v,
+                                    "obstacle_elasticity" => ps.obstacle_elasticity = v,
                                     _ => {}
                                 }
                             }

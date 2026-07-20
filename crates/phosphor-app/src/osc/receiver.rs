@@ -144,6 +144,41 @@ fn parse_osc_message(msg: &OscMessage) -> Option<OscInMessage> {
                         value: value > 0.5,
                     })
                 }
+                // /phosphor/layer/{n}/obstacle/{field}
+                "obstacle" if parts.len() >= 6 => match parts[5] {
+                    "enabled" => {
+                        let value = first_float(&msg.args)?;
+                        Some(OscInMessage::LayerObstacleEnabled {
+                            layer,
+                            value: value > 0.5,
+                        })
+                    }
+                    "mode" => {
+                        let value = first_float(&msg.args)? as u32;
+                        Some(OscInMessage::LayerObstacleMode { layer, value })
+                    }
+                    "threshold" => {
+                        let value = first_float(&msg.args)?;
+                        Some(OscInMessage::LayerObstacleThreshold {
+                            layer,
+                            value: value.clamp(0.0, 1.0),
+                        })
+                    }
+                    "elasticity" => {
+                        let value = first_float(&msg.args)?;
+                        Some(OscInMessage::LayerObstacleElasticity {
+                            layer,
+                            value: value.clamp(0.0, 1.0),
+                        })
+                    }
+                    _ => {
+                        let value = first_float(&msg.args).unwrap_or(1.0);
+                        Some(OscInMessage::Raw {
+                            address: addr.clone(),
+                            value,
+                        })
+                    }
+                },
                 _ => {
                     let value = first_float(&msg.args).unwrap_or(1.0);
                     Some(OscInMessage::Raw {
@@ -417,6 +452,117 @@ mod tests {
             }
             other => panic!("expected LayerEnabled, got {:?}", other),
         }
+    }
+
+    // ---- Obstacle parse tests (#1793) ----
+
+    #[test]
+    fn parse_layer_obstacle_enabled_true() {
+        let msg = OscMessage {
+            addr: "/phosphor/layer/0/obstacle/enabled".into(),
+            args: vec![OscType::Float(0.8)],
+        };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::LayerObstacleEnabled { layer, value }) => {
+                assert_eq!(layer, 0);
+                assert!(value); // 0.8 > 0.5
+            }
+            other => panic!("expected LayerObstacleEnabled, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_layer_obstacle_enabled_false() {
+        let msg = OscMessage {
+            addr: "/phosphor/layer/0/obstacle/enabled".into(),
+            args: vec![OscType::Float(0.3)],
+        };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::LayerObstacleEnabled { layer: 0, value }) => assert!(!value),
+            other => panic!("expected LayerObstacleEnabled, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_layer_obstacle_mode() {
+        let msg = OscMessage {
+            addr: "/phosphor/layer/1/obstacle/mode".into(),
+            args: vec![OscType::Int(3)],
+        };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::LayerObstacleMode { layer, value }) => {
+                assert_eq!(layer, 1);
+                assert_eq!(value, 3);
+            }
+            other => panic!("expected LayerObstacleMode, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_layer_obstacle_threshold_clamped() {
+        let msg = OscMessage {
+            addr: "/phosphor/layer/0/obstacle/threshold".into(),
+            args: vec![OscType::Float(1.5)],
+        };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::LayerObstacleThreshold { layer: 0, value }) => {
+                assert!((value - 1.0).abs() < 1e-6);
+            }
+            other => panic!("expected LayerObstacleThreshold, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_layer_obstacle_elasticity() {
+        let msg = OscMessage {
+            addr: "/phosphor/layer/2/obstacle/elasticity".into(),
+            args: vec![OscType::Float(0.25)],
+        };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::LayerObstacleElasticity { layer, value }) => {
+                assert_eq!(layer, 2);
+                assert!((value - 0.25).abs() < 1e-6);
+            }
+            other => panic!("expected LayerObstacleElasticity, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_unknown_obstacle_field_returns_raw() {
+        let msg = OscMessage {
+            addr: "/phosphor/layer/0/obstacle/bogus".into(),
+            args: vec![OscType::Float(1.0)],
+        };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::Raw { address, .. }) => {
+                assert_eq!(address, "/phosphor/layer/0/obstacle/bogus");
+            }
+            other => panic!("expected Raw, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_bare_obstacle_returns_raw() {
+        // No field segment -> fails the parts.len() >= 6 guard -> Raw (learn mode).
+        let msg = OscMessage {
+            addr: "/phosphor/layer/0/obstacle".into(),
+            args: vec![OscType::Float(1.0)],
+        };
+        match parse_osc_message(&msg) {
+            Some(OscInMessage::Raw { address, .. }) => {
+                assert_eq!(address, "/phosphor/layer/0/obstacle");
+            }
+            other => panic!("expected Raw, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_obstacle_missing_args_returns_none() {
+        let msg = OscMessage {
+            addr: "/phosphor/layer/0/obstacle/threshold".into(),
+            args: vec![],
+        };
+        assert!(parse_osc_message(&msg).is_none());
     }
 
     #[test]

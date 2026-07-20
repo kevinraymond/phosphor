@@ -173,6 +173,8 @@ pub enum ObstacleMode {
 }
 
 impl ObstacleMode {
+    pub const ALL: &[ObstacleMode] = &[Self::Bounce, Self::Stick, Self::Flow, Self::Contain];
+
     pub fn from_u32(v: u32) -> Self {
         match v {
             1 => Self::Stick,
@@ -180,6 +182,14 @@ impl ObstacleMode {
             3 => Self::Contain,
             _ => Self::Bounce,
         }
+    }
+
+    /// Map a normalized 0..1 control value (binding-bus output) onto the full
+    /// mode list: 0.0 → Bounce, 1.0 → Contain, evenly spaced in between
+    /// (mirrors `BlendMode::from_normalized`, #1792). Out-of-range input clamps.
+    pub fn from_normalized(v: f32) -> Self {
+        let max_index = (Self::ALL.len() - 1) as f32;
+        Self::from_u32((v.clamp(0.0, 1.0) * max_index).round() as u32)
     }
 
     pub fn label(&self) -> &'static str {
@@ -1064,5 +1074,36 @@ mod tests {
         assert_eq!(ObstacleMode::Stick.label(), "Stick");
         assert_eq!(ObstacleMode::Flow.label(), "Flow Around");
         assert_eq!(ObstacleMode::Contain.label(), "Contain");
+    }
+
+    // --- ObstacleMode::from_normalized (#1793) ---
+
+    #[test]
+    fn obstacle_mode_from_normalized_endpoints() {
+        assert_eq!(ObstacleMode::from_normalized(0.0), ObstacleMode::Bounce);
+        assert_eq!(ObstacleMode::from_normalized(1.0), ObstacleMode::Contain);
+    }
+
+    #[test]
+    fn obstacle_mode_from_normalized_reaches_all_modes() {
+        for (i, mode) in ObstacleMode::ALL.iter().enumerate() {
+            let v = i as f32 / (ObstacleMode::ALL.len() - 1) as f32;
+            assert_eq!(ObstacleMode::from_normalized(v), *mode, "step {i} (v={v})");
+        }
+    }
+
+    #[test]
+    fn obstacle_mode_from_normalized_clamps_out_of_range() {
+        assert_eq!(ObstacleMode::from_normalized(-0.5), ObstacleMode::Bounce);
+        assert_eq!(ObstacleMode::from_normalized(2.0), ObstacleMode::Contain);
+    }
+
+    #[test]
+    fn obstacle_mode_from_normalized_interior_rounding() {
+        // 0.5 * 3 = 1.5 rounds half-away-from-zero to 2 = Flow.
+        assert_eq!(ObstacleMode::from_normalized(0.5), ObstacleMode::Flow);
+        // Boundary between step 0 and 1 sits at 0.5/3 ≈ 0.1667.
+        assert_eq!(ObstacleMode::from_normalized(0.16), ObstacleMode::Bounce);
+        assert_eq!(ObstacleMode::from_normalized(0.17), ObstacleMode::Stick);
     }
 }
