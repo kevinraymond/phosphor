@@ -867,8 +867,8 @@ impl App {
             &self.midi,
             &self.osc,
         );
-        for (target, value) in bind_results {
-            self.apply_binding_target(&target, value);
+        for out in bind_results {
+            self.apply_binding_target(&out.target, out.value, out.rising);
         }
         self.binding_bus.save_if_dirty();
         // A preset-scoped binding edit persists only on explicit preset save, so
@@ -2157,7 +2157,7 @@ impl App {
     }
 
     /// Apply a single binding bus result to its target.
-    fn apply_binding_target(&mut self, target: &str, value: f32) {
+    fn apply_binding_target(&mut self, target: &str, value: f32, rising: bool) {
         let mut parts = target.splitn(2, '.');
         let category = match parts.next() {
             Some(c) => c,
@@ -2267,8 +2267,10 @@ impl App {
                 }
             "scene" => {
                 // scene.transport.go / scene.transport.prev / scene.transport.stop
+                // Edge-triggered (#1791): fire only on the frame the output
+                // rises above 0.5, not every frame a source is held high.
                 if let Some(action) = rest.strip_prefix("transport.") {
-                    if value > 0.5 && !action.is_empty() {
+                    if rising && !action.is_empty() {
                         let trigger = format!("scene.transport.{action}");
                         self.binding_bus.pending_triggers.push(trigger);
                     }

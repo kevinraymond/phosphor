@@ -58,6 +58,12 @@ pub struct BindingRuntime {
     pub last_input: Option<f32>,
     pub last_output: Option<f32>,
     pub last_raw: Option<SourceRaw>,
+    /// Rising-edge latch (#1791): whether last frame's post-transform output
+    /// was above the 0.5 trigger threshold. Deliberately freezes while the
+    /// binding is disabled or its source is absent from the snapshot, so a
+    /// briefly missing held-high source can suppress a trigger but never
+    /// fire a spurious one.
+    pub prev_above_threshold: bool,
 }
 
 impl BindingRuntime {
@@ -67,8 +73,20 @@ impl BindingRuntime {
             last_input: None,
             last_output: None,
             last_raw: None,
+            prev_above_threshold: false,
         }
     }
+}
+
+/// One evaluated binding result for the app to apply this frame.
+#[derive(Debug, Clone)]
+pub struct BindingOutput {
+    pub target: String,
+    pub value: f32,
+    /// True only on the frame `value` crossed above 0.5. Trigger-style
+    /// targets (scene.transport.*) fire on this; continuous targets ignore
+    /// it and stay level-driven.
+    pub rising: bool,
 }
 
 /// Original value before normalization (UI diagnostics only).

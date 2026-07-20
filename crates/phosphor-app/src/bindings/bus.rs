@@ -227,7 +227,7 @@ impl BindingBus {
     }
 
     /// Evaluate all enabled bindings for one frame.
-    /// Returns (target_id, value) pairs for the app to apply.
+    /// Returns per-binding outputs (target, value, rising edge) for the app to apply.
     pub fn evaluate(
         &mut self,
         audio: Option<&AudioFeatures>,
@@ -235,7 +235,7 @@ impl BindingBus {
         dmfcc: &[f32; 13],
         midi: &MidiSystem,
         osc: &OscSystem,
-    ) -> Vec<(String, f32)> {
+    ) -> Vec<BindingOutput> {
         // Collect source snapshots (always, even with no bindings — needed for matrix meters)
         let mut snapshot = HashMap::with_capacity(128);
 
@@ -253,6 +253,13 @@ impl BindingBus {
         snapshot.extend(sources::collect_osc(osc));
         snapshot.extend(sources::collect_websocket(&self.ws_bind_values));
 
+        self.evaluate_snapshot(snapshot)
+    }
+
+    /// Core per-frame evaluation against a prebuilt source snapshot. Split from
+    /// `evaluate` so tests can drive it without `MidiSystem`/`OscSystem`, whose
+    /// constructors touch config files, MIDI ports, and UDP sockets.
+    fn evaluate_snapshot(&mut self, snapshot: SourceSnapshot) -> Vec<BindingOutput> {
         if self.bindings.is_empty() {
             self.last_snapshot = snapshot;
             return Vec::new();
@@ -306,7 +313,20 @@ impl BindingBus {
             let output = transforms::apply_chain(*value, &binding.transforms, runtime);
             runtime.last_output = Some(output);
 
-            results.push((binding.target.clone(), output));
+            // Rising-edge latch (#1791): true only on the frame the
+            // post-transform output crosses above 0.5. Trigger targets
+            // consume this; continuous targets ignore it. Skipped (frozen)
+            // when the source is missing or the binding is disabled — see
+            // `BindingRuntime::prev_above_threshold`.
+            let above = output > 0.5;
+            let rising = above && !runtime.prev_above_threshold;
+            runtime.prev_above_threshold = above;
+
+            results.push(BindingOutput {
+                target: binding.target.clone(),
+                value: output,
+                rising,
+            });
         }
 
         self.last_snapshot = snapshot;
@@ -733,5 +753,139 @@ mod tests {
         bus.flush();
         assert!(!bus.dirty);
         assert!(bus.dirty_since.is_none());
+    }
+
+    // --- Rising-edge latch (#1791) ---
+
+    fn snap(key: &str, v: f32) -> SourceSnapshot {
+        let mut m: SourceSnapshot = HashMap::new();
+        m.insert(
+            key.to_string(),
+            (
+                v,
+                SourceRaw {
+                    display: format!("{v:.3}"),
+                    numeric: v as f64,
+                },
+            ),
+        );
+        m
+    }
+
+    #[test]
+    fn scene_trigger_rises_once_per_press() {
+        let mut bus = empty_bus();
+        bus.add_binding(
+            "audio.kick".into(),
+            "scene.transport.go".into(),
+            BindingScope::Global,
+        );
+
+        // Held high: rising on the first frame only, level output unchanged.
+        let first = bus.evaluate_snapshot(snap("audio.kick", 1.0));
+        assert_eq!(first.len(), 1);
+        assert!(first[0].rising);
+        assert!(first[0].value > 0.5);
+        for _ in 0..2 {
+            let held = bus.evaluate_snapshot(snap("audio.kick", 1.0));
+            assert!(!held[0].rising);
+            assert!(held[0].value > 0.5);
+        }
+
+        // Release, then press again: re-fires.
+        let low = bus.evaluate_snapshot(snap("audio.kick", 0.0));
+        assert!(!low[0].rising);
+        let again = bus.evaluate_snapshot(snap("audio.kick", 1.0));
+        assert!(again[0].rising);
+    }
+
+    #[test]
+    fn rising_edge_uses_post_transform_output() {
+        let mut bus = empty_bus();
+        let id = bus.add_binding(
+            "audio.kick".into(),
+            "scene.transport.go".into(),
+            BindingScope::Global,
+        );
+        bus.get_binding_mut(&id)
+            .unwrap()
+            .transforms
+            .push(TransformDef::Invert);
+
+        // Input 0.0 → post-transform 1.0 → rising.
+        let out = bus.evaluate_snapshot(snap("audio.kick", 0.0));
+        assert!(out[0].rising);
+        assert!(out[0].value > 0.5);
+        // Input 1.0 → post-transform 0.0 → falls, no edge.
+        let out = bus.evaluate_snapshot(snap("audio.kick", 1.0));
+        assert!(!out[0].rising);
+        assert!(out[0].value < 0.5);
+    }
+
+    #[test]
+    fn missing_source_freezes_latch() {
+        let mut bus = empty_bus();
+        bus.add_binding(
+            "audio.kick".into(),
+            "scene.transport.go".into(),
+            BindingScope::Global,
+        );
+
+        let out = bus.evaluate_snapshot(snap("audio.kick", 1.0));
+        assert!(out[0].rising);
+        // Source vanishes from the snapshot: binding skipped, latch frozen high.
+        let out = bus.evaluate_snapshot(HashMap::new());
+        assert!(out.is_empty());
+        // Source returns still high: no spurious re-fire.
+        let out = bus.evaluate_snapshot(snap("audio.kick", 1.0));
+        assert!(!out[0].rising);
+    }
+
+    #[test]
+    fn reenabled_binding_does_not_refire_while_held() {
+        let mut bus = empty_bus();
+        let id = bus.add_binding(
+            "audio.kick".into(),
+            "scene.transport.go".into(),
+            BindingScope::Global,
+        );
+
+        let out = bus.evaluate_snapshot(snap("audio.kick", 1.0));
+        assert!(out[0].rising);
+
+        bus.get_binding_mut(&id).unwrap().enabled = false;
+        assert!(bus.evaluate_snapshot(snap("audio.kick", 1.0)).is_empty());
+
+        // Re-enable while the source is still held high: latch persisted → no edge.
+        bus.get_binding_mut(&id).unwrap().enabled = true;
+        let out = bus.evaluate_snapshot(snap("audio.kick", 1.0));
+        assert!(!out[0].rising);
+    }
+
+    #[test]
+    fn two_bindings_same_target_latch_independently() {
+        let mut bus = empty_bus();
+        bus.add_binding(
+            "audio.kick".into(),
+            "scene.transport.go".into(),
+            BindingScope::Global,
+        );
+        bus.add_binding(
+            "audio.snare".into(),
+            "scene.transport.go".into(),
+            BindingScope::Global,
+        );
+
+        // Raise A alone: exactly one rising edge.
+        let mut s = snap("audio.kick", 1.0);
+        s.extend(snap("audio.snare", 0.0));
+        let out = bus.evaluate_snapshot(s);
+        assert_eq!(out.iter().filter(|o| o.rising).count(), 1);
+
+        // Raise B while A stays high: exactly one new rising edge (B's).
+        let mut s = snap("audio.kick", 1.0);
+        s.extend(snap("audio.snare", 1.0));
+        let out = bus.evaluate_snapshot(s);
+        assert_eq!(out.iter().filter(|o| o.rising).count(), 1);
     }
 }
