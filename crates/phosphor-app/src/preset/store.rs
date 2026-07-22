@@ -855,6 +855,90 @@ mod tests {
     }
 
     #[test]
+    fn builtin_presets_reference_effects_that_still_ship() {
+        // Crucible layer 7 and Spectral Eye layer 2 shipped for months pointing at
+        // "Swarm", deleted in a42c6cb. Nothing caught it: apply_preset_immediately
+        // only warned, and the layer kept whatever effect was loaded before it.
+        //
+        // CARGO_MANIFEST_DIR, not assets_dir(): that resolves CWD-relative, and
+        // `cargo test` runs with CWD = crates/phosphor-app, which has no assets/.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/effects");
+        let shipped: std::collections::HashSet<String> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "pfx"))
+            .filter_map(|p| std::fs::read_to_string(p).ok())
+            .filter_map(|j| serde_json::from_str::<crate::effect::format::PfxEffect>(&j).ok())
+            .map(|p| p.name)
+            .collect();
+        assert!(
+            !shipped.is_empty(),
+            "no .pfx files found in {}",
+            dir.display()
+        );
+
+        for &(preset_name, json) in BUILTIN_PRESETS {
+            let preset: Preset = serde_json::from_str(json).unwrap();
+            for (i, l) in preset.layers.iter().enumerate() {
+                if l.effect_name.is_empty() || l.media_path.is_some() || l.webcam_device.is_some() {
+                    continue;
+                }
+                assert!(
+                    shipped.contains(&l.effect_name),
+                    "built-in preset '{preset_name}' layer {i} wants effect '{}', \
+                     which no longer ships",
+                    l.effect_name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn builtin_preset_params_are_in_range() {
+        // The other half of the Swarm fallout: ParamStore::set does NOT clamp to the
+        // declared range (params/store.rs), so a stale value reaches the shader out of
+        // bounds. Crucible's trail_decay was 0.98, above Array's max of 0.96.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/effects");
+        let effects: Vec<crate::effect::format::PfxEffect> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "pfx"))
+            .filter_map(|p| std::fs::read_to_string(p).ok())
+            .filter_map(|j| serde_json::from_str(&j).ok())
+            .collect();
+
+        for &(preset_name, json) in BUILTIN_PRESETS {
+            let preset: Preset = serde_json::from_str(json).unwrap();
+            for (i, l) in preset.layers.iter().enumerate() {
+                let Some(eff) = effects.iter().find(|e| e.name == l.effect_name) else {
+                    continue;
+                };
+                for (name, value) in &l.params {
+                    let Some(def) = eff.inputs.iter().find(|d| d.name() == name) else {
+                        panic!(
+                            "built-in preset '{preset_name}' layer {i} sets '{name}', \
+                             which '{}' does not have",
+                            eff.name
+                        );
+                    };
+                    if let (crate::params::ParamDef::Float { min, max, .. }, ParamValue::Float(v)) =
+                        (def, value)
+                    {
+                        assert!(
+                            *v >= *min && *v <= *max,
+                            "built-in preset '{preset_name}' layer {i}: {name} = {v} \
+                             is outside {}'s declared range {min}..{max}",
+                            eff.name
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn is_builtin_for_indices() {
         let mut s = PresetStore::new();
         s.builtin_count = 2;

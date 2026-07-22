@@ -186,13 +186,13 @@
       "media_looping": null
     },
     {
-      "effect_name": "Swarm",
+      "effect_name": "Array",
       "params": {
-        "orbit_speed": {
-          "Float": 2.0
+        "speed_mult": {
+          "Float": 1.0
         },
         "trail_decay": {
-          "Float": 0.98
+          "Float": 0.96
         }
       },
       "blend_mode": "Normal",

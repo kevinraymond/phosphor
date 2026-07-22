@@ -2747,6 +2747,10 @@ impl App {
                 }
             }
 
+            // Set when the preset names an effect that is not installed; the layer
+            // is then disabled rather than left holding the previous preset's effect.
+            let mut effect_missing = false;
+
             // Determine what to load for this layer
             let is_webcam_layer = lp.webcam_device.is_some();
 
@@ -2867,11 +2871,18 @@ impl App {
                     } else if let Some(idx) = effect_idx {
                         self.load_effect_on_layer(i, idx);
                     } else {
+                        // Leaving the layer as-is meant it kept the *previous* preset's
+                        // effect and then got stamped with this preset's opacity, blend
+                        // and params — so the same file rendered differently depending on
+                        // what was loaded before it. Both shipped presets pointed a layer
+                        // at "Swarm" for months after it was deleted and nothing caught
+                        // it. A missing layer is debuggable; a wrong one is not.
                         log::warn!(
-                            "Effect '{}' not found for layer {}, skipping",
+                            "Effect '{}' not found for layer {}, disabling layer",
                             lp.effect_name,
                             i
                         );
+                        effect_missing = true;
                     }
                 }
             }
@@ -3167,7 +3178,7 @@ impl App {
                 }
                 layer.blend_mode = lp.blend_mode;
                 layer.opacity = lp.opacity;
-                layer.enabled = lp.enabled;
+                layer.enabled = lp.enabled && !effect_missing;
                 layer.locked = lp.locked;
                 layer.pinned = lp.pinned;
                 layer.custom_name = lp.custom_name.clone();
