@@ -26,6 +26,10 @@ pub struct BindingMatrixState {
     pub open: bool,
     pub scope_tab: ScopeTab,
     pub collapsed_source_groups: HashSet<String>,
+    /// What the collapse-all button reports. Tracked explicitly because the source
+    /// list now starts with the long groups collapsed, so "is the collapsed set empty"
+    /// is no longer the same question.
+    pub source_groups_collapsed: bool,
     pub collapsed_target_groups: HashSet<String>,
     pub expanded_binding_id: Option<String>,
     // Position tracking for connection lines (rebuilt each frame)
@@ -50,7 +54,25 @@ impl BindingMatrixState {
         Self {
             open: false,
             scope_tab: ScopeTab::Effect,
-            collapsed_source_groups: HashSet::new(),
+            // Bands, Features and Beat stay open — they are what most patches start
+            // from. The rest would push 74 sources' worth of rows above the fold.
+            collapsed_source_groups: [
+                "audio_loudness",
+                "audio_timbre",
+                "audio_structure",
+                "audio_harmonic",
+                "audio_stereo",
+                "audio_pitch",
+                "audio_key",
+                "audio_mfcc",
+                "audio_chroma",
+                "audio_mel",
+                "audio_dmfcc",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+            source_groups_collapsed: false,
             collapsed_target_groups: HashSet::new(),
             expanded_binding_id: None,
             source_positions: HashMap::new(),
@@ -348,6 +370,7 @@ fn draw_header(
                     {
                         bus.apply_template(
                             tmpl,
+                            info.active_layer,
                             info.active_effect_name(),
                             info.active_param_names(),
                         );
@@ -392,7 +415,10 @@ fn draw_source_column(ui: &mut egui::Ui, state: &mut BindingMatrixState, bus: &B
                 .color(tc.text_secondary),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let all_collapsed = !state.collapsed_source_groups.is_empty();
+            // Explicit flag rather than `!collapsed_source_groups.is_empty()`: with the
+            // long groups collapsed by default the set is non-empty on first open, and
+            // deriving from emptiness showed "Expand all" with the wrong caret.
+            let all_collapsed = state.source_groups_collapsed;
             let icon = if all_collapsed {
                 "\u{25bc}"
             } else {
@@ -412,18 +438,14 @@ fn draw_source_column(ui: &mut egui::Ui, state: &mut BindingMatrixState, bus: &B
                 .on_hover_text(hint)
                 .clicked()
             {
+                state.source_groups_collapsed = !all_collapsed;
                 if all_collapsed {
                     state.collapsed_source_groups.clear();
                 } else {
-                    for id in [
-                        "audio_bands",
-                        "audio_features",
-                        "audio_beat",
-                        "audio_mfcc",
-                        "audio_chroma",
-                        "midi",
-                        "osc",
-                    ] {
+                    for id in audio_group_ids() {
+                        state.collapsed_source_groups.insert(id);
+                    }
+                    for id in ["midi", "osc"] {
                         state.collapsed_source_groups.insert(id.to_string());
                     }
                     for key in bus.last_snapshot.keys() {
@@ -453,49 +475,14 @@ fn draw_source_column(ui: &mut egui::Ui, state: &mut BindingMatrixState, bus: &B
                 .map(|b| b.source.as_str())
                 .collect();
 
-            // Audio groups
-            let audio_groups: &[(&str, &str, &[&str])] = &[
-                (
-                    "Audio \u{00b7} Bands",
-                    "audio_bands",
-                    &[
-                        "audio.band.0",
-                        "audio.band.1",
-                        "audio.band.2",
-                        "audio.band.3",
-                        "audio.band.4",
-                        "audio.band.5",
-                        "audio.band.6",
-                        "audio.rms",
-                    ],
-                ),
-                (
-                    "Audio \u{00b7} Features",
-                    "audio_features",
-                    &[
-                        "audio.kick",
-                        "audio.centroid",
-                        "audio.flux",
-                        "audio.flatness",
-                        "audio.rolloff",
-                        "audio.bandwidth",
-                        "audio.zcr",
-                    ],
-                ),
-                (
-                    "Audio \u{00b7} Beat",
-                    "audio_beat",
-                    &[
-                        "audio.onset",
-                        "audio.beat",
-                        "audio.beat_phase",
-                        "audio.bpm",
-                        "audio.beat_strength",
-                    ],
-                ),
-            ];
+            // Audio groups, derived from AUDIO_SOURCE_ORDER rather than listed again.
+            // This column and the expanded-card picker each had their own hardcoded
+            // list (20 keys here, 21 there) and both were missing the same 28 v2/v3
+            // features; deriving one from the other removes the way they drift.
+            // `dominant_chroma` is skipped: it heads the dynamic Chroma group below.
+            let audio_groups = audio_source_groups();
 
-            for &(group_label, group_id, keys) in audio_groups {
+            for (group_label, group_id, keys) in &audio_groups {
                 let mapped_count = keys.iter().filter(|k| bound_sources.contains(*k)).count();
                 draw_source_group(
                     ui,
@@ -608,6 +595,37 @@ fn draw_source_column(ui: &mut egui::Ui, state: &mut BindingMatrixState, bus: &B
                     "audio_mel",
                     AUDIO_COLOR,
                     &mel_refs,
+                    mapped,
+                    &bound_sources,
+                );
+            }
+
+            // Delta-MFCC (A16 #1467, dynamic — bindings-only, like Mel)
+            let mut dmfcc_keys: Vec<String> = bus
+                .last_snapshot
+                .keys()
+                .filter(|k| k.starts_with("audio.dmfcc."))
+                .cloned()
+                .collect();
+            if !dmfcc_keys.is_empty() {
+                dmfcc_keys.sort_by_key(|k| {
+                    k.strip_prefix("audio.dmfcc.")
+                        .and_then(|n| n.parse::<u32>().ok())
+                        .unwrap_or(99)
+                });
+                let dmfcc_refs: Vec<&str> = dmfcc_keys.iter().map(|s| s.as_str()).collect();
+                let mapped = dmfcc_refs
+                    .iter()
+                    .filter(|k| bound_sources.contains(*k))
+                    .count();
+                draw_source_group(
+                    ui,
+                    state,
+                    bus,
+                    "Audio \u{00b7} \u{0394}MFCC",
+                    "audio_dmfcc",
+                    AUDIO_COLOR,
+                    &dmfcc_refs,
                     mapped,
                     &bound_sources,
                 );
@@ -2281,21 +2299,16 @@ fn draw_transform_params_inline(
             });
         }
         TransformDef::Curve { curve_type } => {
-            let curves = [
-                "ease_in",
-                "ease_out",
-                "ease_in_out",
-                "ease_in_quad",
-                "ease_out_quad",
-                "ease_in_cubic",
-                "ease_out_cubic",
-            ];
+            // Sourced from transforms.rs so the picker cannot offer a curve
+            // `apply_curve` does not implement — four of the seven it used to list
+            // evaluated to identity.
+            let curves = crate::bindings::transforms::CURVE_TYPES;
             let mut selected = curve_type.clone();
             egui::ComboBox::from_id_salt(format!("xf_curve_{binding_id}_{transform_idx}"))
                 .selected_text(RichText::new(&selected).size(8.0))
                 .width(100.0)
                 .show_ui(ui, |ui| {
-                    for &ct in &curves {
+                    for &ct in curves {
                         if ui
                             .selectable_label(selected == ct, RichText::new(ct).size(8.0))
                             .clicked()
@@ -2466,6 +2479,40 @@ fn draw_matrix_source_picker(
                         });
                         group_header(ui, "Audio \u{2014} Mel", AUDIO_COLOR);
                         for key in &mel_keys {
+                            let info = audio_source_info(key);
+                            let val = bus
+                                .last_snapshot
+                                .get(key.as_str())
+                                .map(|(v, _)| *v)
+                                .unwrap_or(0.0);
+                            draw_source_row(
+                                ui,
+                                key,
+                                &info.friendly,
+                                &info.uniform,
+                                val,
+                                AUDIO_COLOR,
+                                source.as_str() == key.as_str(),
+                                source,
+                            );
+                        }
+                    }
+
+                    // Delta-MFCC (A16 #1467) — bindings-only, like Mel
+                    let mut dmfcc_keys: Vec<String> = bus
+                        .last_snapshot
+                        .keys()
+                        .filter(|k| k.starts_with("audio.dmfcc."))
+                        .cloned()
+                        .collect();
+                    if !dmfcc_keys.is_empty() {
+                        dmfcc_keys.sort_by_key(|k| {
+                            k.strip_prefix("audio.dmfcc.")
+                                .and_then(|n| n.parse::<u32>().ok())
+                                .unwrap_or(99)
+                        });
+                        group_header(ui, "Audio \u{2014} \u{0394}MFCC", AUDIO_COLOR);
+                        for key in &dmfcc_keys {
                             let info = audio_source_info(key);
                             let val = bus
                                 .last_snapshot

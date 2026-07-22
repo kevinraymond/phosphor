@@ -203,6 +203,46 @@ pub const UNIFORM_TARGETS: &[(&str, &str)] = &[
 // Source display helpers
 // ---------------------------------------------------------------------------
 
+/// Display name and group for the v2 (#1505) / v3 (#1629) audio features.
+///
+/// These 28 were collected by `bindings::sources` every frame from the day their
+/// detectors landed, but appeared in neither picker, so the only way to bind one was to
+/// hand-edit `global-bindings.json` — while the README promised all 74 features were
+/// bindable. Their uniform names match the key suffix exactly, so `audio_source_info`'s
+/// generic `u.{short}` fallback is already correct for every one of them; only the
+/// friendly name and sub-group were missing.
+const EXTENDED_SOURCES: &[(&str, &str, &str)] = &[
+    // (key suffix, friendly name, sub-group)
+    ("loudness_m", "Momentary Loudness", "Loudness"),
+    ("loudness_s", "Short-term Loudness", "Loudness"),
+    ("loudness_trend", "Loudness Trend", "Loudness"),
+    ("contrast_0", "Contrast 200 Hz", "Timbre"),
+    ("contrast_1", "Contrast 400 Hz", "Timbre"),
+    ("contrast_2", "Contrast 800 Hz", "Timbre"),
+    ("contrast_3", "Contrast 1.6 kHz", "Timbre"),
+    ("contrast_4", "Contrast 3.2 kHz", "Timbre"),
+    ("contrast_5", "Contrast 6.4 kHz", "Timbre"),
+    ("contrast_mean", "Contrast Mean", "Timbre"),
+    ("timbre_flux", "Timbre Flux", "Timbre"),
+    ("downbeat", "Downbeat", "Beat"),
+    ("bar_phase", "Bar Phase", "Beat"),
+    ("beat_in_bar", "Beat in Bar", "Beat"),
+    ("section_novelty", "Section Novelty", "Structure"),
+    ("buildup", "Build-up", "Structure"),
+    ("drop", "Drop", "Structure"),
+    ("percussive_energy", "Percussive Energy", "Harmonic"),
+    ("harmonic_energy", "Harmonic Energy", "Harmonic"),
+    ("harmonic_ratio", "Harmonic Ratio", "Harmonic"),
+    ("pan", "Pan", "Stereo"),
+    ("stereo_width", "Stereo Width", "Stereo"),
+    ("stereo_corr", "L/R Correlation", "Stereo"),
+    ("pitch", "Pitch", "Pitch"),
+    ("pitch_confidence", "Pitch Confidence", "Pitch"),
+    ("key_class", "Key Root", "Key"),
+    ("key_is_minor", "Minor Key", "Key"),
+    ("key_confidence", "Key Confidence", "Key"),
+];
+
 /// Metadata for an audio source entry in the picker.
 pub struct AudioSourceInfo {
     /// Display name shown in the picker (e.g., "Sub Bass", "kick", "MFCC 5").
@@ -365,8 +405,26 @@ pub fn audio_source_info(key: &str) -> AudioSourceInfo {
                     sub_group: "Mel",
                 };
             }
-            // Fallback
+            if let Some(n) = key.strip_prefix("audio.dmfcc.") {
+                // A16 (#1467): delta-MFCC slopes are bindings-only for the same reason
+                // as mel — no uniform budget for another 13 floats.
+                return AudioSourceInfo {
+                    friendly: format!("ΔMFCC {n}"),
+                    uniform: "(binding only)".into(),
+                    sub_group: "DMFCC",
+                };
+            }
             let short = key.strip_prefix("audio.").unwrap_or(key);
+            if let Some((_, friendly, sub_group)) =
+                EXTENDED_SOURCES.iter().find(|(k, _, _)| *k == short)
+            {
+                return AudioSourceInfo {
+                    friendly: (*friendly).into(),
+                    uniform: format!("u.{short}"),
+                    sub_group,
+                };
+            }
+            // Fallback
             AudioSourceInfo {
                 friendly: short.to_string(),
                 uniform: format!("u.{short}"),
@@ -377,6 +435,11 @@ pub fn audio_source_info(key: &str) -> AudioSourceInfo {
 }
 
 /// Canonical audio source ordering for the picker (by sub-group).
+///
+/// Each sub-group MUST be one contiguous run: `draw_matrix_source_picker` emits a header
+/// every time `sub_group` changes, so a split run renders the same header twice.
+/// `audio.mfcc.*`, `audio.chroma.*`, `audio.mel.*` and `audio.dmfcc.*` are enumerated
+/// dynamically from the live snapshot instead of being listed here.
 pub const AUDIO_SOURCE_ORDER: &[&str] = &[
     // Bands
     "audio.band.0",
@@ -387,6 +450,10 @@ pub const AUDIO_SOURCE_ORDER: &[&str] = &[
     "audio.band.5",
     "audio.band.6",
     "audio.rms",
+    // Loudness
+    "audio.loudness_m",
+    "audio.loudness_s",
+    "audio.loudness_trend",
     // Features
     "audio.kick",
     "audio.centroid",
@@ -395,15 +462,87 @@ pub const AUDIO_SOURCE_ORDER: &[&str] = &[
     "audio.rolloff",
     "audio.bandwidth",
     "audio.zcr",
+    // Timbre
+    "audio.contrast_0",
+    "audio.contrast_1",
+    "audio.contrast_2",
+    "audio.contrast_3",
+    "audio.contrast_4",
+    "audio.contrast_5",
+    "audio.contrast_mean",
+    "audio.timbre_flux",
     // Beat
     "audio.onset",
     "audio.beat",
     "audio.beat_phase",
     "audio.bpm",
     "audio.beat_strength",
-    // Chroma
+    "audio.downbeat",
+    "audio.bar_phase",
+    "audio.beat_in_bar",
+    // Structure
+    "audio.section_novelty",
+    "audio.buildup",
+    "audio.drop",
+    // Harmonic
+    "audio.percussive_energy",
+    "audio.harmonic_energy",
+    "audio.harmonic_ratio",
+    // Stereo
+    "audio.pan",
+    "audio.stereo_width",
+    "audio.stereo_corr",
+    // Pitch
+    "audio.pitch",
+    "audio.pitch_confidence",
+    // Key
+    "audio.key_class",
+    "audio.key_is_minor",
+    "audio.key_confidence",
+    // Chroma — abuts the dynamically-enumerated chroma bins.
     "audio.dominant_chroma",
 ];
+
+/// The static audio sources grouped for the SOURCES column, as
+/// `(display label, collapse id, keys)`.
+///
+/// Derived from [`AUDIO_SOURCE_ORDER`] so the column and the expanded-card picker cannot
+/// list different things — they did, and both were missing the same 28 features.
+/// `Chroma` is excluded: `dominant_chroma` heads the dynamically-built chroma group,
+/// alongside the twelve pitch-class bins.
+pub fn audio_source_groups() -> Vec<(String, String, Vec<&'static str>)> {
+    let mut out: Vec<(String, String, Vec<&'static str>)> = Vec::new();
+    for &key in AUDIO_SOURCE_ORDER {
+        let sub_group = audio_source_info(key).sub_group;
+        if sub_group == "Chroma" {
+            continue;
+        }
+        match out.last_mut() {
+            Some((label, _, keys)) if label.ends_with(sub_group) => keys.push(key),
+            _ => out.push((
+                format!("Audio \u{00b7} {sub_group}"),
+                format!("audio_{}", sub_group.to_lowercase()),
+                vec![key],
+            )),
+        }
+    }
+    out
+}
+
+/// Collapse ids for every audio group, static and dynamic — what "Collapse all" writes
+/// and what the default-collapsed set is chosen from.
+pub fn audio_group_ids() -> Vec<String> {
+    let mut ids: Vec<String> = audio_source_groups()
+        .into_iter()
+        .map(|(_, id, _)| id)
+        .collect();
+    ids.extend(
+        ["audio_mfcc", "audio_chroma", "audio_mel", "audio_dmfcc"]
+            .iter()
+            .map(|s| s.to_string()),
+    );
+    ids
+}
 
 // ---------------------------------------------------------------------------
 // Color / badge helpers
@@ -722,4 +861,75 @@ pub fn draw_source_row(
     }
 
     resp.on_hover_text(key);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_collected_audio_source_is_reachable_from_the_picker() {
+        // 28 of the 74 audio features were collected every frame and listed in neither
+        // picker, so the only way to bind one was to hand-edit global-bindings.json —
+        // while the README promised any of the 74 could drive any parameter.
+        let snap = crate::bindings::sources::collect_audio(&Default::default());
+        let listed: std::collections::HashSet<&str> = AUDIO_SOURCE_ORDER.iter().copied().collect();
+        let missing: Vec<&String> = snap
+            .keys()
+            // mfcc/chroma bins are enumerated from the live snapshot, not this table
+            .filter(|k| !k.starts_with("audio.mfcc.") && !k.starts_with("audio.chroma."))
+            .filter(|k| !listed.contains(k.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "collected but unreachable in the picker: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn audio_source_order_keeps_sub_groups_contiguous() {
+        // draw_matrix_source_picker emits a header on every sub_group change, and
+        // audio_source_groups() starts a new group the same way, so a sub-group split
+        // across two runs of the table renders its header twice.
+        let mut seen = std::collections::HashSet::new();
+        let mut prev = "";
+        for &k in AUDIO_SOURCE_ORDER {
+            let g = audio_source_info(k).sub_group;
+            if g != prev {
+                assert!(
+                    seen.insert(g),
+                    "sub-group '{g}' appears in two separate runs"
+                );
+                prev = g;
+            }
+        }
+    }
+
+    #[test]
+    fn every_listed_audio_source_has_a_real_name() {
+        // A key that falls through to the generic arm shows its raw id in the picker.
+        for &k in AUDIO_SOURCE_ORDER {
+            let info = audio_source_info(k);
+            assert_ne!(
+                info.sub_group, "Other",
+                "'{k}' has no display metadata — it would render as a raw source id"
+            );
+        }
+    }
+
+    #[test]
+    fn source_column_groups_cover_the_order_table() {
+        // The column derives its groups from AUDIO_SOURCE_ORDER; only dominant_chroma
+        // is meant to be absent (it heads the dynamically-built Chroma group).
+        let grouped: Vec<&str> = audio_source_groups()
+            .into_iter()
+            .flat_map(|(_, _, keys)| keys)
+            .collect();
+        let expected: Vec<&str> = AUDIO_SOURCE_ORDER
+            .iter()
+            .copied()
+            .filter(|k| *k != "audio.dominant_chroma")
+            .collect();
+        assert_eq!(grouped, expected);
+    }
 }

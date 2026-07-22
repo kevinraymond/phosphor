@@ -47,7 +47,7 @@ pub struct AudioFeatures {
     // Derived: dominant pitch class (argmax of chroma), normalized 0-1
     pub dominant_chroma: f32,
 
-    // ---- Reserved tail (batched ABI bump #1505) — 0.0 until each detector lands ----
+    // ---- Batched ABI bump #1505 ("v2"). All detectors below have landed. ----
     // A10 loudness (#1461): perceptual loudness envelope
     pub loudness_m: f32,     // momentary loudness (LUFS-like, normalized)
     pub loudness_s: f32,     // short-term loudness
@@ -73,7 +73,7 @@ pub struct AudioFeatures {
     pub buildup: f32,         // riser/tension estimate
     pub drop: f32,            // drop/impact detection
 
-    // ---- Reserved tail (batched ABI bump #1629, "v3") — 0.0 until each detector lands ----
+    // ---- Batched ABI bump #1629 ("v3"). All detectors below have landed. ----
     // A14 HPSS (#1465): harmonic/percussive split energies
     pub percussive_energy: f32, // transient (percussive-masked) energy, dB-mapped 0-1
     pub harmonic_energy: f32,   // sustained (harmonic-masked) energy, dB-mapped 0-1

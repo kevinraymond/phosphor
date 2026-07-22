@@ -69,8 +69,10 @@ pub fn collect_audio(features: &AudioFeatures) -> SourceSnapshot {
         (features.dominant_chroma, raw(features.dominant_chroma)),
     );
 
-    // Reserved audio features (batched ABI bumps #1505 "v2" + #1629 "v3") — 0.0 until each
-    // detector lands, but exposed as sources now so bindings can target them ahead of time.
+    // Audio features added by the batched ABI bumps #1505 ("v2") and #1629 ("v3").
+    // Every detector below has landed; the "0.0 until each detector lands" note this
+    // comment used to carry outlived them by a release and is why these 28 sat here,
+    // collected every frame, listed in neither picker, until #1896.
     let reserved = [
         // v2 (#1505)
         ("audio.loudness_m", features.loudness_m),
