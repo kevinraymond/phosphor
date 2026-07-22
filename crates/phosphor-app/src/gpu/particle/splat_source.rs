@@ -63,9 +63,9 @@ pub struct SplatCloud {
 pub struct DemoScene {
     pub name: &'static str,
     pub file: &'static str,
-    /// Download URL. EMPTY until the bespoke captured scene is hosted
-    /// (board #1859 — a stable GitHub-release-asset URL is the plan); the
-    /// panel hides the Download button and shows a placement hint instead.
+    /// Download URL (raw `.ply`/`.splat`, not an archive). Hosted as a GitHub
+    /// release asset on the non-version `demo-assets` tag; `ureq` follows the
+    /// 302 to the CDN. Empty disables the Download button (shows a hint).
     pub url: &'static str,
     /// Approximate size shown in the confirm dialog.
     pub size_mb: u32,
@@ -73,9 +73,9 @@ pub struct DemoScene {
 
 pub const DEMO_SCENES: &[DemoScene] = &[DemoScene {
     name: "default",
-    file: "phosphor_demo.splat",
-    url: "",
-    size_mb: 64,
+    file: "phosphor_demo.ply",
+    url: "https://github.com/kevinraymond/fosfora/releases/download/demo-assets/trooper.ply",
+    size_mb: 42,
 }];
 
 pub fn demo_scene(name: &str) -> Option<&'static DemoScene> {
@@ -1226,7 +1226,7 @@ mod tests {
         // Known demo maps under splat_dir.
         let p = resolve_source_path("demo:default").unwrap();
         assert!(p.starts_with(splat_dir()));
-        assert!(p.ends_with("phosphor_demo.splat"));
+        assert!(p.ends_with("phosphor_demo.ply"));
         // Absolute passes through.
         let abs = resolve_source_path("/tmp/scene.ply").unwrap();
         assert_eq!(abs, PathBuf::from("/tmp/scene.ply"));
