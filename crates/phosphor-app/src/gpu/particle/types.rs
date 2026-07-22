@@ -191,7 +191,7 @@ pub struct ParticleUniforms {
     pub cam_focal: f32,         // focal-length multiplier = cot(fov/2), volumetric convention
     pub splat_focal_depth: f32, // DoF focal plane in view-depth units (centroid EMA + focal_bias)
     pub splat_explode: f32,     // drop envelope: max(env·exp(−dt/0.45), drop)
-    pub _pad_splat0: f32,       // spare slots for the next batched feature
+    pub splat_sorted: f32, // 1.0 = sorted-composite path (sim writes raw intrinsic alpha); 0.0 = OIT
     pub _pad_splat1: f32,
     // Total = 896 bytes
 }
@@ -619,6 +619,9 @@ fn default_scale() -> f32 {
 fn default_one_u32() -> u32 {
     1
 }
+fn default_true() -> bool {
+    true
+}
 
 /// Morph target definition: specifies a target shape for particle morphing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -648,6 +651,12 @@ pub struct SplatDef {
     /// (captured scenes are often tilted; this levels them without re-export)
     #[serde(default)]
     pub rotation_degrees: [f32; 3],
+    /// Depth-sorted alpha compositing (true, #1800) vs the weighted-average OIT
+    /// fallback (false). Sorting matches SuperSplat crispness (front-to-back
+    /// occlusion); OIT is the cheaper low-end path. Load-time — toggling
+    /// rebuilds the particle system (it changes which pipelines exist).
+    #[serde(default = "default_true")]
+    pub sort: bool,
 }
 
 /// .pfx particle definition (JSON).
@@ -1179,6 +1188,7 @@ mod tests {
             source: "demo:default".to_string(),
             scene_scale: 1.5,
             rotation_degrees: [0.0, 90.0, -12.5],
+            sort: false,
         };
         let json = serde_json::to_string(&def).unwrap();
         let back: SplatDef = serde_json::from_str(&json).unwrap();
@@ -1193,5 +1203,6 @@ mod tests {
         assert_eq!(splat.source, "scene.ply");
         assert_eq!(splat.scene_scale, 1.0);
         assert_eq!(splat.rotation_degrees, [0.0, 0.0, 0.0]);
+        assert!(splat.sort); // defaults on
     }
 }

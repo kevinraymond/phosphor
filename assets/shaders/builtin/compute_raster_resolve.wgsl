@@ -10,9 +10,11 @@ struct ResolveUniforms {
 
 // Mode 2 coverage: opacity from the accumulated weight sum. The sim folds an
 // OIT_ALPHA_SCALE of 0.125 into every per-splat weight (i32 overflow headroom
-// at 3M splats); this gain compensates it (8×) plus a density factor (~1.5)
-// so a handful of overlapping splats already reads solid.
-const COVERAGE_GAIN: f32 = 12.0;
+// at 3M splats); this gain compensates it (8×) plus a density factor so a
+// solid region of overlapping splats saturates to fully opaque instead of the
+// ~55% translucency the old 12.0 left. Only the mode-2 (Splat #1800) branch
+// reads this — Splat is the sole "blend":"oit" effect.
+const COVERAGE_GAIN: f32 = 40.0;
 
 @group(0) @binding(0) var<storage, read> fb_r: array<i32>;
 @group(0) @binding(1) var<storage, read> fb_g: array<i32>;

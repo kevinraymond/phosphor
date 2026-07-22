@@ -83,6 +83,14 @@ fn rand_dir3(seed: u32) -> vec3f {
 // (3M × 0.125 = 375k < 524k). The OIT resolve divides it back out; only
 // coverage needs the matching COVERAGE_GAIN compensation (resolve shader).
 const OIT_ALPHA_SCALE: f32 = 0.125;
+// OIT-only opacity accumulation boost. Weighted-average OIT must lean on the
+// splats' own weight to build a solid surface, and real captures are very
+// low-opacity (median sigmoid ≈ 0.03); the fallback was tuned around an
+// opacity_gain of 4.0. The sorted path now owns the shared `opacity_gain`
+// default at 1.0 (raw, SuperSplat-faithful), so the OIT branch reintroduces the
+// 4× accumulation here — one .pfx default serves both paths without regressing
+// the fallback. Applied only when !splat_sorted.
+const OIT_OPACITY_BOOST: f32 = 4.0;
 // Reform time constant ≈ 0.45 s (matches the drop envelope decay).
 const RETURN_RATE: f32 = 2.2;
 // World-space displacement clamp — keeps exploded splats recoverable.
@@ -90,6 +98,22 @@ const MAX_OFF: f32 = 3.0;
 // Final-alpha floor below which a splat cannot contribute a fixed-point
 // quantum — skip mark_alive so the raster never sees it.
 const ALPHA_CULL: f32 = 1.0 / 512.0;
+// Standard 3DGS antialiasing dilation (Kerbl et al.): a fixed px² added to the
+// 2D covariance diagonal so every splat — including the degenerate thin
+// needles/surfels typical of real captures (anisotropy ~1000:1, sub-pixel
+// minor axis) — covers at least ~1px and merges into a surface instead of
+// aliasing into speckle. 0.3 is the canonical value; do NOT drop it, it is
+// load-bearing for surface smoothness, not fog.
+const AA_FLOOR: f32 = 0.3;
+// Front-favouring OIT depth weight. Since the resolve averages Σc·w/Σw with no
+// sorting, a near-bias lets the nearest surface lead the colour → less
+// front+back grey blend. FLOORED (WZ_FLOOR) so far splats still register in the
+// framebuffer and contribute coverage/opacity — the weight only reshades the
+// average, it must never gate visibility (that is the intrinsic-alpha cull
+// below). K≈4 over the [dist−1, dist+1] span gives a ~6× front:back lean; too
+// steep risks nearest-splat flicker as the camera orbits.
+const OIT_DEPTH_K: f32 = 4.0;
+const WZ_FLOOR: f32 = 0.15;
 
 @compute @workgroup_size(256)
 fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
@@ -200,7 +224,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     // (energy comp uses the uncapped determinant) while the footprint stays
     // bounded — far-defocus reads as fade at a fraction of the raster cost.
     let coc = param(3u) * 6.0 * abs(t.z - u.splat_focal_depth) / max(t.z, 0.1);
-    let blur = 0.3 + coc * coc;
+    let blur = AA_FLOOR + coc * coc;
     let det_full = max((caa + blur) * (ccc + blur) - cbb * cbb, 1e-8);
     let blur_vis = min(blur, 3.0);
     caa += blur_vis;
@@ -209,18 +233,28 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     var alpha = base.a * param(5u) * sqrt(det_core / det_full);
 
     // Footprint radius from the major eigenvalue, cutoff q = 12 (exp(−6)).
-    // The 8px cap PRESERVES the raster's 3×3-tile scatter bound: shrink the
-    // covariance uniformly (keeps eccentricity) instead of clipping.
+    // The cap shrinks the covariance uniformly (keeps eccentricity) instead of
+    // clipping. OIT keeps the 8px 3×3-tile scatter bound (load-bearing for the
+    // raster); the sorted billboard draw has no tile bound, so it matches
+    // SuperSplat's per-axis vmin = min(1024, viewport) — the 8px cap was the
+    // pointillist-crust culprit at close zoom (surface splats want 20–100px).
     let lmax = 0.5 * (caa + ccc) + sqrt(max(0.25 * (caa - ccc) * (caa - ccc) + cbb * cbb, 0.0));
     var r_px = sqrt(12.0 * lmax);
-    if r_px > 8.0 {
-        let shrink = (8.0 / r_px) * (8.0 / r_px);
+    let r_cap = select(8.0, min(1024.0, min(u.resolution.x, u.resolution.y)), u.splat_sorted > 0.5);
+    if r_px > r_cap {
+        let shrink = (r_cap / r_px) * (r_cap / r_px);
         caa *= shrink;
         cbb *= shrink;
         ccc *= shrink;
-        det = max(caa * ccc - cbb * cbb, 1e-8);
-        r_px = 8.0;
+        r_px = r_cap;
     }
+    // Keep the 2D covariance diagonal f16-safe even after a pathological shrink
+    // (SuperSplat floors the minor eigenvalue at 0.1) — else a thin-needle conic
+    // overflows f16 and NaN-poisons the sorted blend (the black-square artifact).
+    // No-op for normal splats (diagonals already ≥ AA floor 0.3).
+    caa = max(caa, 0.05);
+    ccc = max(ccc, 0.05);
+    det = max(caa * ccc - cbb * cbb, 1e-8);
     // Conic = inverse covariance, packed f16 for the raster (flags.zw).
     let inv_det = 1.0 / det;
     let conic_a = ccc * inv_det;
@@ -229,8 +263,11 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     let r_ndc = r_px * 2.0 / u.resolution.y; // raster: radius_px = vel_size.w·H/2
 
     // ---- OIT weight + obstacle carve + cull ----
-    // Bounded near-favoring depth weight (scene spans [dist−1, dist+1]).
-    let wz = clamp((u.cam_distance + 1.0 - t.z) * 0.5, 0.0, 1.0) * 0.75 + 0.25;
+    // Front-favouring depth weight (scene spans [dist−1, dist+1]), floored so
+    // the far half of the figure still registers coverage instead of averaging
+    // toward the background. Near splats lead the OIT colour average.
+    let dnorm = clamp((t.z - (u.cam_distance - 1.0)) * 0.5, 0.0, 1.0);
+    let wz = WZ_FLOOR + (1.0 - WZ_FLOOR) * exp(-OIT_DEPTH_K * dnorm);
     // Crowd silhouettes punch holes through the captured scene: alpha-carve
     // at the projected position (a 2D clip-space bounce is meaningless for a
     // re-projected 3D point). obstacle_alpha() is 0 when no obstacle is armed.
@@ -239,16 +276,29 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         u.obstacle_threshold + 0.1,
         obstacle_alpha(ndc)
     );
-    let a_out = alpha * wz * carve * OIT_ALPHA_SCALE;
+    // Intrinsic (depth-INDEPENDENT) visibility gates the cull, so the depth
+    // weight only reshades the average and can never delete the far half of
+    // the figure — that regression came from culling on the weighted a_out.
+    // OIT accumulates the 4×-boosted alpha; sorted composites raw opacity.
+    let alpha_oit = alpha * OIT_OPACITY_BOOST;
+    let vis = alpha_oit * carve * OIT_ALPHA_SCALE;
+    let a_out = vis * wz;
     let off_screen = any(abs(ndc) > vec2f(1.0 + r_ndc * 2.0 + 0.05, 1.0 + r_ndc * 2.0 + 0.05));
-    let culled = a_out < ALPHA_CULL || off_screen;
+    // Sorted path composites raw intrinsic alpha, so it must cull on that (not the
+    // boosted, ×0.125-folded `vis` the OIT accumulation uses).
+    let cull_alpha = select(vis, alpha * carve, u.splat_sorted > 0.5);
+    let culled = cull_alpha < ALPHA_CULL || off_screen;
 
     var p: Particle;
     p.pos_life = vec4f(ndc, t.z, select(1.0, 0.0, culled));
     p.vel_size = vec4f(off, r_ndc); // state ALWAYS persisted, even culled
+    // Sorted path composites front-to-back with hardware alpha-over, so it wants
+    // the RAW intrinsic alpha (opacity·falloff·carve) — no OIT depth-weight wz
+    // and no OIT_ALPHA_SCALE fold. The OIT path keeps a_out.
+    let a_sorted = clamp(alpha * carve, 0.0, 1.0);
     p.color = vec4f(
         clamp(base.rgb * (0.5 + param(7u) * 1.5), vec3f(0.0), vec3f(1.0)),
-        a_out
+        select(a_out, a_sorted, u.splat_sorted > 0.5)
     );
     // .zw = packed screen conic for the raster's anisotropic branch.
     p.flags = vec4f(

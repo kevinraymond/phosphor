@@ -1324,16 +1324,74 @@ mod tests {
         let effect: PfxEffect =
             serde_json::from_str(include_str!("../../../../assets/effects/splat.pfx")).unwrap();
         let mut def = effect.particles.unwrap();
-        // 60k: above TILED_THRESHOLD once alive, so early frames exercise the
-        // direct path and steady state exercises the tiled path.
-        def.max_count = 60_000;
+        // Real-scene override: SPLAT_PLY=/path/to/scene.ply runs the production
+        // decode path (parse + cull + normalize) instead of the synthetic
+        // torus-knot, so tuning happens against actual capture geometry (the
+        // synthetic scene is too thin/front-facing to reproduce dense-figure
+        // artefacts). SPLAT_CAM_DIST overrides the orbit radius (default 1.6 =
+        // whole figure; smaller = zoom in).
+        let ply_path = std::env::var("SPLAT_PLY").ok();
+        let env_f = |k: &str, d: f32| {
+            std::env::var(k)
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(d)
+        };
+        let cam_dist = env_f("SPLAT_CAM_DIST", 1.6);
+        let splat_scale = env_f("SPLAT_SCALE", 1.0);
+        let opacity_gain = env_f("SPLAT_OPACITY", 1.0);
+        let exposure = env_f("SPLAT_EXPOSURE", 0.33);
+        // SPLAT_SORT=0 forces the OIT fallback for an A/B against the sorted path.
+        if let Ok(v) = std::env::var("SPLAT_SORT") {
+            if let Some(splat) = def.splat.as_mut() {
+                splat.sort = v != "0";
+            }
+        }
+        if ply_path.is_some() {
+            def.max_count = 1_000_000; // keep every splat of a ~800k capture
+        } else {
+            // 60k: above TILED_THRESHOLD once alive, so early frames exercise
+            // the direct path and steady state exercises the tiled path.
+            def.max_count = 60_000;
+        }
         def.max_scaled_count = 0;
 
-        let (w, h) = (960u32, 540u32);
+        // SPLAT_W/SPLAT_H override the probe resolution — the 8px-cap regression
+        // only shows at real res (1920×1080), not the 960×540 default.
+        let env_u = |k: &str, d: u32| {
+            std::env::var(k)
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(d)
+        };
+        let (w, h) = (env_u("SPLAT_W", 960), env_u("SPLAT_H", 540));
         let fmt = wgpu::TextureFormat::Rgba8UnormSrgb;
+        // Use the effect's own scene transform (incl. the Y-down→Y-up 180°-X flip)
+        // so the offscreen A/B exercises the real load path, not an unrotated one.
+        let scene_scale = def.splat.as_ref().map_or(1.0, |s| s.scene_scale);
+        let scene_rot = def
+            .splat
+            .as_ref()
+            .map_or([0.0, 0.0, 0.0], |s| s.rotation_degrees);
         let mut ps = ParticleSystem::new(&device, &queue, fmt, &def, &sim_src, false);
         ps.resize_compute_raster(&device, w, h);
-        let cloud = generate_test_scene(50_000);
+        let cloud = if let Some(p) = ply_path.as_ref() {
+            use std::sync::atomic::{AtomicBool, AtomicU8};
+            let prog = AtomicU8::new(0);
+            let cancel = AtomicBool::new(false);
+            crate::gpu::particle::splat_source::load_splat_file(
+                std::path::Path::new(p),
+                1_000_000,
+                scene_scale,
+                scene_rot,
+                &prog,
+                &cancel,
+            )
+            .expect("load SPLAT_PLY")
+        } else {
+            generate_test_scene(50_000)
+        };
+        eprintln!("scene splats: {}", cloud.count);
         ps.upload_splat_cloud(&device, &queue, &cloud);
 
         let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -1425,10 +1483,23 @@ mod tests {
                     0.0
                 };
                 // Frozen param slots 0–7 (sim) — see splat.pfx.
-                ps.uniforms.effect_params = [0.8, 0.75, 0.5, s.focus, 1.0, 1.0, 0.3, 0.33];
+                ps.uniforms.effect_params = [
+                    0.8,
+                    0.75,
+                    0.5,
+                    s.focus,
+                    splat_scale,
+                    opacity_gain,
+                    0.3,
+                    exposure,
+                ];
                 // Slots 8–11 (CPU driver): orbit, distance, pitch, focal bias.
-                ps.splat_ui_params = [0.3, 1.6, 0.15, 0.0];
+                // SPLAT_ORBIT=0 + SPLAT_YAW freezes a chosen viewing angle.
+                ps.splat_ui_params = [env_f("SPLAT_ORBIT", 0.3), cam_dist, 0.15, 0.0];
                 ps.update_splat_driver();
+                if std::env::var("SPLAT_YAW").is_ok() {
+                    ps.uniforms.cam_yaw = env_f("SPLAT_YAW", 0.0);
+                }
 
                 // On the final frame render into the capture target instead
                 // (its texture is RENDER_ATTACHMENT | COPY_SRC, not COPY_DST).
@@ -1493,42 +1564,49 @@ mod tests {
                         .expect("save png");
                     eprintln!("wrote {path} (mean {mean:.4})");
 
-                    // Not black (scene visible), not blown out (an i32
-                    // accumulator wrap reads as garbage brightness).
-                    assert!(
-                        mean > 0.004,
-                        "{} rendered near-black (mean {mean:.4})",
-                        s.name
-                    );
-                    assert!(mean < 0.90, "{} blew out (mean {mean:.4})", s.name);
-                    // Background must show through empty space: the scene is
-                    // centered, so the top-left corner is bg-only (the 0.02
-                    // linear clear ≈ 40/255 in sRGB — allow slack).
-                    assert!(
-                        data[0] < 70 && data[1] < 70 && data[2] < 70,
-                        "{}: corner not background ({:?})",
-                        s.name,
-                        &data[0..4]
-                    );
+                    // Sanity guards apply to the synthetic scene only; a real
+                    // SPLAT_PLY render (possibly zoomed) legitimately fills the
+                    // corner and varies in mean — it is a debug capture.
+                    if ply_path.is_none() {
+                        // Not black (scene visible), not blown out (an i32
+                        // accumulator wrap reads as garbage brightness).
+                        assert!(
+                            mean > 0.004,
+                            "{} rendered near-black (mean {mean:.4})",
+                            s.name
+                        );
+                        assert!(mean < 0.90, "{} blew out (mean {mean:.4})", s.name);
+                        // Background must show through empty space: the scene is
+                        // centered, so the top-left corner is bg-only (the 0.02
+                        // linear clear ≈ 40/255 in sRGB — allow slack).
+                        assert!(
+                            data[0] < 70 && data[1] < 70 && data[2] < 70,
+                            "{}: corner not background ({:?})",
+                            s.name,
+                            &data[0..4]
+                        );
+                    }
                     captures.insert(s.name, data);
                 }
             }
         }
 
         // The drop must visibly shatter the scene vs. the same state without
-        // it (mean absolute per-pixel difference).
-        let a = &captures["groove"];
-        let b = &captures["drop_explode"];
-        let diff = a
-            .iter()
-            .zip(b.iter())
-            .map(|(&x, &y)| (x as f64 - y as f64).abs())
-            .sum::<f64>()
-            / (a.len() as f64 * 255.0);
-        assert!(
-            diff > 0.003,
-            "drop_explode is indistinguishable from groove (mean |Δ| {diff:.5})"
-        );
+        // it (mean absolute per-pixel difference). Synthetic scene only.
+        if ply_path.is_none() {
+            let a = &captures["groove"];
+            let b = &captures["drop_explode"];
+            let diff = a
+                .iter()
+                .zip(b.iter())
+                .map(|(&x, &y)| (x as f64 - y as f64).abs())
+                .sum::<f64>()
+                / (a.len() as f64 * 255.0);
+            assert!(
+                diff > 0.003,
+                "drop_explode is indistinguishable from groove (mean |Δ| {diff:.5})"
+            );
+        }
     }
 
     // Headless wall-clock perf run for the #1800 go/no-go gate (≥60 FPS at

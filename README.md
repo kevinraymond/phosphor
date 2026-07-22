@@ -259,6 +259,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, the effect creati
 - [MiDaS](https://github.com/isl-org/MiDaS) (Intel ISL) — Monocular depth estimation model
 - [ONNX Runtime](https://onnxruntime.ai) via [ort](https://github.com/pykeio/ort) — ML inference
 
+**Gaussian Splatting (Splat effect)**
+- [SuperSplat](https://github.com/playcanvas/supersplat) (PlayCanvas) — Reference 3DGS viewer/editor; the Splat effect's sorted renderer was matched against it side-by-side, and its [PlayCanvas engine](https://github.com/playcanvas/engine) gsplat implementation (renormalized Gaussian falloff, EWA covariance projection, front-to-back alpha compositing) guided the render math
+- [3D Gaussian Splatting for Real-Time Radiance Field Rendering](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) (Kerbl, Kopanas, Leimkühler, Drettakis — INRIA) — The technique itself, incl. the anti-aliasing covariance dilation
+
 **Algorithms & Techniques**
 - [Reynolds Boids](https://www.red3d.com/cwr/boids/) (Craig Reynolds) — Flocking behavior baseline for Murmur effect
 - Vicsek model — Noise-driven order-chaos phase transitions in Murmur

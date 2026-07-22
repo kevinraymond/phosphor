@@ -142,7 +142,7 @@ struct ParticleUniforms {
     cam_focal: f32,         // focal-length multiplier = cot(fov/2), volumetric convention
     splat_focal_depth: f32, // DoF focal plane in view-depth units
     splat_explode: f32,     // drop envelope: max(env·exp(−dt/0.45), drop)
-    _pad_splat0: f32,
+    splat_sorted: f32,      // 1.0 = sorted-composite path (raw intrinsic alpha); 0.0 = OIT
     _pad_splat1: f32,
 }
 

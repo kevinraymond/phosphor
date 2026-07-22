@@ -47,6 +47,8 @@ pub struct ParticleInfo {
     pub builtin_images: Vec<String>,
     // Splat scene state (#1800)
     pub has_splat: bool,
+    /// Sorted alpha-over path active (vs weighted-average OIT). Drives the badge.
+    pub splat_sorted: bool,
     /// Loaded scene filename, or empty when no scene has landed yet.
     pub splat_scene_name: String,
     /// Splats uploaded (post cull/subsample) / splats in the source file.
@@ -127,8 +129,13 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
     // All labels in a single wrapping row
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        // Blend mode
-        feature_badge(ui, &info.blend_mode, tc.text_secondary);
+        // Blend mode — a sorted splat effect bypasses the OIT framebuffer, so show
+        // the true active path ("sorted") rather than the pfx blend string ("oit").
+        if info.splat_sorted {
+            feature_badge(ui, "sorted", tc.accent);
+        } else {
+            feature_badge(ui, &info.blend_mode, tc.text_secondary);
+        }
         // Max scaled count
         if info.max_scaled_count > 0 {
             feature_badge_with_tooltip(

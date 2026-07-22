@@ -45,7 +45,7 @@ struct PostParams {
     time: f32,
     rms: f32,
     alpha_from_luma: f32,
-    _pad: f32,
+    tonemap_mode: f32, // 0 = ACES (house look), 1 = linear passthrough (SuperSplat-faithful)
 }
 
 pub struct PostProcessChain {
@@ -283,7 +283,11 @@ impl PostProcessChain {
             time,
             rms,
             alpha_from_luma: if alpha_from_luma { 1.0 } else { 0.0 },
-            _pad: 0.0,
+            tonemap_mode: if overrides.tonemap == "linear" {
+                1.0
+            } else {
+                0.0
+            },
         };
         queue.write_buffer(
             &self.post_params_buffer,

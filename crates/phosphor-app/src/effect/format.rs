@@ -60,10 +60,18 @@ pub struct PostProcessDef {
     pub vignette_enabled: bool,
     #[serde(default = "default_true")]
     pub grain_enabled: bool,
+    /// Tonemap operator: "aces" (default, Phosphor house look) or "linear"
+    /// (raw passthrough clamp, matching SuperSplat for the Splat effect).
+    #[serde(default = "default_tonemap")]
+    pub tonemap: String,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_tonemap() -> String {
+    "aces".to_string()
 }
 
 fn default_bloom_threshold() -> f32 {
@@ -95,6 +103,7 @@ impl Default for PostProcessDef {
             ca_enabled: true,
             vignette_enabled: true,
             grain_enabled: true,
+            tonemap: "aces".to_string(),
         }
     }
 }

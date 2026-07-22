@@ -7,6 +7,7 @@ pub mod obstacle;
 pub mod source_loader;
 pub mod spatial_hash;
 pub mod splat;
+pub mod splat_sort;
 pub mod splat_source;
 pub mod sprite;
 pub mod symbiosis;

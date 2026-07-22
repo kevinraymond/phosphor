@@ -14,7 +14,7 @@ struct PostParams {
     time: f32,
     rms: f32,
     alpha_from_luma: f32,
-    _pad: f32,
+    tonemap_mode: f32,     // 0 = ACES, 1 = linear passthrough (SuperSplat-faithful)
 }
 @group(0) @binding(4) var<uniform> post: PostParams;
 
@@ -55,8 +55,13 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
     let bloom_mix = post.bloom_intensity * (0.7 + post.rms * 0.6);
     color += bloom * bloom_mix;
 
-    // ACES tonemap
-    color = aces_tonemap(color);
+    // Tonemap: ACES (house look) or linear passthrough (SuperSplat-faithful,
+    // preserves raw sRGB contrast — no highlight compression / dark lift).
+    if post.tonemap_mode < 0.5 {
+        color = aces_tonemap(color);
+    } else {
+        color = clamp(color, vec3f(0.0), vec3f(1.0));
+    }
 
     // Vignette
     let vignette_dist = length(uv - 0.5) * 1.414; // normalize to 0-1 at corners

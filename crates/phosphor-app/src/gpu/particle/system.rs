@@ -184,6 +184,19 @@ pub struct ParticleSystem {
     // Compute rasterizer (atomic framebuffer for sub-pixel particles)
     compute_raster: Option<ComputeRasterizer>,
 
+    // Sorted 3DGS path (Splat #1800, `sort: true`): depth counting sort +
+    // sorted-billboard alpha-over draw, replacing the OIT compute raster to get
+    // true front-to-back occlusion. Mutually exclusive with `compute_raster`.
+    splat_sorted: bool,
+    splat_sorter: Option<super::splat_sort::SplatSorter>,
+    splat_render_pipeline: Option<RenderPipeline>,
+    splat_render_bind_groups: Option<[BindGroup; 2]>,
+    /// Half-extent of the scene in view-depth units, for the sort's near/far
+    /// bracket around `cam_distance`. Scene is normalized to r≈1; 2.0 leaves
+    /// headroom for the tail beyond p95 so the figure never clamps into the end
+    /// buckets (exploded outliers may, harmlessly).
+    scene_depth_span: f32,
+
     // Volumetric mode (R3): particle density 3D ray marching. Lazily built on
     // first enable (see `init_volumetric`); replaces the particle render when on.
     volumetric: Option<VolumetricRenderer>,
@@ -984,6 +997,10 @@ impl ParticleSystem {
             (None, None, None, None, None, None, Vec::new(), 0)
         };
 
+        // Sorted 3DGS path (#1800): a splat effect with `sort: true` replaces the
+        // OIT compute raster with a depth sort + sorted-billboard alpha-over draw.
+        let splat_sorted = def.splat.as_ref().is_some_and(|s| s.sort);
+
         // --- Compute rasterizer (optional) ---
         let use_compute_raster = match def.render_mode.as_str() {
             "compute" => {
@@ -1005,6 +1022,8 @@ impl ParticleSystem {
             }
             _ => false, // "billboard" or unknown
         };
+        // The sorted path owns rendering itself — don't also build the OIT raster.
+        let use_compute_raster = use_compute_raster && !splat_sorted;
         let compute_raster = if use_compute_raster {
             // Use a default 1920x1080 size; will be resized on first frame
             let (cr_w, cr_h) = (1920, 1080);
@@ -1025,6 +1044,108 @@ impl ParticleSystem {
             ))
         } else {
             None
+        };
+
+        // --- Sorted 3DGS resources (#1800) ---
+        // Depth counting sort + a sorted-billboard alpha-over pipeline (reuses
+        // the render_bgl, binding 5 = the sorted-index buffer).
+        let (splat_sorter, splat_render_pipeline, splat_render_bind_groups) = if splat_sorted {
+            let sorter = super::splat_sort::SplatSorter::new(
+                device,
+                max_particles,
+                &pos_life_buffers,
+                &alive_index_buffers,
+                &counter_buffer,
+            );
+            let splat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("splat-render"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("../../../../../assets/shaders/builtin/splat_render.wgsl").into(),
+                ),
+            });
+            let splat_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some("splat-render-layout"),
+                bind_group_layouts: &[&render_bgl],
+                push_constant_ranges: &[],
+            });
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("splat-render-pipeline"),
+                layout: Some(&splat_layout),
+                vertex: VertexState {
+                    module: &splat_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: PipelineCompilationOptions::default(),
+                },
+                fragment: Some(FragmentState {
+                    module: &splat_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(ColorTargetState {
+                        format: hdr_format,
+                        // Canonical 3DGS src-over; correct because the draw is a
+                        // single instanced call in far→near order.
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::SrcAlpha,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: PipelineCompilationOptions::default(),
+                }),
+                primitive: PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
+            let sorted = sorter.sorted_indices();
+            let make_bg = |i: usize| {
+                device.create_bind_group(&BindGroupDescriptor {
+                    label: Some("splat-render-bg"),
+                    layout: &render_bgl,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: pos_life_buffers[i].as_entire_binding(),
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: vel_size_buffers[i].as_entire_binding(),
+                        },
+                        BindGroupEntry {
+                            binding: 2,
+                            resource: color_buffers[i].as_entire_binding(),
+                        },
+                        BindGroupEntry {
+                            binding: 3,
+                            resource: flags_buffers[i].as_entire_binding(),
+                        },
+                        BindGroupEntry {
+                            binding: 4,
+                            resource: render_uniform_buffer.as_entire_binding(),
+                        },
+                        BindGroupEntry {
+                            binding: 5,
+                            resource: sorted.as_entire_binding(),
+                        },
+                    ],
+                })
+            };
+            let bgs = [make_bg(0), make_bg(1)];
+            (Some(sorter), Some(pipeline), Some(bgs))
+        } else {
+            (None, None, None)
         };
 
         // --- WBOIT resources (optional) ---
@@ -1158,6 +1279,11 @@ impl ParticleSystem {
             counter_map_pending: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             counter_map_ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             compute_raster,
+            splat_sorted,
+            splat_sorter,
+            splat_render_pipeline,
+            splat_render_bind_groups,
+            scene_depth_span: 2.0,
             volumetric: None,
             volumetric_enabled: false,
             volumetric_params: VolumetricParams::default(),
@@ -1745,6 +1871,14 @@ impl ParticleSystem {
                 let vu = self.build_volumetric_uniforms();
                 vr.dispatch(encoder, queue, output_idx, self.max_particles, &vu);
             }
+        } else if let Some(ref sorter) = self.splat_sorter {
+            // Sorted 3DGS path (#1800): depth counting sort of the alive splats;
+            // the sorted-billboard draw in render() consumes the result. Bracket
+            // the scene's view-depth range around the orbit distance.
+            let span = self.scene_depth_span;
+            let near = (self.uniforms.cam_distance - span).max(0.05);
+            let far = self.uniforms.cam_distance + span;
+            sorter.dispatch(encoder, queue, output_idx, near, far);
         } else if let Some(ref cr) = self.compute_raster {
             if cr.should_use_tiled(self.alive_count) {
                 cr.dispatch_tiled(encoder, queue, output_idx, self.max_particles);
@@ -1819,6 +1953,41 @@ impl ParticleSystem {
                 vr.render_raymarch(encoder, target);
                 return;
             }
+        }
+
+        // Sorted 3DGS path (#1800): one instanced draw of the depth-sorted
+        // splats with hardware src-over into the HDR target (LoadOp::Load, over
+        // the bg plate). A SINGLE draw_indirect keeps the back-to-front instance
+        // order intact — that ordering is the whole correctness argument, so it
+        // must not be split.
+        if let (Some(pipeline), Some(bgs)) =
+            (&self.splat_render_pipeline, &self.splat_render_bind_groups)
+        {
+            queue.write_buffer(
+                &self.render_uniform_buffer,
+                0,
+                bytemuck::bytes_of(&self.render_uniforms),
+            );
+            let output_idx = 1 - self.current;
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("splat-sorted-render"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bgs[output_idx], &[]);
+            pass.draw_indirect(&self.indirect_args_buffer, 0);
+            return;
         }
 
         // Compute raster path: resolve atomic framebuffer to render target
@@ -2074,6 +2243,9 @@ impl ParticleSystem {
         if let Some(driver) = self.splat_driver.as_mut() {
             driver.update(&mut self.uniforms, self.splat_ui_params);
         }
+        // Re-assert each frame so hot-reload can never leave the sim's alpha
+        // branch stale (sorted = raw intrinsic alpha; OIT = weighted a_out).
+        self.uniforms.splat_sorted = if self.splat_sorted { 1.0 } else { 0.0 };
     }
 
     /// Advance the particle image source (video playback). If the frame changed,
@@ -2787,6 +2959,11 @@ impl ParticleSystem {
     /// Whether this particle system uses compute rasterization.
     pub fn is_compute_raster(&self) -> bool {
         self.compute_raster.is_some()
+    }
+
+    /// Whether the sorted alpha-over splat path is active (vs weighted-average OIT).
+    pub fn is_splat_sorted(&self) -> bool {
+        self.splat_sorted
     }
 
     /// Lazily build the volumetric renderer on first enable. Cheap to keep
