@@ -1,0 +1,39 @@
+{
+  "layers": [
+    {
+      "effect_name": "Tide",
+      "params": {
+        "flow_speed": { "Float": 0.62 },
+        "coherence": { "Float": 0.74 },
+        "whitewater": { "Float": 0.55 },
+        "pooling": { "Float": 0.7 },
+        "eddy_strength": { "Float": 0.62 },
+        "water_hue": { "Float": 0.55 },
+        "shimmer": { "Float": 0.5 },
+        "trail_decay": { "Float": 0.86 }
+      },
+      "blend_mode": "Normal",
+      "opacity": 1.0,
+      "enabled": true,
+      "obstacle_image_path": "@REPO@/assets/images/raster_samurai_mask.png",
+      "obstacle_mode": 2,
+      "obstacle_fit": 1,
+      "obstacle_threshold": 0.55,
+      "obstacle_elasticity": 0.45
+    }
+  ],
+  "active_layer": 0,
+  "postprocess": {
+    "enabled": true,
+    "bloom_threshold": 0.42,
+    "bloom_intensity": 0.55,
+    "vignette": 0.35,
+    "ca_intensity": 0.22,
+    "grain_intensity": 0.3,
+    "bloom_enabled": true,
+    "ca_enabled": true,
+    "vignette_enabled": true,
+    "grain_enabled": true,
+    "tonemap": "aces"
+  }
+}

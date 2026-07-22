@@ -1,0 +1,48 @@
+{
+  "layers": [
+    {
+      "effect_name": "Tunnel",
+      "params": {
+        "twist_amount": { "Float": 0.5 },
+        "speed": { "Float": 0.35 },
+        "tunnel_radius": { "Float": 0.45 },
+        "rib_density": { "Float": 0.5 },
+        "pinch_h": { "Float": 0.0 },
+        "pinch_v": { "Float": 0.0 }
+      },
+      "blend_mode": "Screen",
+      "opacity": 0.55,
+      "enabled": true
+    },
+    {
+      "effect_name": "Cascade",
+      "params": {
+        "trail_decay": { "Float": 0.9 },
+        "inward_speed": { "Float": 0.5 },
+        "spread": { "Float": 0.22 },
+        "curl_strength": { "Float": 0.3 },
+        "color_mode": { "Float": 0.6 },
+        "edge_glow": { "Float": 0.45 },
+        "convergence": { "Float": 0.65 },
+        "beat_sync": { "Float": 0.6 }
+      },
+      "blend_mode": "Normal",
+      "opacity": 1.0,
+      "enabled": true
+    }
+  ],
+  "active_layer": 0,
+  "postprocess": {
+    "enabled": true,
+    "bloom_threshold": 0.5,
+    "bloom_intensity": 0.15,
+    "vignette": 0.35,
+    "ca_intensity": 0.25,
+    "grain_intensity": 0.3,
+    "bloom_enabled": true,
+    "ca_enabled": true,
+    "vignette_enabled": true,
+    "grain_enabled": true,
+    "tonemap": "aces"
+  }
+}

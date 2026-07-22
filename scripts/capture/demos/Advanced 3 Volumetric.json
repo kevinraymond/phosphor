@@ -1,0 +1,53 @@
+{
+  "layers": [
+    {
+      "effect_name": "Murmur",
+      "params": {
+        "noise_eta": { "Float": 0.12 },
+        "cohesion": { "Float": 0.62 },
+        "color_mode": { "Float": 0.5 },
+        "predator": { "Float": 0.45 },
+        "separation": { "Float": 0.5 },
+        "speed": { "Float": 0.58 },
+        "smoothing": { "Float": 0.5 },
+        "audio_drive": { "Float": 0.85 }
+      },
+      "blend_mode": "Normal",
+      "opacity": 1.0,
+      "enabled": true
+    }
+  ],
+  "active_layer": 0,
+  "postprocess": {
+    "enabled": true,
+    "bloom_threshold": 0.55,
+    "bloom_intensity": 0.4,
+    "vignette": 0.4,
+    "ca_intensity": 0.15,
+    "grain_intensity": 0.25,
+    "bloom_enabled": true,
+    "ca_enabled": true,
+    "vignette_enabled": true,
+    "grain_enabled": true,
+    "tonemap": "aces"
+  },
+  "volumetric": {
+    "enabled": true,
+    "params": {
+      "march_steps": 80,
+      "absorption": 1.1,
+      "detail_scale": 3.2,
+      "detail_strength": 0.55,
+      "density_gain": 0.22,
+      "cam_yaw": 0.0,
+      "cam_pitch": 0.3,
+      "cam_distance": 3.0,
+      "cam_orbit_speed": 0.32,
+      "fov": 1.5,
+      "palette_hue": 0.58,
+      "emission_gain": 1.8,
+      "env_shape": 1,
+      "jitter_amp": 0.35
+    }
+  }
+}

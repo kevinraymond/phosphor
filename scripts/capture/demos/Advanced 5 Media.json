@@ -1,0 +1,44 @@
+{
+  "layers": [
+    {
+      "effect_name": "Cascade",
+      "params": {
+        "trail_decay": { "Float": 0.85 },
+        "inward_speed": { "Float": 0.4 },
+        "spread": { "Float": 0.35 },
+        "curl_strength": { "Float": 0.45 },
+        "color_mode": { "Float": 0.15 },
+        "edge_glow": { "Float": 0.55 },
+        "convergence": { "Float": 0.5 },
+        "beat_sync": { "Float": 0.65 }
+      },
+      "blend_mode": "Screen",
+      "opacity": 0.85,
+      "enabled": true
+    },
+    {
+      "effect_name": "",
+      "params": {},
+      "blend_mode": "Normal",
+      "opacity": 1.0,
+      "enabled": true,
+      "media_path": "@WORK@/media_bg.png",
+      "media_speed": 1.0,
+      "media_looping": true
+    }
+  ],
+  "active_layer": 0,
+  "postprocess": {
+    "enabled": true,
+    "bloom_threshold": 0.6,
+    "bloom_intensity": 0.35,
+    "vignette": 0.4,
+    "ca_intensity": 0.2,
+    "grain_intensity": 0.3,
+    "bloom_enabled": true,
+    "ca_enabled": true,
+    "vignette_enabled": true,
+    "grain_enabled": true,
+    "tonemap": "aces"
+  }
+}

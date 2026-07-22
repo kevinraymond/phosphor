@@ -1,0 +1,9 @@
+# slug	cue	preset name	required log line (regex, in addition to "Loaded preset")
+# The cue column is the index into _scene.json. capture_advanced.sh films one clip per
+# row, in this order, one loop pass each.
+adv_obstacle	0	Advanced 1 Obstacle	Restored obstacle image for layer 0
+adv_stack	1	Advanced 2 Stack
+adv_volumetric	2	Advanced 3 Volumetric	Volumetric renderer initialized
+adv_bindings	3	Advanced 4 Bindings	Loaded 5 bindings
+adv_media	4	Advanced 5 Media	loaded media
+adv_cue	5	Advanced 6a Cue

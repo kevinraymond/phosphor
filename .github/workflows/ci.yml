@@ -31,6 +31,16 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  demos:
+    name: Capture demo presets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Every way a demo preset can be wrong is silent at runtime — an unknown param is
+      # dropped without a log line, a missing obstacle image logs nothing at all — so a
+      # rename here surfaces as a capture run that quietly films the wrong thing.
+      - run: scripts/capture/check_demos.py
+
   deny:
     name: Dependency audit
     runs-on: ubuntu-latest

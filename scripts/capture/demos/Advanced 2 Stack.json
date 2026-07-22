@@ -1,0 +1,72 @@
+{
+  "layers": [
+    {
+      "effect_name": "Prism",
+      "params": {
+        "fold_count": { "Float": 0.58 },
+        "rotation_speed": { "Float": 0.28 },
+        "zoom": { "Float": 0.45 },
+        "complexity": { "Float": 0.55 },
+        "sparkle": { "Bool": true },
+        "bass_pulse": { "Bool": true },
+        "beat_flash": { "Bool": true }
+      },
+      "blend_mode": "Overlay",
+      "opacity": 0.38,
+      "enabled": true
+    },
+    {
+      "effect_name": "Aurora",
+      "params": {
+        "curtain_speed": { "Float": 0.45 },
+        "band_spread": { "Float": 0.6 },
+        "glow_width": { "Float": 0.35 }
+      },
+      "blend_mode": "ColorDodge",
+      "opacity": 0.5,
+      "enabled": true
+    },
+    {
+      "effect_name": "Cascade",
+      "params": {
+        "trail_decay": { "Float": 0.88 },
+        "inward_speed": { "Float": 0.45 },
+        "spread": { "Float": 0.3 },
+        "curl_strength": { "Float": 0.55 },
+        "color_mode": { "Float": 0.35 },
+        "edge_glow": { "Float": 0.5 },
+        "convergence": { "Float": 0.6 },
+        "beat_sync": { "Float": 0.7 }
+      },
+      "blend_mode": "Screen",
+      "opacity": 0.7,
+      "enabled": true
+    },
+    {
+      "effect_name": "Drift",
+      "params": {
+        "warp_intensity": { "Float": 0.45 },
+        "flow_speed": { "Float": 0.4 },
+        "color_mode": { "Float": 0.0 },
+        "density": { "Float": 0.55 }
+      },
+      "blend_mode": "Normal",
+      "opacity": 1.0,
+      "enabled": true
+    }
+  ],
+  "active_layer": 0,
+  "postprocess": {
+    "enabled": true,
+    "bloom_threshold": 0.55,
+    "bloom_intensity": 0.45,
+    "vignette": 0.35,
+    "ca_intensity": 0.3,
+    "grain_intensity": 0.3,
+    "bloom_enabled": true,
+    "ca_enabled": true,
+    "vignette_enabled": true,
+    "grain_enabled": true,
+    "tonemap": "aces"
+  }
+}

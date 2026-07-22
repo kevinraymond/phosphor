@@ -135,8 +135,12 @@ for c in "${CLIPS[@]}"; do
     "$(printf '%s/.frames/%03d.png' "$OUT" $i)"
   i=$((i+1))
 done
+# Grid sized to the clip count, not hardcoded: `tile=5x8` wants 40 frames and silently
+# produces nothing useful for the 6-clip advanced set. Still resolves to 5x8 at n=38.
+COLS=5; (( ${#CLIPS[@]} < COLS )) && COLS=${#CLIPS[@]}
+ROWS=$(( (${#CLIPS[@]} + COLS - 1) / COLS ))
 ffmpeg -hide_banner -loglevel error -y -pattern_type glob -i "$OUT/.frames/*.png" \
-  -filter_complex "tile=5x8:margin=4:padding=4" -frames:v 1 "$OUT/contact.png"
+  -filter_complex "tile=${COLS}x${ROWS}:margin=4:padding=4" -frames:v 1 "$OUT/contact.png"
 rm -rf "$OUT/.frames"
 log "contact sheet: $OUT/contact.png"
 fi   # ONLY == all|tiles

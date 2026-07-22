@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "name": "Fosfora Advanced",
+  "loop_mode": false,
+  "advance_mode": "Manual",
+  "cues": [
+    {
+      "preset_name": "Advanced 1 Obstacle",
+      "transition": "Cut",
+      "label": "Obstacle collision"
+    },
+    {
+      "preset_name": "Advanced 2 Stack",
+      "transition": "Cut",
+      "label": "Layer stack"
+    },
+    {
+      "preset_name": "Advanced 3 Volumetric",
+      "transition": "Cut",
+      "label": "Volumetric"
+    },
+    {
+      "preset_name": "Advanced 4 Bindings",
+      "transition": "Cut",
+      "label": "Custom bindings"
+    },
+    {
+      "preset_name": "Advanced 5 Media",
+      "transition": "Cut",
+      "label": "Media layer"
+    },
+    {
+      "preset_name": "Advanced 6a Cue",
+      "transition": "Cut",
+      "label": "Cue A"
+    },
+    {
+      "preset_name": "Advanced 6b Cue",
+      "transition": "Dissolve",
+      "transition_secs": 3.0,
+      "label": "Cue B"
+    }
+  ]
+}

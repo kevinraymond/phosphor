@@ -1,0 +1,35 @@
+{
+  "layers": [
+    {
+      "effect_name": "Frost",
+      "params": {
+        "cell_scale": { "Float": 0.45 },
+        "morph_bias": { "Float": -0.25 },
+        "grain_size": { "Float": 0.5 },
+        "drift_speed": { "Float": 0.5 },
+        "edge_glow": { "Float": 0.7 },
+        "ice_hue": { "Float": 0.58 },
+        "feedback_amount": { "Float": 0.5 },
+        "audio_reactivity": { "Float": 0.6 },
+        "drift": { "Point2D": [0.0, -0.6] }
+      },
+      "blend_mode": "Normal",
+      "opacity": 1.0,
+      "enabled": true
+    }
+  ],
+  "active_layer": 0,
+  "postprocess": {
+    "enabled": true,
+    "bloom_threshold": 0.55,
+    "bloom_intensity": 0.45,
+    "vignette": 0.35,
+    "ca_intensity": 0.2,
+    "grain_intensity": 0.3,
+    "bloom_enabled": true,
+    "ca_enabled": true,
+    "vignette_enabled": true,
+    "grain_enabled": true,
+    "tonemap": "aces"
+  }
+}
