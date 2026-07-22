@@ -38,6 +38,27 @@ Six of the thirty-eight, all at default settings:
 
 **→ [See all 38 effects in the gallery](docs/GALLERY.md)**
 
+## Past the defaults
+
+Those are effects out of the box. This is what the rest of the app does to them — six
+setups you can build from the panels, each one a preset you can save and recall:
+
+<table>
+<tr>
+<td width="33%"><img src="assets/media/tiles/adv_obstacle.webp" width="100%" alt="Obstacle collision"><br><b>Flow around a body</b><br><sub>Water parts around a silhouette — a photo, or your webcam</sub></td>
+<td width="33%"><img src="assets/media/tiles/adv_stack.webp" width="100%" alt="Layer stack"><br><b>Four layers, blended</b><br><sub>Voronoi and curtains screened over a particle flock</sub></td>
+<td width="33%"><img src="assets/media/tiles/adv_splat.webp" width="100%" alt="Gaussian splat scene"><br><b>A 3D capture, playing</b><br><sub>Photoscanned Gaussians that shatter on the drop</sub></td>
+</tr>
+<tr>
+<td><img src="assets/media/tiles/adv_bindings.webp" width="100%" alt="Custom bindings"><br><b>Wired to the music</b><br><sub>Drums, harmony and the drop on separate parameters</sub></td>
+<td><img src="assets/media/tiles/adv_media.webp" width="100%" alt="Image as particles"><br><b>Your own image, as particles</b><br><sub>Bass shoves it apart, springs pull it back</sub></td>
+<td><img src="assets/media/tiles/adv_cue.webp" width="100%" alt="Scene cue dissolve"><br><b>Cued and dissolved</b><br><sub>Presets chained into a set, crossfading on cue</sub></td>
+</tr>
+</table>
+
+**→ [How to build these](docs/TUTORIALS.md)** · the presets behind them are in
+[`scripts/capture/demos/`](scripts/capture/demos)
+
 ## Your first 60 seconds
 
 Three steps, and you can't break anything — every setting saves to its own file and can be reset.

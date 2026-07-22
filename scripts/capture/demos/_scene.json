@@ -15,9 +15,9 @@
       "label": "Layer stack"
     },
     {
-      "preset_name": "Advanced 3 Volumetric",
+      "preset_name": "Advanced 3 Splat",
       "transition": "Cut",
-      "label": "Volumetric"
+      "label": "3D capture"
     },
     {
       "preset_name": "Advanced 4 Bindings",

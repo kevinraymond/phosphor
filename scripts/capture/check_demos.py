@@ -158,7 +158,16 @@ def check_preset(path: Path, effects: dict) -> list:
                 if lo is not None and hi is not None and not (lo <= v <= hi):
                     bad(f"{name} layer {i}: {pname} = {v} is outside {eff}'s range {lo}..{hi} (ParamStore::set does not clamp)")
 
-        for key in ("obstacle_image_path", "media_path", "splat_scene_path"):
+        # Every one of these is guarded by a bare `if path.exists()` with no else
+        # branch, so a wrong path produces no log line and no visible error — the
+        # effect just renders without it.
+        for key in (
+            "obstacle_image_path",
+            "media_path",
+            "splat_scene_path",
+            "particle_image_path",
+            "particle_video_path",
+        ):
             raw = lp.get(key)
             if not raw:
                 continue

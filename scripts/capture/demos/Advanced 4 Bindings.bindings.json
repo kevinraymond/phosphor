@@ -3,38 +3,38 @@
   "bindings": [
     {
       "id": "b_001",
-      "name": "Sub-bass brings in the plate",
+      "name": "Drums drive the shards",
       "enabled": true,
       "scope": "Preset",
-      "source": "audio.band.0",
-      "target": "layer.0.opacity",
+      "source": "audio.percussive_energy",
+      "target": "param.0.Cleave.shard_force",
       "transforms": [
-        { "type": "smooth", "factor": 0.55 },
-        { "type": "remap", "in_lo": 0.0, "in_hi": 0.8, "out_lo": 0.15, "out_hi": 0.85 }
+        { "type": "curve", "curve_type": "ease_out" },
+        { "type": "remap", "in_lo": 0.0, "in_hi": 1.0, "out_lo": 0.15, "out_hi": 0.95 }
       ]
     },
     {
       "id": "b_002",
-      "name": "Drums tighten the standing wave",
+      "name": "Harmony tips the balance",
       "enabled": true,
       "scope": "Preset",
-      "source": "audio.percussive_energy",
-      "target": "param.0.Cymatics.attract_strength",
+      "source": "audio.harmonic_ratio",
+      "target": "param.0.Cleave.balance",
       "transforms": [
-        { "type": "curve", "curve_type": "ease_out" },
-        { "type": "remap", "in_lo": 0.0, "in_hi": 1.0, "out_lo": 0.15, "out_hi": 0.9 }
+        { "type": "smooth", "factor": 0.88 },
+        { "type": "remap", "in_lo": 0.2, "in_hi": 0.9, "out_lo": 0.15, "out_hi": 0.85 }
       ]
     },
     {
       "id": "b_003",
-      "name": "Harmony drives the flow field",
+      "name": "Sub-bass swells the ribbons",
       "enabled": true,
       "scope": "Preset",
-      "source": "audio.harmonic_ratio",
-      "target": "param.1.Flux.flow_intensity",
+      "source": "audio.band.0",
+      "target": "param.0.Cleave.ribbon_glow",
       "transforms": [
-        { "type": "smooth", "factor": 0.88 },
-        { "type": "remap", "in_lo": 0.2, "in_hi": 0.9, "out_lo": 0.1, "out_hi": 0.85 }
+        { "type": "smooth", "factor": 0.6 },
+        { "type": "remap", "in_lo": 0.0, "in_hi": 0.8, "out_lo": 0.2, "out_hi": 0.9 }
       ]
     },
     {
@@ -47,19 +47,19 @@
       "transforms": [
         { "type": "smooth", "factor": 0.98 },
         { "type": "scale", "factor": 9.0 },
-        { "type": "clamp", "lo": 0.12, "hi": 0.7 }
+        { "type": "clamp", "lo": 0.12, "hi": 0.65 }
       ]
     },
     {
       "id": "b_005",
-      "name": "Brilliance sets the mode number",
+      "name": "Brilliance glints the fracture",
       "enabled": true,
       "scope": "Preset",
       "source": "audio.band.6",
-      "target": "param.0.Cymatics.pattern_scale",
+      "target": "param.0.Cleave.shatter_glint",
       "transforms": [
         { "type": "smooth", "factor": 0.7 },
-        { "type": "remap", "in_lo": 0.0, "in_hi": 0.7, "out_lo": 0.25, "out_hi": 0.8 }
+        { "type": "remap", "in_lo": 0.0, "in_hi": 0.7, "out_lo": 0.2, "out_hi": 0.95 }
       ]
     }
   ]

@@ -112,6 +112,8 @@ done
 sed "s|@REPO@|$REPO|g; s|@WORK@|$WORK|g" "$DEMOS/_scene.json" \
   > "$CFG/phosphor/scenes/$SCENE_NAME.json"
 
+cap_fetch_splat_demo "$CFG"
+
 # The media demo needs a 16:9 still. Generating it beats pointing the layer at a shipped
 # 2048x2048 PNG, because MediaLayer letterboxes — a square image would pillarbox into a
 # 1080x1080 island with black down both sides, which is not what a media layer looks like
@@ -181,6 +183,7 @@ log "phase-locked to playback; first record window opens in pass $PASS0"
 FORBIDDEN='not found for layer|Failed to load effect|Load error:|Failed to load obstacle image|not found for cue|Splat scene load failed'
 
 k=0
+SCENE_LOADED=0
 for row in "${ROWS[@]}"; do
   IFS=$'\t' read -r slug cue preset want <<<"$row"
   if [[ -n $ONLY && $ONLY != "$slug" ]]; then k=$((k+1)); continue; fi
@@ -189,7 +192,9 @@ for row in "${ROWS[@]}"; do
   printf '\033[36m[advanced]\033[0m %d/%d  %-16s' $((k+1)) "$N" "$slug" >&2
 
   # --- slot opens: switch demo -------------------------------------------------
-  cap_wait_until "$PLAY_T0" "$S"
+  # 1.0s tolerance: the previous slot's recording ends exactly on this boundary, so
+  # arriving a fraction late is structural. The record window below keeps tolerance 0.
+  cap_wait_until "$PLAY_T0" "$S" 1.0
   # x11grab films a screen REGION, not a window, so anything raised over the app lands
   # in the clip: one rehearsal run caught a terminal across the bottom third of the media
   # demo. Re-raise every slot so a transient focus steal costs at most part of one clip.
@@ -198,8 +203,15 @@ for row in "${ROWS[@]}"; do
   xdotool windowactivate --sync "$WIN" 2>/dev/null || true
   xdotool windowraise "$WIN" 2>/dev/null || true
   MARK=$(stat -c%s "$WORK/app.log")
-  if (( k == 0 )); then
+  # The scene has to be loaded before goto_cue does anything — an unloaded timeline has
+  # no cues, so go_to_cue returns None and the demo silently never switches. Keyed on
+  # the first slot ACTUALLY FILMED, not on k == 0, or `--only` on anything but the first
+  # slug would film whatever happened to be on screen.
+  if (( ! SCENE_LOADED )); then
     osc /phosphor/scene/load s "$SCENE_NAME"
+    SCENE_LOADED=1
+    # load_scene starts at cue 0; step on if this slot wants a different one.
+    if (( cue != 0 )); then sleep 0.4; osc /phosphor/scene/goto_cue i "$cue"; fi
   else
     # go_to_cue returns None when already on that index, so never re-issue one.
     osc /phosphor/scene/goto_cue i "$cue"

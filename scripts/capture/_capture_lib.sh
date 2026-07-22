@@ -82,6 +82,31 @@ cap_start_monitor() {
   pactl load-module module-loopback source="$1.monitor" sink="$2" latency_msec=60 2>/dev/null || true
 }
 
+# --------------------------------------------------------------------- assets
+
+# cap_fetch_splat_demo <config dir>
+#
+# splat.pfx ships `"source": "demo:default"`, which resolves to phosphor_demo.ply under
+# the config dir. Isolating the config means it is not there, so Splat would render an
+# empty scene with no error. Cached outside the run so this is a one-time ~42 MB cost.
+cap_fetch_splat_demo() {
+  local cfg=$1
+  local ply=$cfg/phosphor/splats/phosphor_demo.ply
+  local url=https://github.com/kevinraymond/fosfora/releases/download/demo-assets/trooper.ply
+  local cache=${XDG_CACHE_HOME:-$HOME/.cache}/fosfora-capture/phosphor_demo.ply
+  mkdir -p "$(dirname "$ply")"
+  [[ -f $ply ]] && return 0
+  if [[ -f $cache ]]; then
+    log "using cached splat demo scene"
+    cp "$cache" "$ply"
+  else
+    log "downloading splat demo scene (~42 MB)…"
+    mkdir -p "$(dirname "$cache")"
+    curl -fsSL "$url" -o "$cache" && cp "$cache" "$ply" \
+      || log "WARNING: splat demo download failed; Splat will render empty"
+  fi
+}
+
 # --------------------------------------------------------------------- window
 
 # Under a reparenting WM, `xdotool search` matches BOTH the WM frame and the client
@@ -167,7 +192,13 @@ cap_region_check() {
 
 cap_now() { date +%s.%N; }
 
-# cap_wait_until <play_t0> <seconds since play_t0>
+# cap_wait_until <play_t0> <seconds since play_t0> [tolerance]
+#
+# `tolerance` (default 0) is how late arrival may be before it is worth warning about.
+# A slot boundary is structurally a hair late — the previous slot's recording ends
+# exactly ON it, and tearing down ffmpeg costs a few hundred milliseconds — so warning
+# at zero cried wolf on every slot and would have masked a real slip. Waits that
+# actually matter (the record window, which opens half a loop later) keep tolerance 0.
 #
 # Schedule every step against an ABSOLUTE clock rather than sleeping a fixed amount per
 # item. capture.sh's first version slept a fixed `LOOP_SECS*SETTLE_FRAC - 1.2`, making
@@ -178,11 +209,13 @@ cap_now() { date +%s.%N; }
 # overhead is. T0 is PLAYBACK start, not "now" — that is what ties the schedule to the
 # music.
 cap_wait_until() {
-  local t0=$1 at=$2 d
-  d=$(python3 -c "print(max(0.0, $t0 + $at - $(cap_now)))")
+  local t0=$1 at=$2 tol=${3:-0} late d
+  late=$(python3 -c "print($(cap_now) - ($t0 + $at))")
   python3 -c "
 import sys
-if $d <= 0.0: sys.stderr.write('  [warn] behind schedule, phase lock lost\n')"
+if $late > $tol:
+    sys.stderr.write('  [warn] ${late}s behind schedule, phase lock lost\n')"
+  d=$(python3 -c "print(max(0.0, -($late)))")
   sleep "$d"
 }
 

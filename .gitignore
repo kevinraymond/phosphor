@@ -8,3 +8,8 @@ Thumbs.db
 
 # Scratch render output from lattice rule-tuning (not committed)
 /scratch_lattice/
+
+# Capture run output — raw 1080p60 clips are hundreds of MB each; the tiles that
+# ship are copied into assets/media/tiles/ by hand.
+/capture-out*/
+/capture-vol/

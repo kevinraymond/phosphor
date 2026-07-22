@@ -1,26 +1,43 @@
 {
   "layers": [
     {
-      "effect_name": "Array",
+      "effect_name": "Raster",
       "params": {
-        "trail_decay": { "Float": 0.78 },
-        "ring_radius": { "Float": 0.55 },
-        "spread": { "Float": 0.25 },
-        "layout": { "Float": 0.0 },
-        "color_mode": { "Float": 0.4 },
-        "speed_mult": { "Float": 0.55 },
-        "beat_pulse": { "Float": 0.65 },
-        "emitter_glow": { "Float": 0.45 }
+        "trail_decay": {
+          "Float": 0.12
+        },
+        "spring_k": {
+          "Float": 24.0
+        },
+        "bass_strength": {
+          "Float": 0.12
+        },
+        "mid_wave": {
+          "Float": 0.1
+        },
+        "high_scatter": {
+          "Float": 0.06
+        },
+        "burst_force": {
+          "Float": 0.15
+        },
+        "depth_scale": {
+          "Float": 1.4
+        },
+        "bass_mode": {
+          "Float": 0.0
+        }
       },
-      "blend_mode": "Screen",
-      "opacity": 0.85,
-      "enabled": true
+      "blend_mode": "Normal",
+      "opacity": 1.0,
+      "enabled": true,
+      "particle_image_path": "@REPO@/assets/images/raster_magic_tree.png"
     },
     {
       "effect_name": "",
       "params": {},
       "blend_mode": "Normal",
-      "opacity": 1.0,
+      "opacity": 0.35,
       "enabled": true,
       "media_path": "@WORK@/media_bg.png",
       "media_speed": 1.0,
@@ -30,8 +47,8 @@
   "active_layer": 0,
   "postprocess": {
     "enabled": true,
-    "bloom_threshold": 0.65,
-    "bloom_intensity": 0.3,
+    "bloom_threshold": 0.75,
+    "bloom_intensity": 0.2,
     "vignette": 0.4,
     "ca_intensity": 0.2,
     "grain_intensity": 0.3,

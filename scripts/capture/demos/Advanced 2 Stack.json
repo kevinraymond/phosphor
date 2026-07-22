@@ -1,56 +1,92 @@
 {
   "layers": [
     {
-      "effect_name": "Prism",
+      "effect_name": "Pulse",
       "params": {
-        "fold_count": { "Float": 0.62 },
-        "rotation_speed": { "Float": 0.26 },
-        "zoom": { "Float": 0.42 },
-        "complexity": { "Float": 0.5 },
-        "sparkle": { "Bool": true },
-        "bass_pulse": { "Bool": true },
-        "beat_flash": { "Bool": true }
+        "ring_count": {
+          "Float": 0.4
+        },
+        "expansion_speed": {
+          "Float": 0.45
+        },
+        "ring_width": {
+          "Float": 0.3
+        }
       },
-      "blend_mode": "Screen",
-      "opacity": 0.25,
+      "blend_mode": "Add",
+      "opacity": 0.4,
       "enabled": true
     },
     {
       "effect_name": "Aurora",
       "params": {
-        "curtain_speed": { "Float": 0.45 },
-        "band_spread": { "Float": 0.65 },
-        "glow_width": { "Float": 0.28 }
+        "curtain_speed": {
+          "Float": 0.45
+        },
+        "band_spread": {
+          "Float": 0.65
+        },
+        "glow_width": {
+          "Float": 0.28
+        }
       },
       "blend_mode": "ColorDodge",
-      "opacity": 0.3,
+      "opacity": 0.28,
       "enabled": true
     },
     {
       "effect_name": "Murmur",
       "params": {
-        "noise_eta": { "Float": 0.18 },
-        "cohesion": { "Float": 0.4 },
-        "color_mode": { "Float": 0.35 },
-        "predator": { "Float": 0.55 },
-        "separation": { "Float": 0.6 },
-        "speed": { "Float": 0.6 },
-        "smoothing": { "Float": 0.45 },
-        "audio_drive": { "Float": 0.75 }
+        "noise_eta": {
+          "Float": 0.18
+        },
+        "cohesion": {
+          "Float": 0.4
+        },
+        "color_mode": {
+          "Float": 0.35
+        },
+        "predator": {
+          "Float": 0.55
+        },
+        "separation": {
+          "Float": 0.6
+        },
+        "speed": {
+          "Float": 0.6
+        },
+        "smoothing": {
+          "Float": 0.45
+        },
+        "audio_drive": {
+          "Float": 0.75
+        }
       },
       "blend_mode": "Screen",
-      "opacity": 0.8,
+      "opacity": 0.75,
       "enabled": true
     },
     {
       "effect_name": "Tunnel",
       "params": {
-        "twist_amount": { "Float": 0.55 },
-        "speed": { "Float": 0.3 },
-        "tunnel_radius": { "Float": 0.4 },
-        "rib_density": { "Float": 0.6 },
-        "pinch_h": { "Float": 0.0 },
-        "pinch_v": { "Float": 0.0 }
+        "twist_amount": {
+          "Float": 0.55
+        },
+        "speed": {
+          "Float": 0.3
+        },
+        "tunnel_radius": {
+          "Float": 0.4
+        },
+        "rib_density": {
+          "Float": 0.6
+        },
+        "pinch_h": {
+          "Float": 0.0
+        },
+        "pinch_v": {
+          "Float": 0.0
+        }
       },
       "blend_mode": "Normal",
       "opacity": 1.0,
@@ -60,9 +96,9 @@
   "active_layer": 0,
   "postprocess": {
     "enabled": true,
-    "bloom_threshold": 0.65,
-    "bloom_intensity": 0.3,
-    "vignette": 0.4,
+    "bloom_threshold": 0.8,
+    "bloom_intensity": 0.25,
+    "vignette": 0.45,
     "ca_intensity": 0.25,
     "grain_intensity": 0.3,
     "bloom_enabled": true,

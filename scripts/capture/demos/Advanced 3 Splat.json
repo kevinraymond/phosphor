@@ -1,0 +1,38 @@
+{
+  "layers": [
+    {
+      "effect_name": "Splat",
+      "params": {
+        "audio_reactivity": { "Float": 0.7 },
+        "explode_amount": { "Float": 0.8 },
+        "scatter_amount": { "Float": 0.5 },
+        "focus_strength": { "Float": 0.15 },
+        "splat_scale": { "Float": 1.0 },
+        "opacity_gain": { "Float": 1.0 },
+        "idle_breathe": { "Float": 0.35 },
+        "exposure": { "Float": 0.36 },
+        "orbit_speed": { "Float": 0.18 },
+        "cam_distance": { "Float": 1.55 },
+        "cam_pitch": { "Float": 0.12 },
+        "focal_bias": { "Float": 0.0 }
+      },
+      "blend_mode": "Normal",
+      "opacity": 1.0,
+      "enabled": true
+    }
+  ],
+  "active_layer": 0,
+  "postprocess": {
+    "enabled": true,
+    "bloom_threshold": 0.75,
+    "bloom_intensity": 0.15,
+    "vignette": 0.25,
+    "ca_intensity": 0.0,
+    "grain_intensity": 0.0,
+    "bloom_enabled": true,
+    "ca_enabled": false,
+    "vignette_enabled": true,
+    "grain_enabled": false,
+    "tonemap": "linear"
+  }
+}
