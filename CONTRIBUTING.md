@@ -5,7 +5,7 @@ Thanks for your interest in contributing! Fosfora is a live VJ engine built with
 ## Building
 
 **Prerequisites:**
-- Rust 1.85+ (install via [rustup](https://rustup.rs))
+- Rust 1.97+ (pinned via `rust-toolchain.toml`; install via [rustup](https://rustup.rs))
 - Audio input device (built-in mic works)
 - Vulkan-capable GPU
 
@@ -25,7 +25,7 @@ RUST_LOG=phosphor_app=debug cargo run  # verbose logging
 
 The fastest way to contribute is writing a new visual effect. Three steps:
 
-1. **Create a shader** in `assets/shaders/your_effect.wgsl`. Start from the template in [TECHNICAL.md](TECHNICAL.md#shader-authoring-guide) — you get time, resolution, 74 audio features, up to 16 params, and a WGSL library (noise, palette, SDF, tonemap) auto-prepended.
+1. **Create a shader** in `assets/shaders/your_effect.wgsl`. Start from the template in [docs/TECHNICAL.md](docs/TECHNICAL.md#shader-authoring-guide) — you get time, resolution, 74 audio features, up to 16 params, and a WGSL library (noise, palette, SDF, tonemap) auto-prepended.
 
 2. **Create a definition** in `assets/effects/your_effect.pfx` (JSON):
    ```json
@@ -42,7 +42,7 @@ The fastest way to contribute is writing a new visual effect. Three steps:
 
 3. **Run** — the effect appears in the browser automatically. Edit the shader while running; it hot-reloads on save.
 
-See the [Shader Authoring Guide](TECHNICAL.md#shader-authoring-guide) for uniforms, multi-pass, particles, feedback, and common pitfalls.
+See the [Shader Authoring Guide](docs/TECHNICAL.md#shader-authoring-guide) for uniforms, multi-pass, particles, feedback, and common pitfalls.
 
 ## Reporting Bugs
 

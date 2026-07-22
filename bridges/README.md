@@ -1,21 +1,21 @@
-# Phosphor Bridge Scripts
+# Fosfora Bridge Scripts
 
-Companion scripts that stream external data sources into Phosphor's
-binding bus via websocket. Run any bridge alongside Phosphor to add
+Companion scripts that stream external data sources into Fosfora's
+binding bus via websocket. Run any bridge alongside Fosfora to add
 new source types to the Binding Matrix.
 
 ## What's a Bridge?
 
-Phosphor generates visuals from audio. Bridges let you *also* control
+Fosfora generates visuals from audio. Bridges let you *also* control
 visuals with your body, a gamepad, your face, and more. A bridge is a
 small Python script that reads data from a device (webcam, controller,
-etc.) and sends it to Phosphor over the network. You pick a bridge, run
-it, and new controls appear in Phosphor's Binding Matrix automatically —
+etc.) and sends it to Fosfora over the network. You pick a bridge, run
+it, and new controls appear in Fosfora's Binding Matrix automatically —
 no configuration needed.
 
 ## Quick Start
 
-**1. Start Phosphor** (the websocket server runs on port 9002 automatically).
+**1. Start Fosfora** (the websocket server runs on port 9002 automatically).
 
 **2. Pick a bridge** based on what you have:
 
@@ -37,7 +37,7 @@ python bridges/mediapipe_hands.py
 ```
 
 Hold your hands up in front of the camera. The bridge tracks your
-fingers and sends their positions to Phosphor.
+fingers and sends their positions to Fosfora.
 
 ### Xbox / gamepad controller
 
@@ -48,7 +48,7 @@ python bridges/xbox_controller.py
 
 Sticks, triggers, and buttons all show up as bindable sources.
 
-**3. Open the Binding Matrix** in Phosphor (press **B**). You'll see
+**3. Open the Binding Matrix** in Fosfora (press **B**). You'll see
 new sources from the bridge. Drag a source onto any parameter to bind
 it — for example, bind hand X position to warp intensity, and moving
 your hand left/right will warp the visuals.
@@ -75,7 +75,7 @@ your hand left/right will warp the visuals.
 
 Every bridge accepts:
 
-    --host HOST    Phosphor host (default: localhost)
+    --host HOST    Fosfora host (default: localhost)
     --port PORT    Websocket port (default: 9002)
     --fps FPS      Target frame rate (default: 30)
 
@@ -84,7 +84,7 @@ Most vision bridges also accept:
     --device N     Camera index (default: 0)
     --show         Show preview window
 
-## Testing Without Phosphor
+## Testing Without Fosfora
 
 Use the echo server to verify bridge output:
 
@@ -139,7 +139,7 @@ docker compose -f bridges/docker-compose.yml --profile depth up hands realsense 
 # GPU-accelerated YOLO
 docker compose -f bridges/docker-compose.yml --profile gpu up yolo-gpu hands lfo
 
-# Point at Phosphor on another machine
+# Point at Fosfora on another machine
 PHOSPHOR_HOST=192.168.1.100 docker compose -f bridges/docker-compose.yml up hands lfo
 ```
 
@@ -176,5 +176,5 @@ while True:
     time.sleep(1/30)
 ```
 
-Fields auto-appear in Phosphor's Binding Matrix as `ws.my-source.value_a`
+Fields auto-appear in Fosfora's Binding Matrix as `ws.my-source.value_a`
 as soon as the first data frame arrives.

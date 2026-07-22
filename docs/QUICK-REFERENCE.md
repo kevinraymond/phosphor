@@ -3,11 +3,12 @@
 ```
 +--[ Left Panel (315px) ]--+-----[ Canvas ]-----+--[ Right Panel (315px) ]-+
 |  Audio                   |                     |  Parameters              |
-|  Effects                 |   Live visual       |  Particles               |
+|  Effects                 |   Live visual       |  Particles / Media / Cam |
 |  Layers                  |   output            |  Obstacle                |
-|  Presets                 |                     |  Audio Reactivity        |
-|  Scenes                  |                     |  Post-Processing         |
-|  Settings                |                     |                          |
+|  Presets                 |                     |  Splat Scene / Lattice   |
+|  Scenes                  |                     |  Audio Reactivity        |
+|  Settings                |                     |  Volumetric              |
+|                          |                     |  Post-Processing         |
 +--------------------------+---------------------+--------------------------+
 |                          Status Bar                                       |
 +---------------------------------------------------------------------------+
@@ -59,7 +60,8 @@ Save/load named presets. Dirty indicator shows unsaved changes. Cycle via MIDI/O
 Cue timeline with per-cue preset, transition type, and duration. Advance modes: Manual, Timer (auto-advance after hold), BeatSync (advance every N beats). Loop toggle.
 
 ### Settings
-Status dots show connection state. Subsections: MIDI, OSC, Web, NDI (if compiled), Global (theme, particle quality).
+Status dots show connection state (MIDI / OSC / WEB / NDI / AUD). Subsections: MIDI, OSC, Web,
+Outputs (NDI and video recording), Global (theme, particle quality, band scale, auto-reconnect).
 
 ---
 

@@ -5,10 +5,10 @@
 Security fixes are applied to the latest release. Older versions are not
 maintained — please update before reporting an issue.
 
-| Version         | Supported |
-| --------------- | --------- |
-| 1.8.x (latest)  | ✅        |
-| < 1.8           | ❌        |
+| Version          | Supported |
+| ---------------- | --------- |
+| 1.12.x (latest)  | ✅        |
+| < 1.12           | ❌        |
 
 ## Reporting a Vulnerability
 

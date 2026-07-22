@@ -51,32 +51,24 @@ Effects are the core visual building blocks of Fosfora. Each effect is a WGSL sh
 
 ### Built-In Effects
 
-Fosfora ships with **24 built-in effects** — 22 you can browse and cycle through, plus 2 hidden ones (the signature **Phosphor** intro visual and a rasterizer stress test). The 22 browsable effects:
+Fosfora ships with **38 built-in effects**, plus 2 hidden ones (the signature **Phosphor**
+intro visual you see at startup, and a rasterizer stress test).
 
-| Effect | Description | Uses Feedback | Uses Particles |
-|--------|-------------|:---:|:---:|
-| **Aurora** | Flowing curtain bands driven by 7 frequency bands | Yes | |
-| **Drift** | Triple domain-warped FBM fluid smoke with advected feedback | Yes | |
-| **Iris** | Spinning dot with fading feedback trails | Yes | |
-| **Prism** | Kaleidoscopic N-fold mirror symmetry over FBM patterns | Yes | |
-| **Pulse** | Beat-synced concentric rings with feedback trails | Yes | |
-| **Shards** | Animated Voronoi cells with glowing fracture edges | Yes | |
-| **Storm** | Billowing dark clouds lit from within by lightning | Yes | |
-| **Tunnel** | Raymarched infinite cylindrical flythrough with twist and glow | Yes | |
-| **Accretion** | Gravitational N-body — audio seeds attract swarms into discs and orbits | Yes | Yes |
-| **Array** | Toroidal per-band speaker emitters firing rings of particles outward | Yes | Yes |
-| **Cascade** | Screen edges emit audio-segmented particle streams that interfere | Yes | Yes |
-| **Chaos** | Strange-attractor system (Lorenz, Rössler, Chen…) with feedback trails | Yes | Yes |
-| **Cymatics** | Chladni standing-wave nodal patterns synced to frequency bands | Yes | Yes |
-| **Flux** | Organic smoke following a 3D curl-noise flow field | Yes | Yes |
-| **Genesis** | Multi-species Particle Lenia self-organizing into predator/prey | Yes | Yes |
-| **Morph** | Particles spring between images and geometry on beat drops | | Yes |
-| **Murmur** | Starling murmuration with topological K=7 flocking | | Yes |
-| **Mycelium** | Branching tendrils that grow at the tips and decay at the roots | Yes | Yes |
-| **Raster** | Video wall — particles map to image pixels with audio displacement | Yes | Yes |
-| **Symbiosis** | Particle Life multi-species ecosystems from a force matrix | | Yes |
-| **Tesla** | Charged particles spiraling through magnetic dipole fields | Yes | Yes |
-| **Turing** | Reaction-diffusion (Gray-Scott) sculpting particles into organic patterns | | Yes |
+**Shaders** (11) — pure fragment shaders, no particles:
+Aurora · Beam · Drift · Frost · Iris · Prism · Pulse · Shards · Storm · Strata · Tunnel
+
+**Particle simulations** (19) — GPU compute, from a few thousand particles to two million:
+Accretion · Array · Cascade · Chaos · Cleave · Cymatics · Flux · Genesis · Morph · Murmur ·
+Mycelium · Polycephalum · Raster · Splat · Symbiosis · Tesla · Tide · Turing · Vessel
+
+**Lattice** (8) — one 3D cellular-automata engine, eight rules, ray-marched as a volume:
+445 · Brain · Builder · Chunky · Clouds · Pulse · Pyroclastic · Shells
+
+The browser groups these into **Built-in** and **User** sections, with a search box and type
+filters, and a ★ Favorites row at the top. Badges mark each effect **SH** (shader), **PS**
+(particle) or **FB** (feedback).
+
+See the **[Effect Gallery](GALLERY.md)** for a clip of every one at default settings.
 
 ### Creating Your Own Effects
 
@@ -85,7 +77,8 @@ Effects are defined by `.pfx` files — JSON manifests that reference WGSL shade
 **Create from scratch:**
 1. In the Effects panel, click the **+ New** button
 2. Enter a name for your effect
-3. Fosfora creates a `.pfx` file and starter `.wgsl` shader in `~/.config/phosphor/effects/`
+3. Fosfora creates a `.pfx` file and starter `.wgsl` shader in the `assets/` folder next to
+   the app (`assets/effects/` and `assets/shaders/`)
 4. The shader editor opens automatically
 
 **Copy a built-in effect:**
@@ -655,7 +648,7 @@ Post-processing applies screen-space effects after all layers are composited.
 **Film Grain** — Adds animated noise texture for a filmic feel
 - *Intensity* (0.0–1.0): Noise strength
 
-### Audio Reactivity
+### Audio-Reactive Post-Processing
 
 Post-processing is automatically audio-reactive:
 - **RMS** (overall loudness) modulates bloom threshold and intensity

@@ -1,281 +1,194 @@
+<div align="center">
+
 # Fosfora
 
-![CI](https://github.com/kevinraymond/fosfora/actions/workflows/ci.yml/badge.svg)
+**Turn whatever your computer is playing into live, beat-synced visuals.**
 
-**Cross-platform real-time particle and shader engine for live performance. Welcome to the light.**
+[![CI](https://github.com/kevinraymond/fosfora/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinraymond/fosfora/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/kevinraymond/fosfora?label=download)](https://github.com/kevinraymond/fosfora/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
-<p align="center">
-  <img src="assets/fosfora-teaser.gif" alt="Fosfora reacting to music" width="100%" />
-</p>
+<img src="assets/media/hero.webp" alt="Fosfora reacting to music" width="100%" />
 
-<!-- Placeholder hero clip. Replace with a fresh 10–15s screen capture of a few effects reacting to music — the single biggest thing that shows what Fosfora does. -->
+### [⬇&nbsp; Download for macOS, Windows or Linux](https://github.com/kevinraymond/fosfora/releases/latest)
 
-## What is this?
+</div>
 
-Fosfora is a **free, open-source app that turns whatever audio your computer is playing into live, beat-synced visuals** — a music visualizer built for actually performing with. There's nothing to code, no account to create, and no setup: open it, play music, and it reacts.
+Fosfora is a free, open-source music visualizer built for actually performing with. There's
+nothing to code, no account to make, and no project to set up: open it, play music, and it
+reacts. When you want more, every knob is there — 38 effects, an eight-layer stack, MIDI, OSC,
+your phone as a control surface, a webcam, and NDI out to your video mixer.
 
-At a glance:
+## See it move
 
-| | |
-|---|---|
-| **Rendering** | Native GPU app (Vulkan/Metal via wgpu) · Compute rasterizer for million-particle effects · Shader hot-reload (edit WGSL live) |
-| **Audio** | BPM detection · 7-band spectrum · 13 MFCC timbral features · 12 chroma pitch classes · Beat sync |
-| **Effects** | 24 built-in effects (particle sims, feedback shaders, reaction-diffusion, flocking, strange attractors, morphing) |
-| **Compositing** | 8-layer stack · 10 blend modes · Media layers (GIF/PNG/MP4) · Webcam layers · Monocular depth (MiDaS) |
-| **Control** | Binding matrix (flow editor) · MIDI learn + auto-connect · OSC in/out with learn · Web touch surface (phone/tablet) |
-| **Output** | NDI® (built in, runtime-loaded) · Presets · Scene cues with timeline morphing |
+Six of the thirty-eight, all at default settings:
 
-## Note from Dev
+<table>
+<tr>
+<td width="33%"><img src="assets/media/tiles/prism.webp" width="100%" alt="Prism"><br><b>Prism</b><br><sub>Kaleidoscopic mirror symmetry</sub></td>
+<td width="33%"><img src="assets/media/tiles/cymatics.webp" width="100%" alt="Cymatics"><br><b>Cymatics</b><br><sub>Chladni standing waves, per band</sub></td>
+<td width="33%"><img src="assets/media/tiles/morph.webp" width="100%" alt="Morph"><br><b>Morph</b><br><sub>Particles spring between images</sub></td>
+</tr>
+<tr>
+<td><img src="assets/media/tiles/genesis.webp" width="100%" alt="Genesis"><br><b>Genesis</b><br><sub>Two species, self-organizing</sub></td>
+<td><img src="assets/media/tiles/lattice_clouds.webp" width="100%" alt="Lattice Clouds"><br><b>Lattice Clouds</b><br><sub>3D cellular automata, ray-marched</sub></td>
+<td><img src="assets/media/tiles/chaos.webp" width="100%" alt="Chaos"><br><b>Chaos</b><br><sub>Strange attractors</sub></td>
+</tr>
+</table>
 
-Thanks for checking this project out! I've gone through a couple experimental projects recently - [EASE](https://github.com/kevinraymond/ease) and [EASEy-GLYPH](https://github.com/kevinraymond/easey-glyph) - and with Fosfora I'm trying to put it all together.
+**→ [See all 38 effects in the gallery](docs/GALLERY.md)**
 
-I hope this project is genuinely useful. I've tried to make it as easy to use as possible, but I'm no kind of performer so I'm open to suggestions for improvements (drop an issue)!
-
-I started writing software during the time of C-64 and TRaSh-80, and even with the field of AI "before it was cool" ... even so, I never imagined we would get to the point where I can architect and design and not need to write out everything. Wild times.
-
-Give it a try! Let me know how I can make it better for you.
-
----
-
-Under the hood it's a GPU engine — WGSL shaders, compute particles, and layer compositing — that you drive from the panels below, or from MIDI, OSC, or a phone browser:
-
-<p align="center">
-  <img width="1518" height="1222" alt="Fosfora UI" src="https://github.com/user-attachments/assets/3072dd58-17d4-4ce4-8166-429bee57f780" />
-</p>
-
-
-## Quick Start
+## Your first 60 seconds
 
 Three steps, and you can't break anything — every setting saves to its own file and can be reset.
 
-**1. Download it** for your platform from [**GitHub Releases**](https://github.com/kevinraymond/fosfora/releases/latest):
+1. **Download and open it.** A visual is already running when the window appears. The panels
+   fade in after a second or two, or press **D** to show them right away.
+2. **Point it at your audio.** This is the one step worth getting right — see
+   [below](#the-visuals-arent-reacting-to-my-music) if nothing moves. Most of the time it just
+   works.
+3. **Play something.** Click effects on the left until one grabs you, then press **F** for
+   fullscreen.
 
-- **macOS** — download the `.dmg`, open it, drag Fosfora to Applications (signed & notarized)
-- **Windows** — download the `.zip`, extract, run `fosfora.exe`
-- **Linux** — download the `.tar.gz`, extract, run `./fosfora`
+<p align="center">
+  <img src="assets/media/ui.webp" alt="The Fosfora interface" width="100%" />
+</p>
 
-**2. Open it.** A visual is already running when the window appears. The control UI fades in after a second or two — or press **D** to show it right away.
-
-**3. Play some music** — anything your computer can hear. The visuals react immediately from your default input device.
-
-**What to expect in the first 10 seconds:** the window opens with a visual already moving → the panels fade in → press **D** to toggle them → click an effect on the left → press **F** for fullscreen. That's the whole loop.
-
-NDI® output is built into the official downloads — to use it, install the [NDI® runtime](https://ndi.video) (the only extra step needed).
+NDI® output is built into the official downloads — to use it, install the
+[NDI® runtime](https://ndi.video). That's the only extra step anything here needs.
 
 <details>
-<summary><strong>Build from source</strong></summary>
+<summary><strong>Build from source instead</strong></summary>
 
-**Prerequisites:** Rust 1.97+ (pinned via `rust-toolchain.toml`), a Vulkan-capable GPU.
+Needs Rust 1.97+ (pinned via `rust-toolchain.toml`) and a Vulkan-capable GPU.
 
 ```bash
 git clone https://github.com/kevinraymond/fosfora.git
 cd fosfora
 cargo run --release                    # no extra deps
-cargo run --release --features video   # requires: ffmpeg on PATH
-cargo run --release --features webcam  # requires: libclang-dev, v4l-utils (Linux)
-cargo run --release --features ndi     # requires: NDI SDK (runtime-loaded)
-cargo run --release --features depth   # requires: libssl-dev, libclang-dev (includes webcam), ONNX Runtime (runtime, auto-downloaded)
+cargo run --release --features video   # video layers — needs ffmpeg on PATH
+cargo run --release --features webcam  # webcam layers — needs libclang-dev, v4l-utils (Linux)
+cargo run --release --features ndi     # NDI out — needs the NDI runtime
+cargo run --release --features depth   # webcam + MiDaS depth — needs libssl-dev, libclang-dev
 ```
 
 </details>
 
-**New to Fosfora?** Check out the [Tutorials](TUTORIALS.md) for in-depth guides on every feature — effects, audio, layers, MIDI, OSC, and more.
+## What you can do with it
 
-**Curious what Fosfora is actually hearing?** [AUDIO-FEATURES.md](AUDIO-FEATURES.md) explains all 74 audio features in plain English, with a link to the research behind each one.
+|  |  |
+|---|---|
+| **Stack and blend** | Layers work like Photoshop or OBS — up to 8 of them, 10 blend modes, drag to reorder. Put a slow shader under a particle storm, dial the opacity, and it's a new look. Layers can also be images, GIFs, video files or a live webcam, not just effects. |
+| **Perform it live** | Map any MIDI knob to any parameter by clicking **M** and wiggling the knob. Same for OSC. Or open your phone's browser and use it as a touch surface — no app to install. |
+| **It genuinely listens** | Not just "loud = big". Fosfora tracks 74 things about your music 86 times a second — beat and tempo, key and chord, drums separated from melody, the moment a build turns into a drop — and any of them can drive any parameter. |
+| **Bring the room in** | Feed it a webcam and let particles flow around your silhouette, or a photo, or a depth map. Hand and body tracking stream in over the [bridges](bridges/README.md). |
+| **Send it anywhere** | NDI out to your video mixer, or record straight to a file — H.264, HEVC or AV1 in MP4 or MKV, up to 8K, hardware-encoded, with the audio muxed in. |
+| **Save the moment** | Presets store your whole layer stack. Scenes chain them into a cue list that advances on a timer, on the beat, or when you hit the spacebar. |
+| **Make it yours** | Every effect is a WGSL shader you can open in the built-in editor and edit while it's running — it recompiles on save and tells you where you broke it. |
 
-## Make it yours
+## The effects
 
-A few ideas, in plain terms:
+**38 built-in**, all audio-reactive out of the box, every parameter a slider you can map to
+MIDI or OSC. [Full gallery with clips →](docs/GALLERY.md)
 
-- **Effects** are like TV channels — flip through them in the left panel until one grabs you.
-- **Layers** are stacked transparent sheets (think Photoshop or OBS): stack one effect over another, set each sheet's opacity and blend mode, and drag to reorder.
-- **Presets** are saved looks — build a layer stack you love, save it, and recall it instantly later or from a MIDI/OSC trigger.
-- The **binding matrix** is a patch bay: draw a line from any source (a MIDI knob, an OSC message, an audio feature, your phone, even hand tracking) to any target (a slider, layer opacity, a particle setting) to make it move with the music or your hands.
+**Shaders** — Aurora · Beam · Drift · Frost · Iris · Prism · Pulse · Shards · Storm · Strata · Tunnel
+
+**Particle simulations** — Accretion · Array · Cascade · Chaos · Cleave · Cymatics · Flux ·
+Genesis · Morph · Murmur · Mycelium · Polycephalum · Raster · Splat · Symbiosis · Tesla · Tide ·
+Turing · Vessel
+
+**Lattice** (3D cellular automata, ray-marched) — 445 · Brain · Builder · Chunky · Clouds ·
+Pulse · Pyroclastic · Shells
+
+Any particle effect can also be switched into **Volumetric** mode, which renders the layer
+you're on as ray-marched fog instead of discrete points — the same simulation, made of smoke.
 
 ## Controls
 
-### Keyboard
-
 | Key | Action |
 |-----|--------|
-| `D` | Toggle the UI overlay |
-| `F` | Toggle fullscreen |
-| `B` | Open the binding matrix |
-| `[` / `]` | Previous / next layer (when you have more than one) |
-| `Space` | Go to the next scene cue (when a timeline has cues) |
-| `T` | Play / pause the scene timeline (when a timeline has cues) |
-| `Esc` | Quit — or close the binding matrix first if it's open |
+| `D` | Show / hide the UI |
+| `F` | Fullscreen |
+| `B` | Binding matrix |
+| `[` `]` | Previous / next layer |
+| `Space` | Next scene cue |
+| `T` | Play / pause the scene timeline |
+| `Esc` | Quit |
 
-`Tab` and the arrow keys navigate the UI itself (widget focus, slider nudges) — see [QUICK-REFERENCE.md](QUICK-REFERENCE.md) for the full accessibility shortcuts.
+**Binding matrix** (press **B**) — a full-screen patch bay. Drag a line from any source (a MIDI
+knob, an OSC message, an audio feature, your phone, a hand-tracking bridge) to any target (a
+slider, layer opacity, a particle setting) and it moves with the music or with you.
 
-### Binding Matrix
+**MIDI** — click the **M** next to any parameter, move a knob, done. Auto-connects and hot-plugs.
 
-Press **B** (or click "Matrix" in the left panel) to open the binding matrix — a full-screen flow editor for connecting any source to any target. Three columns show sources (left), active bindings (center), and targets (right) with animated Bezier connection lines. Sources include MIDI CCs, OSC addresses, audio features, and WebSocket bridges (e.g. MediaPipe hand/pose/face tracking, game controllers). Targets include all effect parameters, layer opacity/blend, particle settings, and post-processing controls.
+**OSC** — receives on port 9000, transmits on 9001. Click **O** next to a parameter and send any
+message to bind it, or address things directly:
+`oscsend localhost 9000 /phosphor/param/warp_intensity f 0.8`.
+[Full address list →](docs/QUICK-REFERENCE.md)
 
-### MIDI
+**Your phone** — enable the web surface and open `http://<this-machine>:9002` on any phone or
+tablet on the same network. Multiple people can connect at once.
 
-Any MIDI controller works. Plug in and use MIDI learn:
+## Documentation
 
-1. Click the **M** button next to any parameter
-2. Move a knob or press a button on your controller
-3. The binding saves automatically to `~/.config/phosphor/midi.json`
+| | |
+|---|---|
+| [**Gallery**](docs/GALLERY.md) | Every effect, in motion |
+| [**Tutorials**](docs/TUTORIALS.md) | The full guide — effects, audio, layers, scenes, MIDI, OSC |
+| [**Quick reference**](docs/QUICK-REFERENCE.md) | Shortcuts, blend modes, OSC addresses, config files |
+| [**Audio features**](docs/AUDIO-FEATURES.md) | All 74 features in plain English, and the research behind them |
+| [**Technical**](docs/TECHNICAL.md) | Architecture, shader authoring, the `.pfx` format |
+| [**Credits**](docs/CREDITS.md) | The libraries and papers this is built on |
 
-Trigger actions (next/prev effect, layer, preset, toggle post-processing) can also be MIDI-learned.
+Settings, presets, scenes and mappings all live in `~/.config/phosphor/` (and the equivalent on
+macOS and Windows). Delete it to reset; nothing else on your system is touched.
 
-### OSC
+## FAQ
 
-| Port | Direction | Default |
-|------|-----------|---------|
-| 9000 | Receive | On |
-| 9001 | Transmit | Off (enable in UI) |
+**<a id="the-visuals-arent-reacting-to-my-music"></a>The visuals aren't reacting to my music.**
+Fosfora listens to an *input* device. Open the **Audio** panel and pick the right source:
+- **Linux** — pick the **Monitor** of your output device. That's your system audio; a plain
+  microphone only hears the room.
+- **Windows** — pick the WASAPI **loopback** device for system audio, or a mic for the room.
+- **macOS** — the default input is your mic. To visualize system audio, route it with a loopback
+  tool such as BlackHole.
 
-Addresses: `/phosphor/param/{name}`, `/phosphor/trigger/{action}`, `/phosphor/layer/{n}/param/{name}`, `/phosphor/layer/{n}/opacity`, `/phosphor/layer/{n}/blend`, `/phosphor/layer/{n}/enabled`, `/phosphor/layer/{n}/obstacle/{enabled|mode|threshold|elasticity}` (mode: 0=Bounce 1=Stick 2=Flow 3=Contain), `/phosphor/postprocess/enabled`, `/phosphor/volumetric/enabled`, `/phosphor/volumetric/{param}`, `/phosphor/scene/{goto_cue|load|loop_mode|advance_mode}`.
+**I just get a black screen, or it won't start.**
+Fosfora needs a Vulkan-capable GPU (Vulkan on Linux and Windows, Metal on macOS). Update your
+graphics drivers first.
 
-OSC learn works the same as MIDI learn — click the **O** button, send any message to bind.
+**macOS says it can't verify the app.**
+The official `.dmg` is signed and notarized, so downloading and dragging should just work. If
+macOS still blocks it, right-click the app → **Open** the first time.
 
-### Web Touch Control
+**Can I use it with my VJ software?**
+Yes — turn on NDI and it shows up as a source in Resolume, OBS, TouchDesigner and anything else
+that speaks NDI. Or record to a file and drop that in.
 
-When enabled in the UI, a touch-friendly control surface is served at:
+## From the dev
 
-```
-http://localhost:9002
-```
+Thanks for checking this project out! I've gone through a couple experimental projects recently -
+[EASE](https://github.com/kevinraymond/ease) and
+[EASEy-GLYPH](https://github.com/kevinraymond/easey-glyph) - and with Fosfora I'm trying to put
+it all together.
 
-Open it on a phone or tablet on the same network. Supports multiple simultaneous clients with live audio visualization, effect selection, param sliders, and layer management.
+I hope this project is genuinely useful. I've tried to make it as easy to use as possible, but
+I'm no kind of performer so I'm open to suggestions for improvements (drop an issue)!
 
-## Effects
+I started writing software during the time of C-64 and TRaSh-80, and even with the field of AI
+"before it was cool" ... even so, I never imagined we would get to the point where I can
+architect and design and not need to write out everything. Wild times.
 
-**24 built-in effects** — 22 you can browse and cycle through, plus 2 hidden ones (the signature **Phosphor** intro visual and a rasterizer stress test). All are audio-reactive out of the box, and every parameter is a slider in the UI that you can map to MIDI/OSC.
-
-**Shader effects** (pure GPU shaders):
-
-| Effect | Description |
-|--------|-------------|
-| **Aurora** | Flowing curtain bands driven by 7 frequency bands |
-| **Drift** | Triple domain-warped FBM fluid smoke with advected feedback |
-| **Iris** | Spinning dot with fading feedback trails |
-| **Prism** | Kaleidoscopic N-fold mirror symmetry over FBM patterns |
-| **Pulse** | Beat-synced concentric rings with feedback trails |
-| **Shards** | Animated Voronoi cells with glowing fracture edges |
-| **Storm** | Billowing dark clouds lit from within by lightning |
-| **Tunnel** | Raymarched infinite cylindrical flythrough with twist and glow |
-
-**Particle effects** (GPU compute simulations):
-
-| Effect | Description |
-|--------|-------------|
-| **Accretion** | Gravitational N-body — audio seeds attract swarms into discs and orbits |
-| **Array** | Toroidal per-band speaker emitters firing rings of particles outward |
-| **Cascade** | Screen edges emit audio-segmented particle streams that interfere |
-| **Chaos** | Strange-attractor system (Lorenz, Rössler, Chen…) with feedback trails |
-| **Cymatics** | Chladni standing-wave nodal patterns synced to frequency bands |
-| **Flux** | Organic smoke following a 3D curl-noise flow field |
-| **Genesis** | Multi-species Particle Lenia self-organizing into predator/prey |
-| **Morph** | Particles spring between images and geometry on beat drops |
-| **Murmur** | Starling murmuration with topological K=7 flocking |
-| **Mycelium** | Branching tendrils that grow at the tips and decay at the roots |
-| **Raster** | Video wall — particles map to image pixels with audio displacement |
-| **Symbiosis** | Particle Life multi-species ecosystems from a force matrix |
-| **Tesla** | Charged particles spiraling through magnetic dipole fields |
-| **Turing** | Reaction-diffusion (Gray-Scott) sculpting particles into organic patterns |
-
-## Layers
-
-- Up to **8 layers** composited on the GPU
-- **10 blend modes**: Normal, Add, Screen, Color Dodge, Multiply, Overlay, Hard Light, Difference, Exclusion, Subtract
-- Per-layer **opacity**, **enable/disable**, **lock** (freezes all settings), **pin** (prevents reorder)
-- **Drag-and-drop** reordering in the layer panel
-- **Media layers**: load PNG/JPEG/GIF/WebP as compositing layers with letterbox fit and animated playback
-- **Video layers** (with `--features video`): MP4/MOV/AVI/MKV/WebM pre-decoded to RAM for instant scrub and seek (requires ffmpeg, 60s max)
-- **Post-processing**: bloom, chromatic aberration, ACES tonemapping, vignette, film grain (audio-reactive)
-
-## Presets
-
-- Save/load the entire layer stack (effects, params, blend modes, opacities) as named presets
-- Stored in `~/.config/phosphor/presets/` as JSON
-- Cycle presets via MIDI/OSC triggers or the preset panel
-- Locked layers are preserved during preset load
-- Bundled presets: **Crucible** and **Spectral Eye** — full multi-layer compositions to start from
-
-## Configuration
-
-All config is stored in `~/.config/phosphor/`:
-
-| File | Contents |
-|------|----------|
-| `midi.json` | MIDI port, CC/trigger bindings |
-| `osc.json` | OSC ports, address bindings |
-| `web.json` | Web control surface port, enable state |
-| `presets/*.json` | Named presets |
-
-## FAQ / Troubleshooting
-
-**The visuals aren't reacting to my music.**
-Fosfora listens to an *input* device. Open the **Audio** panel (right sidebar) and pick the right source:
-- **Linux** — choose the **Monitor** of your output device (that's your system audio via PulseAudio/PipeWire); a plain microphone only hears the room.
-- **Windows** — pick the WASAPI **loopback** device for system audio, or a mic to react to the room.
-- **macOS** — the default input is your mic; to visualize system audio, route it with a loopback tool (e.g. BlackHole).
-
-**I just get a black screen / it won't start.**
-Fosfora needs a Vulkan-capable GPU (Vulkan on Linux/Windows, Metal on macOS). Update your graphics drivers, and if you built from source make sure the release build ran cleanly.
-
-**macOS says it can't verify the app / it's from an unidentified developer.**
-The official `.dmg` is signed and notarized, so a normal download-and-drag should just work. If macOS still blocks it, right-click the app → **Open** the first time, or allow it under **System Settings → Privacy & Security**.
-
-**Where do my settings and presets live?**
-In a per-user config folder — see [Configuration](#configuration) for the exact files. Deleting them resets Fosfora to defaults; nothing else on your system is touched.
-
-## Writing Effects
-
-Effects are WGSL fragment shaders paired with a JSON `.pfx` definition. Shaders have access to time, resolution, 74 audio features (7 frequency bands, beat detection, spectral shape, 13 MFCC timbral coefficients, 12 chroma pitch classes, plus loudness, key, downbeat, stereo, structure, harmonic/percussive, pitch and spectral-contrast detectors), three live audio textures (`waveform`/`spectrum`/`spectrogram` — for oscilloscopes, spectrum bars and waterfalls), up to 16 parameters, feedback from the previous frame, and a built-in library (noise, palette, SDF, tonemap).
-
-Edit a shader while running — it hot-reloads on save with error recovery.
-
-See [TECHNICAL.md](TECHNICAL.md#shader-authoring-guide) for the full authoring guide, uniform reference, multi-pass pipelines, and particle system integration.
+Give it a try! Let me know how I can make it better for you.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, the effect creation walkthrough, and PR guidelines.
+New effects are the easiest way in — a WGSL shader plus a small JSON file, and it shows up in the
+browser automatically. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[shader authoring guide](docs/TECHNICAL.md#shader-authoring-guide).
 
-## Acknowledgments
-
-**Rendering & GPU**
-- [wgpu](https://github.com/gfx-rs/wgpu) — WebGPU implementation (Vulkan/Metal/DX12)
-- [egui](https://github.com/emilk/egui) — Immediate-mode GUI
-- [naga](https://github.com/gfx-rs/wgpu/tree/trunk/naga) — WGSL shader validation
-- [glam](https://github.com/bitshifter/glam-rs) — Linear algebra
-
-**Audio**
-- [cpal](https://github.com/RustAudio/cpal) — Cross-platform audio I/O
-- [rustfft](https://github.com/ejmahler/RustFFT) — FFT for spectral analysis and beat detection
-- [midir](https://github.com/Boddlnagg/midir) — Cross-platform MIDI I/O
-
-**Networking & Control**
-- [rosc](https://github.com/klingtnet/rosc) — Open Sound Control protocol
-- [tungstenite](https://github.com/snapview/tungstenite-rs) — WebSocket server
-- [NDI](https://ndi.video) — Network Device Interface (runtime-loaded)
-
-**Depth Estimation**
-- [MiDaS](https://github.com/isl-org/MiDaS) (Intel ISL) — Monocular depth estimation model
-- [ONNX Runtime](https://onnxruntime.ai) via [ort](https://github.com/pykeio/ort) — ML inference
-
-**Gaussian Splatting (Splat effect)**
-- [SuperSplat](https://github.com/playcanvas/supersplat) (PlayCanvas) — Reference 3DGS viewer/editor; the Splat effect's sorted renderer was matched against it side-by-side, and its [PlayCanvas engine](https://github.com/playcanvas/engine) gsplat implementation (renormalized Gaussian falloff, EWA covariance projection, front-to-back alpha compositing) guided the render math
-- [3D Gaussian Splatting for Real-Time Radiance Field Rendering](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) (Kerbl, Kopanas, Leimkühler, Drettakis — INRIA) — The technique itself, incl. the anti-aliasing covariance dilation
-
-**Algorithms & Techniques**
-- [Reynolds Boids](https://www.red3d.com/cwr/boids/) (Craig Reynolds) — Flocking behavior baseline for Murmur effect
-- Vicsek model — Noise-driven order-chaos phase transitions in Murmur
-- Topological interaction (K=7 nearest neighbors) — Scale-free correlations in Murmur
-- [Inigo Quilez](https://iquilezles.org/) — Smooth Worley noise (log-sum-exp) in Storm
-- Beer-Lambert law — Volumetric light absorption in Storm
-- Curl noise — Divergence-free particle advection in Flux
-- Audio analysis — SuperFlux onsets, YIN pitch, constant-Q chroma, Krumhansl-Kessler key profiles, Fitzgerald median-filter HPSS, Foote novelty, EBU R128 loudness, MFCC and spectral contrast. Full citations in [AUDIO-FEATURES.md](AUDIO-FEATURES.md#further-reading)
-- Beat detection pipeline ported from [EASEy-GLYPH](https://github.com/kevinraymond/easey-glyph)
-
-**Fonts (SIL Open Font License 1.1)**
-- [Inter](https://github.com/rsms/inter) — Rasmus Andersson
-- [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) — JetBrains
+Built on wgpu, egui, cpal, rustfft and a lot of published research —
+[full credits](docs/CREDITS.md).
 
 ## License
 
