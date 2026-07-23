@@ -3,7 +3,7 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
-## Unreleased
+## v1.15.0 — 2026-07-23
 
 ### Added
 - **New effect: Panorama — the stereo field as a picture** — the screen becomes a map of the mix: horizontal is where a sound sits between your speakers, vertical is its pitch. A centred kick anchors the bottom while hats and reverb tails fan out to the edges, the cloud bends left and right as the image moves, and a mono mix collapses it to a single column. Nothing else in the app shows you the stereo image.
