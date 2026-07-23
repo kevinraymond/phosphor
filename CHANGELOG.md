@@ -3,7 +3,7 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
-## Unreleased
+## v1.16.0 — 2026-07-23
 
 ### Changed
 - **Ascend is now a spectral mountain range instead of a flat band** — the seven frequency bands each raise their own peak across the width, so the horizon is terrain that dances band-by-band, and brightness lifts the whole range up the frame rather than nudging a low bar pinned to the bottom. A kick punches the range up on the beat. It shipped in v1.15.0 as a nearly-flat line that only slid up and down.
