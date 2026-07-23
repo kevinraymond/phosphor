@@ -15,10 +15,10 @@
 // features (#1490).
 //
 // NO TRAIL RING: this sim never calls trail_write, and the .pfx sets
-// trail_length 0. Those two must agree — particle_lib declares trail_buffer at
-// @group(2) @binding(0) and the system only creates that bind-group layout when
-// trail_length >= 2 (system.rs), so a sim that references trail_write while its
-// .pfx says 0 fails compute-pipeline validation every frame and renders nothing.
+// trail_length 0. particle_lib declares trail_buffer at @group(2) @binding(0);
+// since #1921 the system always creates that binding (a dummy when trails are
+// off), so a sim may reference trail_write with trail_length 0 without failing
+// pipeline validation. This sim omits it anyway — it has no trail to write.
 // --- Param mapping ---
 // param(0) = altitude      (how far rolloff lifts the field)
 // param(1) = thickness     (how far bandwidth spreads it vertically)

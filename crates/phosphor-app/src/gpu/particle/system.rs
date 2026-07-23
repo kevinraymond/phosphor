@@ -115,8 +115,18 @@ pub struct ParticleSystem {
     trail_render_pipeline: Option<RenderPipeline>,
     trail_render_bgl: Option<BindGroupLayout>,
     trail_render_bind_groups: Option<[BindGroup; 2]>,
-    trail_compute_bgl: Option<BindGroupLayout>,
-    trail_compute_bind_group: Option<BindGroup>,
+    /// Group-2 layout, always present: binding 0 is `trail_buffer`, which
+    /// particle_lib declares unconditionally. A sim that references it with
+    /// trails off — a `.pfx` with `trail_length` 0, or a trail effect whose
+    /// trails are disabled at runtime past 500K particles — used to fail
+    /// pipeline validation every frame (#1921). Binding 0 is now always in the
+    /// layout, bound to the real trail buffer or to `dummy_trail_buffer`.
+    trail_compute_bgl: BindGroupLayout,
+    trail_compute_bind_group: BindGroup,
+    /// 16-byte stand-in bound at group 2 binding 0 when there is no real trail
+    /// buffer, so the group-2 layout never changes and the compute pipeline
+    /// never needs rebuilding just because trails toggled.
+    dummy_trail_buffer: wgpu::Buffer,
     trail_indirect_args_buffer: Option<wgpu::Buffer>,
     trail_prepare_indirect_pipeline: Option<ComputePipeline>,
     trail_prepare_indirect_bind_group: Option<BindGroup>,
@@ -603,32 +613,49 @@ impl ParticleSystem {
             entries: &[],
         });
 
-        // Create trail compute BGL before pipeline if trails are needed,
-        // so the shader's @group(2) bindings validate at pipeline creation.
-        let trail_compute_bgl = if def.trail_length >= 2 {
-            Some(device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("particle-trail-compute-bgl"),
-                entries: &[BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            }))
-        } else {
-            None
+        // Group 2 always carries binding 0 (`trail_buffer`), which particle_lib
+        // declares unconditionally. A sim that references it while trails are off
+        // — a `.pfx` with trail_length 0, or a trail effect whose trails get
+        // disabled at runtime past 500K particles — used to fail pipeline
+        // validation every frame (#1921). Binding it to a 16-byte dummy keeps the
+        // layout fixed, so it validates whatever the sim does and the pipeline
+        // never rebuilds when trails toggle; setup_trails swaps in the real buffer.
+        let dummy_trail_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("trail-dummy"),
+            size: 16,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let trail_rw_entry = || BindGroupLayoutEntry {
+            binding: 0,
+            visibility: ShaderStages::COMPUTE,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Storage { read_only: false },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
         };
+        let trail_compute_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("particle-trail-compute-bgl"),
+            entries: &[trail_rw_entry()],
+        });
+        let trail_compute_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("particle-trail-compute-bg-dummy"),
+            layout: &trail_compute_bgl,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: dummy_trail_buffer.as_entire_binding(),
+            }],
+        });
 
-        // Splat static attribute buffer (#1800) — group 2, binding 1 (binding
-        // 0 is particle_lib's unconditional trail_buffer declaration; the sim
-        // never references it, so the layout may omit it). Created before the
-        // pipeline layout so the sim's @group(2) bindings validate. The buffer
-        // starts zeroed (wgpu guarantee): every slot unpacks opacity 0 = dead
-        // until a scene uploads, so the effect renders empty, never garbage.
+        // Splat static attribute buffer (#1800) — group 2, binding 1. Binding 0
+        // is particle_lib's unconditional trail_buffer, bound to the dummy here
+        // (splat sims never trail); carrying it in the splat layout too keeps
+        // group 2's binding 0 present on every path (#1921). Created before the
+        // pipeline layout so the sim's @group(2) bindings validate. The static
+        // buffer starts zeroed (wgpu guarantee): every slot unpacks opacity 0 =
+        // dead until a scene uploads, so the effect renders empty, never garbage.
         // Binding 2 is the optional view-dependent SH buffer (#1862). It is
         // always bound so one pipeline layout serves every scene, but sized to
         // the LOADED splat count rather than max_particles — a DC-only capture
@@ -637,7 +664,11 @@ impl ParticleSystem {
             if def.splat.is_some() {
                 let bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
                     label: Some("particle-splat-bgl"),
-                    entries: &[compute_storage_ro(1), compute_storage_ro(2)],
+                    entries: &[
+                        trail_rw_entry(),
+                        compute_storage_ro(1),
+                        compute_storage_ro(2),
+                    ],
                 });
                 let size =
                     (std::mem::size_of::<SplatStatic>() as u64 * max_particles as u64).max(32);
@@ -648,7 +679,8 @@ impl ParticleSystem {
                     mapped_at_creation: false,
                 });
                 let sh_buffer = create_splat_sh_buffer(device, None);
-                let bg = create_splat_bind_group(device, &bgl, &buffer, &sh_buffer);
+                let bg =
+                    create_splat_bind_group(device, &bgl, &dummy_trail_buffer, &buffer, &sh_buffer);
                 (Some(bgl), Some(buffer), Some(sh_buffer), Some(bg))
             } else {
                 (None, None, None, None)
@@ -704,41 +736,26 @@ impl ParticleSystem {
             (None, None, None, None, None, None, None, None, 0)
         };
 
-        // Build compute pipeline layout matching compute_bind_group_layouts() logic:
-        // groups 0=core, 1=flow field, 2=trails OR splat static (mutually
-        // exclusive — the #1800 sanitizer disables trails under splat),
-        // 3=spatial hash, 4=R-D (if present)
-        let mut bgl_refs: Vec<&BindGroupLayout> = vec![&compute_bgl, &flow_field_bgl];
-        if let Some(ref sbgl) = splat_bgl {
-            bgl_refs.push(sbgl);
-        }
+        // Build compute pipeline layout matching compute_bind_group_layouts():
+        // groups 0=core, 1=flow field, 2=trails OR splat (mutually exclusive —
+        // the #1800 sanitizer disables trails under splat), 3=spatial hash,
+        // 4=R-D. Group 2 is ALWAYS present now — splat {0,1,2} or the trail
+        // layout {0} — so binding 0 is there whatever the sim does (#1921), and
+        // groups 3/4 need no contiguity padding for the group-2 slot.
+        let mut bgl_refs: Vec<&BindGroupLayout> = vec![
+            &compute_bgl,
+            &flow_field_bgl,
+            splat_bgl.as_ref().unwrap_or(&trail_compute_bgl),
+        ];
         if let Some(ref sh) = spatial_hash {
-            // Spatial hash at group 3 requires group 2 to exist (contiguous)
-            if bgl_refs.len() < 3 {
-                if let Some(ref trail_bgl) = trail_compute_bgl {
-                    bgl_refs.push(trail_bgl);
-                } else {
-                    bgl_refs.push(&empty_bgl);
-                }
-            }
             bgl_refs.push(&sh.query_bgl);
-        } else if let Some(ref trail_bgl) = trail_compute_bgl {
-            if bgl_refs.len() < 3 {
-                bgl_refs.push(trail_bgl);
-            }
+        } else if rd_particle_bgl.is_some() || trail_field_sim_bgl.is_some() {
+            bgl_refs.push(&empty_bgl); // pad group 3 so group 4 stays at index 4
         }
+        // R-D and the physarum trail field are mutually exclusive at group 4.
         if let Some(ref rd_pbgl) = rd_particle_bgl {
-            // Group 4 requires groups 2 and 3 to exist (contiguous)
-            while bgl_refs.len() < 4 {
-                bgl_refs.push(&empty_bgl);
-            }
             bgl_refs.push(rd_pbgl);
-        }
-        if let Some(ref tf_sbgl) = trail_field_sim_bgl {
-            // Group 4 (mutually exclusive with R-D); pad groups 2/3 to keep indices contiguous.
-            while bgl_refs.len() < 4 {
-                bgl_refs.push(&empty_bgl);
-            }
+        } else if let Some(ref tf_sbgl) = trail_field_sim_bgl {
             bgl_refs.push(tf_sbgl);
         }
 
@@ -1237,7 +1254,8 @@ impl ParticleSystem {
             trail_render_bgl: None,
             trail_render_bind_groups: None,
             trail_compute_bgl,
-            trail_compute_bind_group: None,
+            trail_compute_bind_group,
+            dummy_trail_buffer,
             trail_indirect_args_buffer: None,
             trail_prepare_indirect_pipeline: None,
             trail_prepare_indirect_bind_group: None,
@@ -1368,38 +1386,23 @@ impl ParticleSystem {
     /// splat missing HERE while present in `new()` = "group 2 binding 1 not
     /// available in the pipeline layout" spam on any shader edit).
     fn compute_bind_group_layouts(&self) -> Vec<&BindGroupLayout> {
-        let mut layouts: Vec<&BindGroupLayout> = vec![&self.compute_bgl, &self.flow_field_bgl];
-
-        if let Some(splat_bgl) = &self.splat_bgl {
-            layouts.push(splat_bgl);
-        }
+        // MUST mirror the builder in new() (same order, same padding) or a
+        // recompile produces a layout the bind groups no longer match. Group 2
+        // is always present: splat {0,1,2} or the trail layout {0}.
+        let mut layouts: Vec<&BindGroupLayout> = vec![
+            &self.compute_bgl,
+            &self.flow_field_bgl,
+            self.splat_bgl.as_ref().unwrap_or(&self.trail_compute_bgl),
+        ];
         if let Some(hash) = &self.spatial_hash {
-            // Group 3 requires group 2 to exist (contiguous indices).
-            // Use trail BGL if available, otherwise empty placeholder.
-            if layouts.len() < 3 {
-                if let Some(trail_bgl) = &self.trail_compute_bgl {
-                    layouts.push(trail_bgl);
-                } else {
-                    layouts.push(&self.empty_bgl);
-                }
-            }
             layouts.push(&hash.query_bgl);
-        } else if let Some(trail_bgl) = &self.trail_compute_bgl {
-            if layouts.len() < 3 {
-                layouts.push(trail_bgl);
-            }
+        } else if self.rd_particle_bgl.is_some() || self.trail_field_sim_bgl.is_some() {
+            layouts.push(&self.empty_bgl); // pad group 3 so group 4 stays at index 4
         }
-
-        // Group 4: R-D texture, or the physarum trail field (mutually exclusive)
+        // Group 4: R-D texture, or the physarum trail field (mutually exclusive).
         if let Some(ref rd_pbgl) = self.rd_particle_bgl {
-            while layouts.len() < 4 {
-                layouts.push(&self.empty_bgl);
-            }
             layouts.push(rd_pbgl);
         } else if let Some(ref tf_sbgl) = self.trail_field_sim_bgl {
-            while layouts.len() < 4 {
-                layouts.push(&self.empty_bgl);
-            }
             layouts.push(tf_sbgl);
         }
 
@@ -1753,16 +1756,13 @@ impl ParticleSystem {
             pass.set_pipeline(&self.compute_pipeline);
             pass.set_bind_group(0, &self.compute_bind_groups[self.current], &[]);
             pass.set_bind_group(1, &self.flow_field_bind_group, &[]);
+            // Group 2 is always bound: splat {0,1,2} or the trail layout {0},
+            // whose binding 0 (real trail buffer or dummy) satisfies
+            // particle_lib's unconditional trail_buffer declaration (#1921).
             if let Some(splat_bg) = &self.splat_bind_group {
                 pass.set_bind_group(2, splat_bg, &[]);
-            } else if let Some(trail_bg) = &self.trail_compute_bind_group {
-                pass.set_bind_group(2, trail_bg, &[]);
-            } else if self.spatial_hash.is_some()
-                || self.rd_particle_bgs.is_some()
-                || self.trail_field_sim_bgs.is_some()
-            {
-                // Groups 3/4 require group 2 to exist (contiguous indices)
-                pass.set_bind_group(2, &self.empty_bind_group, &[]);
+            } else {
+                pass.set_bind_group(2, &self.trail_compute_bind_group, &[]);
             }
             if let Some(hash) = &self.spatial_hash {
                 pass.set_bind_group(3, &hash.query_bind_group, &[]);
@@ -2245,7 +2245,8 @@ impl ParticleSystem {
         if let Some(recs) = &sh {
             queue.write_buffer(&sh_buffer, 0, bytemuck::cast_slice(recs));
         }
-        let bg = create_splat_bind_group(device, bgl, &buffer, &sh_buffer);
+        let bg =
+            create_splat_bind_group(device, bgl, &self.dummy_trail_buffer, &buffer, &sh_buffer);
 
         self.splat_static_buffer = Some(buffer);
         self.splat_sh_buffer = Some(sh_buffer);
@@ -2735,6 +2736,25 @@ impl ParticleSystem {
 
     /// Set up trail rendering with the given trail length.
     /// Creates trail buffer, compute bind group for trail writes, and render pipeline.
+    /// Tear down trail rendering and point group 2's binding 0 back at the dummy
+    /// buffer. The group-2 layout is unchanged (still `trail_compute_bgl`), so the
+    /// compute pipeline stays valid and needs no recompile (#1921).
+    fn disable_trails(&mut self, device: &Device) {
+        self.trail_buffer = None;
+        self.trail_length = 0;
+        self.trail_render_pipeline = None;
+        self.trail_render_bgl = None;
+        self.trail_render_bind_groups = None;
+        self.trail_compute_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("particle-trail-compute-bg-dummy"),
+            layout: &self.trail_compute_bgl,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: self.dummy_trail_buffer.as_entire_binding(),
+            }],
+        });
+    }
+
     pub fn setup_trails(
         &mut self,
         device: &Device,
@@ -2743,13 +2763,7 @@ impl ParticleSystem {
         trail_width: f32,
     ) {
         if trail_length < 2 {
-            self.trail_buffer = None;
-            self.trail_length = 0;
-            self.trail_render_pipeline = None;
-            self.trail_render_bgl = None;
-            self.trail_render_bind_groups = None;
-            self.trail_compute_bgl = None;
-            self.trail_compute_bind_group = None;
+            self.disable_trails(device);
             return;
         }
 
@@ -2763,13 +2777,7 @@ impl ParticleSystem {
                 self.max_particles,
                 MAX_TRAIL_PARTICLES,
             );
-            self.trail_buffer = None;
-            self.trail_length = 0;
-            self.trail_render_pipeline = None;
-            self.trail_render_bgl = None;
-            self.trail_render_bind_groups = None;
-            self.trail_compute_bgl = None;
-            self.trail_compute_bind_group = None;
+            self.disable_trails(device);
             return;
         }
 
@@ -2789,13 +2797,7 @@ impl ParticleSystem {
             }
             if capped < 2 {
                 log::warn!("Trail length too short after capping — trails disabled");
-                self.trail_buffer = None;
-                self.trail_length = 0;
-                self.trail_render_pipeline = None;
-                self.trail_render_bgl = None;
-                self.trail_render_bind_groups = None;
-                self.trail_compute_bgl = None;
-                self.trail_compute_bind_group = None;
+                self.disable_trails(device);
                 return;
             }
             capped
@@ -2813,27 +2815,12 @@ impl ParticleSystem {
             mapped_at_creation: false,
         });
 
-        // Compute bind group for trail writes (group 2)
-        let trail_compute_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("particle-trail-compute-bgl"),
-            entries: &[
-                // binding 0: trail buffer (read_write)
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
+        // Compute bind group for trail writes (group 2, binding 0). Reuses the
+        // persistent group-2 layout so the compute pipeline built in new() stays
+        // valid — only the bound buffer changes, dummy → real (#1921).
         let trail_compute_bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("particle-trail-compute-bg"),
-            layout: &trail_compute_bgl,
+            layout: &self.trail_compute_bgl,
             entries: &[BindGroupEntry {
                 binding: 0,
                 resource: trail_buffer.as_entire_binding(),
@@ -2944,11 +2931,10 @@ impl ParticleSystem {
                 cache: None,
             });
 
-        // Store trail compute BGL/BG now so recompile can see them
-        self.trail_compute_bgl = Some(trail_compute_bgl);
-        self.trail_compute_bind_group = Some(trail_compute_bind_group);
-
-        // Recompile compute pipeline with trail bind group (group 2)
+        // Point group 2 at the real trail buffer. The layout is unchanged, so
+        // the recompile below rebuilds an identical-layout pipeline — kept for
+        // safety, cheap, and only runs the once at trail setup.
+        self.trail_compute_bind_group = trail_compute_bind_group;
         self.recompile_compute(device, &self.current_compute_source.clone());
 
         // Trail indirect args buffer (vertex_count = 6*(trail_length-1), instance_count from alive)
@@ -2973,7 +2959,7 @@ impl ParticleSystem {
         self.trail_render_pipeline = Some(trail_render_pipeline);
         self.trail_render_bgl = Some(trail_render_bgl);
         self.trail_render_bind_groups = Some(trail_render_bind_groups);
-        // trail_compute_bgl and trail_compute_bind_group already stored above (before recompile)
+        // trail_compute_bind_group already stored above (before recompile)
         self.trail_indirect_args_buffer = Some(trail_indirect_args_buffer);
         self.trail_prepare_indirect_pipeline = Some(trail_prepare_pipeline);
         self.trail_prepare_indirect_bind_group = Some(trail_prepare_bg);
@@ -3554,11 +3540,13 @@ fn create_splat_sh_buffer(device: &Device, records: Option<&[SplatShRec]>) -> wg
     })
 }
 
-/// The group-2 splat bind group: static attributes at binding 1, SH at 2.
-/// Shared by `new()` and `upload_splat_cloud` so the two never drift.
+/// The group-2 splat bind group: the trail dummy at binding 0 (particle_lib
+/// declares `trail_buffer` there and splat sims never trail), static attributes
+/// at 1, SH at 2. Shared by `new()` and `upload_splat_cloud` so the two never drift.
 fn create_splat_bind_group(
     device: &Device,
     layout: &BindGroupLayout,
+    dummy_trail: &wgpu::Buffer,
     static_buffer: &wgpu::Buffer,
     sh_buffer: &wgpu::Buffer,
 ) -> BindGroup {
@@ -3566,6 +3554,10 @@ fn create_splat_bind_group(
         label: Some("particle-splat-bg"),
         layout,
         entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: dummy_trail.as_entire_binding(),
+            },
             BindGroupEntry {
                 binding: 1,
                 resource: static_buffer.as_entire_binding(),
@@ -4882,4 +4874,114 @@ fn create_wboit_resources(
         composite_bind_group,
         composite_bgl,
     )
+}
+
+#[cfg(test)]
+mod trail_binding_tests {
+    //! #1921: a particle sim that references `trail_write` with trails off used
+    //! to fail compute-pipeline validation every frame — a black layer and a log
+    //! flood. Group 2's binding 0 is now always in the layout, so these probes
+    //! build a real `ParticleSystem` around a shipped trail sim (`tide_sim.wgsl`
+    //! calls `trail_write`) with trails off and assert the dispatch validates
+    //! clean. `layout: None` shader probes can't catch this — the mismatch is
+    //! between the explicit pipeline layout and the shader's bindings.
+    use super::*;
+    use crate::effect::format::PfxEffect;
+    use crate::gpu::test_gpu::{gpu_guard, test_gpu};
+
+    fn tide_def() -> ParticleDef {
+        let effect: PfxEffect =
+            serde_json::from_str(include_str!("../../../../../assets/effects/tide.pfx")).unwrap();
+        effect.particles.expect("tide is a particle effect")
+    }
+
+    fn tide_sim_src() -> String {
+        let noise = include_str!("../../../../../assets/shaders/lib/noise.wgsl");
+        let palette = include_str!("../../../../../assets/shaders/lib/palette.wgsl");
+        let plib = include_str!("../../../../../assets/shaders/lib/particle_lib.wgsl");
+        let sim = include_str!("../../../../../assets/shaders/tide_sim.wgsl");
+        format!("{noise}\n{palette}\n{plib}\n{sim}")
+    }
+
+    fn dispatch_once(ps: &ParticleSystem, device: &Device, queue: &Queue) {
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("trail-probe-enc"),
+        });
+        ps.dispatch(&mut enc, queue);
+        queue.submit([enc.finish()]);
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+    }
+
+    // Reported trigger: a .pfx sets trail_length 0 while its sim calls trail_write.
+    #[test]
+    #[ignore = "requires a GPU/software adapter"]
+    fn trail_length_zero_with_trail_write_validates() {
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
+        let sim_src = tide_sim_src();
+        let mut def = tide_def();
+        def.trail_length = 0; // the user edit that black-screened the layer
+
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let ps = ParticleSystem::new(
+            &device,
+            &queue,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            &def,
+            &sim_src,
+            false,
+        );
+        dispatch_once(&ps, &device, &queue);
+        let err = pollster::block_on(device.pop_error_scope());
+        assert!(
+            err.is_none(),
+            "trail_length 0 + trail_write must validate: {err:?}"
+        );
+    }
+
+    // Second trigger (#1921 board note): a trail effect whose trails are disabled
+    // at runtime past the 500K-particle cap. new() builds the pipeline expecting
+    // group 2; setup_trails returns before the recompile that would have rebuilt
+    // it, so the dispatch used to bind a group 2 without binding 0.
+    #[test]
+    #[ignore = "requires a GPU/software adapter"]
+    fn trails_disabled_over_particle_cap_validates() {
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
+        let sim_src = tide_sim_src();
+        let mut def = tide_def();
+        assert!(def.trail_length >= 2, "tide ships with trails");
+        def.max_count = 600_000; // past MAX_TRAIL_PARTICLES (500K)
+        def.max_scaled_count = 0; // no quality scaling — keep the real count
+
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut ps = ParticleSystem::new(
+            &device,
+            &queue,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            &def,
+            &sim_src,
+            false,
+        );
+        assert!(
+            ps.max_particles > 500_000,
+            "probe needs >500K to hit the cap"
+        );
+        // The app calls setup_trails after new(); >500K disables trails here.
+        ps.setup_trails(
+            &device,
+            wgpu::TextureFormat::Rgba16Float,
+            def.trail_length,
+            def.trail_width,
+        );
+        dispatch_once(&ps, &device, &queue);
+        let err = pollster::block_on(device.pop_error_scope());
+        assert!(
+            err.is_none(),
+            "runtime-disabled trails must validate: {err:?}"
+        );
+    }
 }
