@@ -1821,13 +1821,9 @@ impl App {
             effect.particles.as_ref().and_then(|pd| pd.splat.as_ref()),
         ) {
             match crate::gpu::particle::splat_source::resolve_source(&splat.source) {
-                Ok(path) => self.splat_loader.load(
-                    path,
-                    ps.max_particles,
-                    splat.scene_scale,
-                    splat.rotation_degrees,
-                    layer_idx,
-                ),
+                Ok(path) => self
+                    .splat_loader
+                    .load(path, ps.max_particles, splat.into(), layer_idx),
                 Err(e) => log::info!("Splat scene not loaded yet: {e}"),
             }
         }
@@ -3050,13 +3046,7 @@ impl App {
                         // Same UX as missing media: warn and keep going.
                         log::warn!("Splat scene '{scene_path}' not found for layer {i}");
                     } else if !already_loaded {
-                        self.splat_loader.load(
-                            path,
-                            target,
-                            splat.scene_scale,
-                            splat.rotation_degrees,
-                            i,
-                        );
+                        self.splat_loader.load(path, target, (&splat).into(), i);
                     }
                 }
             }

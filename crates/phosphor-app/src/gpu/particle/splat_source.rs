@@ -20,6 +20,38 @@ use crossbeam_channel::{Receiver, TryRecvError, bounded};
 
 use crate::gpu::half::f32_to_f16;
 
+/// The `.pfx` `splat` block's load-time scene options, threaded from `SplatDef`
+/// down to the decoder. Bundled rather than passed loose because they travel
+/// together through five call sites, and a third bare `f32` alongside
+/// `scene_scale` is exactly the kind of positional argument that gets
+/// transposed. See [`SplatDef`](super::types::SplatDef) for what each means.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneOptions {
+    pub scene_scale: f32,
+    pub rotation_degrees: [f32; 3],
+    pub far_clip: f32,
+}
+
+impl Default for SceneOptions {
+    fn default() -> Self {
+        Self {
+            scene_scale: 1.0,
+            rotation_degrees: [0.0; 3],
+            far_clip: 0.0, // no clip unless a .pfx asks for one
+        }
+    }
+}
+
+impl From<&super::types::SplatDef> for SceneOptions {
+    fn from(d: &super::types::SplatDef) -> Self {
+        Self {
+            scene_scale: d.scene_scale,
+            rotation_degrees: d.rotation_degrees,
+            far_clip: d.far_clip,
+        }
+    }
+}
+
 /// Transform applied to normalize the source scene (recorded for debugging /
 /// status UI; the cloud itself is already transformed).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -689,10 +721,54 @@ fn median_of(values: &mut [f32]) -> f32 {
     *m
 }
 
+/// Drop every splat further than `far_clip` × `radius_p95` from `center`.
+/// Returns the number removed. All SoA vectors move in lockstep — a splat that
+/// loses only some of its attributes is worse than one that stays.
+fn clip_far_field(
+    cloud: &mut SplatCloud,
+    center: [f32; 3],
+    radius_p95: f32,
+    far_clip: f32,
+) -> usize {
+    if far_clip <= 0.0 || radius_p95 <= 1e-6 {
+        return 0;
+    }
+    let limit = far_clip * radius_p95;
+    let limit_sq = limit * limit;
+    let keep: Vec<usize> = (0..cloud.count)
+        .filter(|&i| {
+            let p = cloud.positions[i];
+            let d = [p[0] - center[0], p[1] - center[1], p[2] - center[2]];
+            d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= limit_sq
+        })
+        .collect();
+    let dropped = cloud.count - keep.len();
+    if dropped == 0 {
+        return 0;
+    }
+    let pick = |src: &[[f32; 3]]| -> Vec<[f32; 3]> { keep.iter().map(|&i| src[i]).collect() };
+    cloud.positions = pick(&cloud.positions);
+    cloud.scales = pick(&cloud.scales);
+    cloud.colors = pick(&cloud.colors);
+    cloud.rotations = keep.iter().map(|&i| cloud.rotations[i]).collect();
+    cloud.opacities = keep.iter().map(|&i| cloud.opacities[i]).collect();
+    if !cloud.sh.is_empty() {
+        cloud.sh = keep.iter().map(|&i| cloud.sh[i]).collect();
+    }
+    cloud.count = keep.len();
+    dropped
+}
+
 /// Recenter to the per-axis median, scale so the 95th-percentile radius is
 /// 1.0 × `scene_scale`, then apply the .pfx Euler rotation offsets. Runs on
 /// the retained (subsampled) set — a representative sample by construction.
-fn normalize_cloud(cloud: &mut SplatCloud, scene_scale: f32, rotation_degrees: [f32; 3]) {
+/// `far_clip` drops the unbounded-capture far field first (see [`SplatDef`]).
+fn normalize_cloud(cloud: &mut SplatCloud, opts: SceneOptions) {
+    let SceneOptions {
+        scene_scale,
+        rotation_degrees,
+        far_clip,
+    } = opts;
     if cloud.count == 0 {
         return;
     }
@@ -715,6 +791,20 @@ fn normalize_cloud(cloud: &mut SplatCloud, scene_scale: f32, rotation_degrees: [
     let p95_idx = ((dist_sq.len() - 1) as f32 * 0.95) as usize;
     let (_, v, _) = dist_sq.select_nth_unstable_by(p95_idx, f32::total_cmp);
     let radius_p95 = v.sqrt();
+
+    // Cull the far field BEFORE scaling, and keep the p95 measured on the full
+    // set: recomputing it afterwards would zoom the framing by however much was
+    // dropped, so an unbounded capture would change size the moment far_clip is
+    // touched. The clip only removes outliers, never rescales what remains.
+    let dropped = clip_far_field(cloud, center, radius_p95, far_clip);
+    if dropped > 0 {
+        log::info!(
+            "Splat far-field clip: dropped {dropped} splats beyond {far_clip}× the p95 radius \
+             ({} kept)",
+            cloud.count
+        );
+    }
+
     let norm = if radius_p95 > 1e-6 {
         radius_p95.recip()
     } else {
@@ -773,8 +863,7 @@ fn normalize_cloud(cloud: &mut SplatCloud, scene_scale: f32, rotation_degrees: [
 pub fn load_splat_file(
     path: &Path,
     target_count: u32,
-    scene_scale: f32,
-    rotation_degrees: [f32; 3],
+    opts: SceneOptions,
     progress: &AtomicU8,
     cancel: &AtomicBool,
 ) -> Result<SplatCloud, String> {
@@ -805,7 +894,7 @@ pub fn load_splat_file(
     if cloud.count == 0 {
         return Err("scene contains no visible splats".to_string());
     }
-    normalize_cloud(&mut cloud, scene_scale, rotation_degrees);
+    normalize_cloud(&mut cloud, opts);
     progress.store(100, Ordering::Relaxed);
     Ok(cloud)
 }
@@ -870,14 +959,7 @@ impl SplatSceneLoader {
 
     /// Start loading a scene in the background for `layer_idx`, subsampled to
     /// `target_count` with the .pfx scene transform applied.
-    pub fn load(
-        &mut self,
-        path: PathBuf,
-        target_count: u32,
-        scene_scale: f32,
-        rotation_degrees: [f32; 3],
-        layer_idx: usize,
-    ) {
+    pub fn load(&mut self, path: PathBuf, target_count: u32, opts: SceneOptions, layer_idx: usize) {
         let load_gen = self.begin_request(
             path.file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -892,14 +974,7 @@ impl SplatSceneLoader {
         thread::Builder::new()
             .name("splat-scene-loader".into())
             .spawn(move || {
-                let result = match load_splat_file(
-                    &path,
-                    target_count,
-                    scene_scale,
-                    rotation_degrees,
-                    &progress,
-                    &cancel,
-                ) {
+                let result = match load_splat_file(&path, target_count, opts, &progress, &cancel) {
                     Ok(cloud) => SplatLoadResult::Loaded {
                         layer_idx,
                         cloud: Box::new(cloud),
@@ -914,13 +989,7 @@ impl SplatSceneLoader {
     /// Open a file dialog (background thread, `ParticleSourceLoader` pattern)
     /// then decode the chosen scene. A cancelled dialog drops the sender →
     /// `try_recv` sees Disconnected and resets `loading`.
-    pub fn open_dialog(
-        &mut self,
-        target_count: u32,
-        scene_scale: f32,
-        rotation_degrees: [f32; 3],
-        layer_idx: usize,
-    ) {
+    pub fn open_dialog(&mut self, target_count: u32, opts: SceneOptions, layer_idx: usize) {
         let load_gen = self.begin_request("choosing file…".to_string());
 
         let (tx, rx) = bounded(1);
@@ -935,20 +1004,14 @@ impl SplatSceneLoader {
                     .set_title("Load Gaussian Splat Scene")
                     .add_filter("Splat scenes", &["ply", "splat"]);
                 if let Some(path) = dialog.pick_file() {
-                    let result = match load_splat_file(
-                        &path,
-                        target_count,
-                        scene_scale,
-                        rotation_degrees,
-                        &progress,
-                        &cancel,
-                    ) {
-                        Ok(cloud) => SplatLoadResult::Loaded {
-                            layer_idx,
-                            cloud: Box::new(cloud),
-                        },
-                        Err(message) => SplatLoadResult::Error { layer_idx, message },
-                    };
+                    let result =
+                        match load_splat_file(&path, target_count, opts, &progress, &cancel) {
+                            Ok(cloud) => SplatLoadResult::Loaded {
+                                layer_idx,
+                                cloud: Box::new(cloud),
+                            },
+                            Err(message) => SplatLoadResult::Error { layer_idx, message },
+                        };
                     let _ = tx.send((load_gen, result));
                 }
             })
@@ -1275,7 +1338,13 @@ mod tests {
         let cloud = {
             let bytes = make_ply_with_f_rest(SH_COEFFS, &[visible_splat()]);
             let mut c = parse_bytes(&bytes, 10).unwrap();
-            normalize_cloud(&mut c, 1.0, [90.0, 0.0, 0.0]);
+            normalize_cloud(
+                &mut c,
+                SceneOptions {
+                    rotation_degrees: [90.0, 0.0, 0.0],
+                    ..Default::default()
+                },
+            );
             c
         };
         // A source-frame +Y direction must come back out of the render frame.
@@ -1409,12 +1478,120 @@ mod tests {
         assert!(err.contains("32-byte"));
     }
 
+    /// A compact cloud of `n` splats plus `far` outliers parked at `dist` × the
+    /// cluster's own extent — a miniature of the unbounded-capture shape.
+    fn cloud_with_outliers(n: usize, far: usize, dist: f32) -> SplatCloud {
+        let mut verts = Vec::new();
+        for i in 0..n {
+            let mut v = visible_splat();
+            let t = i as f32 / n as f32;
+            v.pos = [t, t * 0.5, -t];
+            verts.push(v);
+        }
+        for i in 0..far {
+            let mut v = visible_splat();
+            v.pos = [dist + i as f32, 0.0, 0.0];
+            verts.push(v);
+        }
+        let bytes = make_ply_with_f_rest(SH_COEFFS, &verts);
+        parse_bytes(&bytes, (n + far) as u32).unwrap()
+    }
+
+    #[test]
+    fn far_clip_needs_the_far_field_under_5_percent() {
+        // The threshold is a multiple of the p95 radius, so if MORE than 5% of a
+        // capture is far field the p95 itself lands out there and the clip
+        // becomes a no-op. Real unbounded captures sit well inside that (ladder
+        // .ply: 2.24%), but the limit is structural, so pin it.
+        let mut cloud = cloud_with_outliers(200, 12, 500.0); // 5.7% — too many
+        normalize_cloud(
+            &mut cloud,
+            SceneOptions {
+                far_clip: 10.0,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            cloud.count, 212,
+            "p95 lands in the far field; nothing culled"
+        );
+    }
+
+    #[test]
+    fn far_clip_drops_the_far_field_and_keeps_the_scene() {
+        let mut cloud = cloud_with_outliers(200, 4, 500.0); // 2.0%, like ladder.ply
+        assert_eq!(cloud.count, 204);
+        normalize_cloud(
+            &mut cloud,
+            SceneOptions {
+                far_clip: 10.0,
+                ..Default::default()
+            },
+        );
+        assert_eq!(cloud.count, 200, "the 4 far-field splats must be dropped");
+        // Every SoA vector moves in lockstep — a splat keeping its position but
+        // inheriting a neighbour's colour or SH would be far worse than one that
+        // simply stayed.
+        assert_eq!(cloud.positions.len(), 200);
+        assert_eq!(cloud.scales.len(), 200);
+        assert_eq!(cloud.rotations.len(), 200);
+        assert_eq!(cloud.colors.len(), 200);
+        assert_eq!(cloud.opacities.len(), 200);
+        assert_eq!(cloud.sh.len(), 200, "SH must be culled with the rest");
+    }
+
+    #[test]
+    fn far_clip_zero_keeps_everything() {
+        let mut cloud = cloud_with_outliers(200, 4, 500.0);
+        normalize_cloud(&mut cloud, SceneOptions::default()); // far_clip 0
+        assert_eq!(cloud.count, 204);
+    }
+
+    #[test]
+    fn far_clip_is_a_noop_on_a_compact_capture() {
+        // The default must not touch an object capture. trooper.ply's furthest
+        // splat is 1.4× its p95 radius; nothing here exceeds that either.
+        let mut cloud = cloud_with_outliers(200, 0, 0.0);
+        let before = cloud.count;
+        normalize_cloud(
+            &mut cloud,
+            SceneOptions {
+                far_clip: 10.0,
+                ..Default::default()
+            },
+        );
+        assert_eq!(cloud.count, before);
+    }
+
+    #[test]
+    fn far_clip_does_not_rescale_what_remains() {
+        // The clip must not change framing: p95 is measured on the FULL set and
+        // reused, so toggling far_clip cannot make the scene jump in size.
+        let mut kept = cloud_with_outliers(200, 4, 500.0);
+        let mut clipped = cloud_with_outliers(200, 4, 500.0);
+        normalize_cloud(&mut kept, SceneOptions::default());
+        normalize_cloud(
+            &mut clipped,
+            SceneOptions {
+                far_clip: 10.0,
+                ..Default::default()
+            },
+        );
+        assert!(
+            (kept.transform.scale - clipped.transform.scale).abs() < 1e-9,
+            "clipping changed the scene scale: {} vs {}",
+            kept.transform.scale,
+            clipped.transform.scale
+        );
+        assert_eq!(kept.positions[0], clipped.positions[0]);
+    }
+
     #[test]
     fn normalization_recenters_and_scales() {
         let bytes = make_test_ply(CANONICAL_PROPS, &many_splats(200));
         let mut cloud = parse_bytes(&bytes, 200).unwrap();
         let pre_scale = cloud.scales[0][0];
-        normalize_cloud(&mut cloud, 1.0, [0.0, 0.0, 0.0]);
+        normalize_cloud(&mut cloud, SceneOptions::default());
         // Center ≈ 0 (median-recentred): the median position maps to origin.
         let mut xs: Vec<f32> = cloud.positions.iter().map(|p| p[0]).collect();
         let med_x = median_of(&mut xs);
@@ -1442,7 +1619,13 @@ mod tests {
         splats[2].pos = [0.0, 0.0, 0.0];
         let bytes = make_test_ply(CANONICAL_PROPS, &splats);
         let mut cloud = parse_bytes(&bytes, 10).unwrap();
-        normalize_cloud(&mut cloud, 1.0, [0.0, 0.0, 90.0]); // Z+90°: x → y
+        normalize_cloud(
+            &mut cloud,
+            SceneOptions {
+                rotation_degrees: [0.0, 0.0, 90.0],
+                ..Default::default()
+            },
+        ); // Z+90°: x → y
         let p = cloud.positions[0];
         assert!(p[0].abs() < 1e-4 && (p[1] - 1.0).abs() < 1e-4, "{p:?}");
         // Quaternion rotated too (was identity → now Z+90°).
@@ -1479,7 +1662,8 @@ mod tests {
         std::fs::write(&path, &bytes).unwrap();
         let progress = AtomicU8::new(0);
         let cancel = AtomicBool::new(false);
-        let cloud = load_splat_file(&path, 10, 1.0, [0.0, 0.0, 0.0], &progress, &cancel).unwrap();
+        let cloud =
+            load_splat_file(&path, 10, SceneOptions::default(), &progress, &cancel).unwrap();
         assert_eq!(cloud.count, 1);
         assert_eq!(progress.load(Ordering::Relaxed), 100);
         let _ = std::fs::remove_file(&path);

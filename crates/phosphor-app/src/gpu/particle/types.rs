@@ -661,6 +661,29 @@ pub struct SplatDef {
     /// rebuilds the particle system (it changes which pipelines exist).
     #[serde(default = "default_true")]
     pub sort: bool,
+    /// Drop splats further than this multiple of the scene's 95th-percentile
+    /// radius, at load. 0 disables it.
+    ///
+    /// An UNBOUNDED capture (a room, a landscape) carries a far field of huge
+    /// near-opaque primitives standing in for sky and background. On
+    /// `ladder.ply` those are 2.24% of the splats but ~100% of the total
+    /// projected area, reaching 74× the p95 radius — they surround the camera
+    /// at every orbit distance, so no amount of backing off escapes them and
+    /// the scene renders as milk. A masked object capture has no such tail
+    /// (`trooper.ply` stops at 1.4× p95), so the default is a no-op there.
+    ///
+    /// Because the threshold is a MULTIPLE of the p95 radius, it only works when
+    /// the far field is under 5% of the capture — past that the p95 itself lands
+    /// out there and the clip becomes a no-op. Real unbounded captures sit well
+    /// inside that (`ladder.ply`: 2.24%), but the limit is structural.
+    ///
+    /// Load-time, like `scene_scale` — changing it needs a scene reload.
+    #[serde(default = "default_far_clip")]
+    pub far_clip: f32,
+}
+
+fn default_far_clip() -> f32 {
+    10.0
 }
 
 /// .pfx particle definition (JSON).
@@ -1193,6 +1216,7 @@ mod tests {
             scene_scale: 1.5,
             rotation_degrees: [0.0, 90.0, -12.5],
             sort: false,
+            far_clip: 4.0,
         };
         let json = serde_json::to_string(&def).unwrap();
         let back: SplatDef = serde_json::from_str(&json).unwrap();
@@ -1208,5 +1232,9 @@ mod tests {
         assert_eq!(splat.scene_scale, 1.0);
         assert_eq!(splat.rotation_degrees, [0.0, 0.0, 0.0]);
         assert!(splat.sort); // defaults on
+        // Far-field cull is on by default and deliberately generous: it must be
+        // a no-op on a masked object capture (trooper.ply reaches 1.4× p95) while
+        // still catching an unbounded scene's sky primitives (ladder.ply, 74×).
+        assert_eq!(splat.far_clip, 10.0);
     }
 }

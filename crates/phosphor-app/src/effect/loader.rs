@@ -1369,6 +1369,8 @@ mod tests {
         // Use the effect's own scene transform (incl. the Y-down→Y-up 180°-X flip)
         // so the offscreen A/B exercises the real load path, not an unrotated one.
         let scene_scale = def.splat.as_ref().map_or(1.0, |s| s.scene_scale);
+        // SPLAT_FAR_CLIP overrides the .pfx far-field cull (0 = keep everything).
+        let far_clip = def.splat.as_ref().map_or(0.0, |s| s.far_clip);
         // SPLAT_ROT=x,y,z overrides the .pfx Euler offsets — the SH path is the
         // one thing that reads the scene rotation back out (it un-rotates the
         // view direction), so testing it needs the rotation to be a variable.
@@ -1392,8 +1394,11 @@ mod tests {
             crate::gpu::particle::splat_source::load_splat_file(
                 std::path::Path::new(p),
                 1_000_000,
-                scene_scale,
-                scene_rot,
+                crate::gpu::particle::splat_source::SceneOptions {
+                    scene_scale,
+                    rotation_degrees: scene_rot,
+                    far_clip: env_f("SPLAT_FAR_CLIP", far_clip),
+                },
                 &prog,
                 &cancel,
             )
@@ -1703,8 +1708,11 @@ mod tests {
                 crate::gpu::particle::splat_source::load_splat_file(
                     std::path::Path::new(&p),
                     count,
-                    1.0,
-                    scene_rot,
+                    crate::gpu::particle::splat_source::SceneOptions {
+                        rotation_degrees: scene_rot,
+                        far_clip: def.splat.as_ref().map_or(0.0, |s| s.far_clip),
+                        ..Default::default()
+                    },
                     &prog,
                     &cancel,
                 )

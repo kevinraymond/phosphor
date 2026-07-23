@@ -2384,14 +2384,18 @@ impl ApplicationHandler for PhosphorApp {
                                 .and_then(|e| e.pass_executor.particle_system.as_ref())
                                 .and_then(|ps| {
                                     ps.def.splat.as_ref().map(|s| {
-                                        (ps.max_particles, s.scene_scale, s.rotation_degrees)
+                                        (
+                                            ps.max_particles,
+                                            crate::gpu::particle::splat_source::SceneOptions::from(
+                                                s,
+                                            ),
+                                        )
                                     })
                                 });
-                            if let Some((target, scale, rot)) = job {
+                            if let Some((target, opts)) = job {
                                 app.splat_loader.open_dialog(
                                     target,
-                                    scale,
-                                    rot,
+                                    opts,
                                     app.layer_stack.active_layer,
                                 );
                                 app.preset_store.mark_dirty();
@@ -2419,18 +2423,22 @@ impl ApplicationHandler for PhosphorApp {
                                 .and_then(|e| e.pass_executor.particle_system.as_ref())
                                 .and_then(|ps| {
                                     ps.def.splat.as_ref().map(|s| {
-                                        (ps.max_particles, s.scene_scale, s.rotation_degrees)
+                                        (
+                                            ps.max_particles,
+                                            crate::gpu::particle::splat_source::SceneOptions::from(
+                                                s,
+                                            ),
+                                        )
                                     })
                                 });
-                            if let (Ok(path), Some((target, scale, rot))) = (
+                            if let (Ok(path), Some((target, opts))) = (
                                 crate::gpu::particle::splat_source::resolve_source("demo:default"),
                                 job,
                             ) {
                                 app.splat_loader.load(
                                     path,
                                     target,
-                                    scale,
-                                    rot,
+                                    opts,
                                     app.layer_stack.active_layer,
                                 );
                             }
