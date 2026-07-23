@@ -1260,6 +1260,16 @@ fn audio_thread(
             raw.pan = stereo_field.pan;
             raw.stereo_width = stereo_field.stereo_width;
             raw.stereo_corr = stereo_field.stereo_corr;
+            // A13b (#1801): per-band pan, from the same analyzer and the same gate. Also
+            // Passthrough — the producer already holds an empty band at 0.5.
+            let [bp_sub, bp_bass, bp_lo, bp_mid, bp_up, bp_pres, bp_bril] = stereo_field.band_pan;
+            raw.band_pan_sub_bass = bp_sub;
+            raw.band_pan_bass = bp_bass;
+            raw.band_pan_low_mid = bp_lo;
+            raw.band_pan_mid = bp_mid;
+            raw.band_pan_upper_mid = bp_up;
+            raw.band_pan_presence = bp_pres;
+            raw.band_pan_brilliance = bp_bril;
 
             // A14 (#1465): harmonic/percussive split from the medium (1024-pt) magnitude. The two
             // energies arrive dB-mapped 0..1 (volume-invariant spans — see hpss.rs) and are set

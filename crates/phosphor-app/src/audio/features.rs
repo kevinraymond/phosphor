@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 
-/// 74 audio features, all normalized to 0.0-1.0 range.
+/// 81 audio features, all normalized to 0.0-1.0 range.
 /// Multi-resolution FFT bands + spectral shape + beat detection + MFCC + chroma,
 /// plus a reserved tail laid out by two batched shader-ABI bumps: v2 (#1505 —
 /// loudness / key / downbeat / stereo / structure) and v3 (#1629 — hpss / pitch /
@@ -92,9 +92,20 @@ pub struct AudioFeatures {
     pub contrast_5: f32,    // ~6400 Hz+
     pub contrast_mean: f32, // mean contrast across bands
     pub timbre_flux: f32,   // L2 norm of the delta-MFCC vector
+
+    // A13b per-band pan (#1801): where each frequency band sits in the stereo image, same
+    // convention as `pan` (0.5 = centred) and the same band order as the seven above. Appended
+    // rather than placed beside `pan` so every existing feature index stays put.
+    pub band_pan_sub_bass: f32,
+    pub band_pan_bass: f32,
+    pub band_pan_low_mid: f32,
+    pub band_pan_mid: f32,
+    pub band_pan_upper_mid: f32,
+    pub band_pan_presence: f32,
+    pub band_pan_brilliance: f32,
 }
 
-pub const NUM_FEATURES: usize = 74;
+pub const NUM_FEATURES: usize = 81;
 
 impl AudioFeatures {
     pub fn as_slice(&self) -> &[f32; NUM_FEATURES] {
@@ -129,7 +140,7 @@ mod tests {
     #[test]
     fn as_slice_len() {
         let f = AudioFeatures::default();
-        assert_eq!(f.as_slice().len(), 74);
+        assert_eq!(f.as_slice().len(), 81);
     }
 
     #[test]
@@ -146,6 +157,7 @@ mod tests {
             dominant_chroma: 0.55,
             drop: 0.44,
             timbre_flux: 0.99,
+            band_pan_brilliance: 0.77,
             ..Default::default()
         };
         let s = f.as_slice();
@@ -154,13 +166,15 @@ mod tests {
         assert!((s[45] - 0.55).abs() < 1e-6);
         // `drop` closed the v2 reserved tail at index 60
         assert!((s[60] - 0.44).abs() < 1e-6);
-        // `timbre_flux` is the new last slot (index 73) after the v3 bump
+        // `timbre_flux` kept index 73 across the A13b append — the point of appending
         assert!((s[73] - 0.99).abs() < 1e-6);
+        // `band_pan_brilliance` is the new last slot (index 80)
+        assert!((s[80] - 0.77).abs() < 1e-6);
     }
 
     #[test]
-    fn size_is_296_bytes() {
-        // 74 f32 features (was 244 bytes / 61 before the #1629 "v3" batched ABI bump)
-        assert_eq!(std::mem::size_of::<AudioFeatures>(), 296);
+    fn size_is_324_bytes() {
+        // 81 f32 features (296 bytes / 74 before the A13b per-band pan append)
+        assert_eq!(std::mem::size_of::<AudioFeatures>(), 324);
     }
 }

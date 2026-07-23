@@ -144,6 +144,15 @@ struct ParticleUniforms {
     splat_explode: f32,     // drop envelope: max(env·exp(−dt/0.45), drop)
     splat_sorted: f32,      // 1.0 = sorted-composite path (raw intrinsic alpha); 0.0 = OIT
     splat_sh_degree: f32,   // 0 = DC only; 1–3 = view-dependent SH bands in splat_sh
+
+    // A13 stereo + A13b per-band pan (#1801 ABI bump, 896 -> 944 B).
+    pan: f32,           // broadband balance: 0.5 = centred, 0 = hard left, 1 = hard right
+    stereo_width: f32,  // mid/side ratio: 0 = mono, ->1 = fully decorrelated
+    stereo_corr: f32,   // L/R correlation: 0.5 = decorrelated, 1 = mono, 0 = anti-phase
+    _pad_stereo: f32,
+    // Per-band pan, same order and convention as `pan`, for the 7 bands sub_bass..brilliance.
+    // A band carrying no energy holds 0.5. Read it with band_pan(i).
+    band_pan: array<vec4f, 2>,
 }
 
 // Access effect param by index (mirrors fragment shader's param() function).
@@ -161,6 +170,12 @@ fn mfcc(i: u32) -> f32 {
 
 fn chroma_val(i: u32) -> f32 {
     return u.chroma[i / 4u][i % 4u];
+}
+
+// A13b per-band pan, i in 0..6 (sub_bass, bass, low_mid, mid, upper_mid, presence, brilliance).
+// 0.5 = centred. Returns 0.5 for a band with no energy, so it is safe to use unguarded.
+fn band_pan(i: u32) -> f32 {
+    return u.band_pan[i / 4u][i % 4u];
 }
 
 // Read force matrix entry: from_sp→to_sp interaction strength (8-wide stride).

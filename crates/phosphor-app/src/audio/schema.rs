@@ -374,6 +374,53 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
         SmoothParams::ar(0.005, 0.06),
         Scale,
     ),
+    // A13b per-band pan (#1801) — detector-owned, exactly like `pan` above: the StereoAnalyzer
+    // already remaps each bipolar balance to 0..1 and holds a band with no energy at 0.5, so
+    // Passthrough (percentile ranging would stretch a mix that genuinely sits near centre out to
+    // the edges, inventing a stereo image that is not there). Scale toward 0 on a stalled device
+    // is inherited from `pan` for consistency, though a held 0.5 would read as "centred".
+    def(
+        "band_pan_sub_bass",
+        Passthrough,
+        SmoothParams::ar(0.03, 0.15),
+        Scale,
+    ),
+    def(
+        "band_pan_bass",
+        Passthrough,
+        SmoothParams::ar(0.03, 0.15),
+        Scale,
+    ),
+    def(
+        "band_pan_low_mid",
+        Passthrough,
+        SmoothParams::ar(0.03, 0.15),
+        Scale,
+    ),
+    def(
+        "band_pan_mid",
+        Passthrough,
+        SmoothParams::ar(0.03, 0.15),
+        Scale,
+    ),
+    def(
+        "band_pan_upper_mid",
+        Passthrough,
+        SmoothParams::ar(0.03, 0.15),
+        Scale,
+    ),
+    def(
+        "band_pan_presence",
+        Passthrough,
+        SmoothParams::ar(0.03, 0.15),
+        Scale,
+    ),
+    def(
+        "band_pan_brilliance",
+        Passthrough,
+        SmoothParams::ar(0.03, 0.15),
+        Scale,
+    ),
 ];
 
 /// Terse constructor so the table above reads as one row per feature. Interpolates
@@ -468,6 +515,9 @@ mod tests {
         assert_eq!(FEATURES[64].name, "pitch");
         assert_eq!(FEATURES[66].name, "contrast_0");
         assert_eq!(FEATURES[73].name, "timbre_flux");
+        // A13b appended after the v3 tail, so every index above is unmoved.
+        assert_eq!(FEATURES[74].name, "band_pan_sub_bass");
+        assert_eq!(FEATURES[80].name, "band_pan_brilliance");
     }
 
     /// Pins the A2 (#1453) per-feature normalization policy for every slot:
@@ -480,7 +530,8 @@ mod tests {
     ///   bar clock, which happen to be contiguous (33..=54); the A13 stereo block (55..=57,
     ///   producer-remapped to 0..1); the A18 structure block (58..=60); and most of the v3 (#1629)
     ///   reserved tail — `harmonic_ratio` (63, a level-invariant balance), A15 pitch (64..=65),
-    ///   A16 contrast (66..=72) — all producer-scaled to 0..1.
+    ///   A16 contrast (66..=72) — all producer-scaled to 0..1; and the A13b per-band pan block
+    ///   (74..=80), which the StereoAnalyzer remaps to 0..1 and holds at 0.5 for an empty band.
     /// - **Adaptive** (gated percentile ranging): the energy-like features — the 7 bands, rms (7),
     ///   flux (10), the A14 HPSS energies `percussive_energy` / `harmonic_energy` (61, 62), and the
     ///   A16 `timbre_flux` (73) — raw levels of unknown absolute scale.
@@ -490,7 +541,7 @@ mod tests {
             let expected = match i {
                 9 | 11 | 12 | 13 | 14 => FixedRange,
                 20..=32 => ZScore,
-                8 | 15..=19 | 33..=60 | 63..=72 => Passthrough,
+                8 | 15..=19 | 33..=60 | 63..=72 | 74..=80 => Passthrough,
                 _ => Adaptive,
             };
             assert_eq!(

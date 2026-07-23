@@ -3,6 +3,14 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## Unreleased
+
+### Added
+- **Per-band pan — seven new audio sources for where each frequency sits in the stereo image** — the existing `pan` collapses the whole mix to one number, so a centred kick under wide hi-hats read the same as a mono track. Each of the seven bands now reports its own position, bindable from the matrix and emitted on `/phosphor/audio/band_pan/*`. A band carrying no energy reads centred rather than drifting. Costs one extra FFT per hop, since both channels come out of a single transform.
+
+### Changed
+- **Shader ABI: particle uniforms 896 → 944 bytes, effect uniforms 400 → 432 bytes** — both gain `band_pan` (7 bands + 1 pad, read with `band_pan(i)`), and particle sims additionally gain `pan`, `stereo_width` and `stereo_corr`, which fragment shaders have had since v1.9.0 but no particle sim could reach. Both blocks are appended, so every existing field keeps its offset: custom shaders need recompiling, not editing.
+
 ## v1.14.0 — 2026-07-23
 
 ### Added

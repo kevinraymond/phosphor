@@ -124,6 +124,10 @@ struct PhosphorUniforms {
     contrast_5: f32,        // A16 ~6400 Hz+
     contrast_mean: f32,     // A16 mean contrast across bands
     timbre_flux: f32,       // A16 L2 norm of the delta-MFCC vector
+    // A13b (#1801) per-band pan: where each of the 7 bands sits in the stereo image.
+    // 0.5 = centred, 0 = hard left, 1 = hard right; a band with no energy holds 0.5.
+    // Same band order as sub_bass..brilliance above. Read it with band_pan(i).
+    band_pan: array<vec4f, 2>,
 }
 
 @group(0) @binding(0) var<uniform> u: PhosphorUniforms;
@@ -145,6 +149,11 @@ fn mfcc(i: u32) -> f32 {
 
 fn chroma_val(i: u32) -> f32 {
     return u.chroma[i / 4u][i % 4u];
+}
+
+// A13b per-band pan, i in 0..6 (sub_bass, bass, low_mid, mid, upper_mid, presence, brilliance).
+fn band_pan(i: u32) -> f32 {
+    return u.band_pan[i / 4u][i % 4u];
 }
 
 fn feedback(uv: vec2f) -> vec4f {
@@ -1804,5 +1813,174 @@ mod tests {
             "splat perf @ {count} splats, 1080p: mean {mean:.2} ms ({:.0} FPS), p99 {p99:.2} ms, max {max:.2} ms",
             1000.0 / mean
         );
+    }
+
+    /// Proves the Rust `ParticleUniforms` and the WGSL mirror in `particle_lib.wgsl` agree at the
+    /// **field** level, not just in total size.
+    ///
+    /// The `*_shaders_compile` probes above all create pipelines with `layout: None`, so wgpu
+    /// derives the layout *from the shader* — a WGSL struct that has drifted smaller than the Rust
+    /// one still validates, and every sim then reads shifted offsets. That is the failure mode the
+    /// A13b bump (896 -> 944 B, #1801) could introduce silently, and Panorama is about to read
+    /// `band_pan` directly.
+    ///
+    /// Writes a distinctive value into one field per block, runs a real dispatch that copies them
+    /// out through the production `particle_lib` accessors, and reads them back. `splat_sh_degree`
+    /// is asserted alongside the new fields specifically to pin the "append, never insert"
+    /// invariant (#1505): if the new tail had been spliced in mid-struct, it would move.
+    ///
+    /// Run: cargo test -p phosphor-app -- --ignored particle_uniforms_wgsl_layout_matches_rust
+    #[test]
+    #[ignore = "requires a GPU/software adapter"]
+    fn particle_uniforms_wgsl_layout_matches_rust() {
+        use crate::gpu::particle::types::ParticleUniforms;
+        use wgpu::util::DeviceExt;
+
+        // Production concatenation order — particle_lib calls into noise.wgsl.
+        let noise = include_str!("../../../../assets/shaders/lib/noise.wgsl");
+        let palette = include_str!("../../../../assets/shaders/lib/palette.wgsl");
+        let plib = include_str!("../../../../assets/shaders/lib/particle_lib.wgsl");
+        let probe = r#"
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+@compute @workgroup_size(1)
+fn cs_main() {
+    out[0] = u.delta_time;       // first block — must not have moved
+    out[1] = u.seed;             // mid-struct anchor
+    out[2] = u.splat_sh_degree;  // last pre-A13b field — pins "append, never insert"
+    out[3] = u.pan;
+    out[4] = u.stereo_width;
+    out[5] = u.stereo_corr;
+    for (var i = 0u; i < 7u; i = i + 1u) {
+        out[6u + i] = band_pan(i);
+    }
+}
+"#;
+        const N: usize = 13;
+
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            ..Default::default()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
+        .expect("no wgpu adapter");
+        eprintln!("probe adapter: {:?}", adapter.get_info());
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("uniform-layout-probe"),
+            required_features: wgpu::Features::empty(),
+            required_limits: adapter.limits(),
+            experimental_features: wgpu::ExperimentalFeatures::default(),
+            memory_hints: wgpu::MemoryHints::Performance,
+            trace: wgpu::Trace::Off,
+        }))
+        .expect("no wgpu device");
+
+        // Distinctive, unequal values so a shifted read cannot coincidentally match.
+        let mut u: ParticleUniforms = bytemuck::Zeroable::zeroed();
+        u.delta_time = 0.125;
+        u.seed = 0.375;
+        u.splat_sh_degree = 3.0;
+        u.pan = 0.25;
+        u.stereo_width = 0.75;
+        u.stereo_corr = 0.125;
+        u.band_pan = [0.11, 0.22, 0.33, 0.44, 0.55, 0.66, 0.77, 0.0];
+
+        let ubuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("probe-uniforms"),
+            contents: bytemuck::bytes_of(&u),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let obuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("probe-out"),
+            size: (N * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let rbuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("probe-readback"),
+            size: (N * 4) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("uniform-layout-probe"),
+            source: wgpu::ShaderSource::Wgsl(format!("{noise}\n{palette}\n{plib}\n{probe}").into()),
+        });
+        // `layout: None` is fine here: the bind group below supplies the *real* Rust-sized buffer,
+        // so wgpu checks it against the minimum binding size the WGSL struct implies.
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("uniform-layout-probe"),
+            layout: None,
+            module: &module,
+            entry_point: Some("cs_main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("uniform-layout-probe"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: ubuf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: obuf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut enc = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = enc.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
+        enc.copy_buffer_to_buffer(&obuf, 0, &rbuf, 0, (N * 4) as u64);
+        queue.submit([enc.finish()]);
+
+        rbuf.slice(..)
+            .map_async(wgpu::MapMode::Read, |r| r.unwrap());
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .unwrap();
+        let got: Vec<f32> = bytemuck::cast_slice(&rbuf.slice(..).get_mapped_range()).to_vec();
+
+        let expect = [
+            ("delta_time", u.delta_time),
+            ("seed", u.seed),
+            ("splat_sh_degree", u.splat_sh_degree),
+            ("pan", u.pan),
+            ("stereo_width", u.stereo_width),
+            ("stereo_corr", u.stereo_corr),
+        ];
+        for (i, (name, want)) in expect.iter().enumerate() {
+            assert_eq!(
+                got[i],
+                *want,
+                "{name}: WGSL read {} but Rust wrote {want} — particle_lib.wgsl has drifted from \
+                 ParticleUniforms ({}-byte struct)",
+                got[i],
+                std::mem::size_of::<ParticleUniforms>()
+            );
+        }
+        for i in 0..7 {
+            assert_eq!(
+                got[6 + i],
+                u.band_pan[i],
+                "band_pan({i}): WGSL read {} but Rust wrote {}",
+                got[6 + i],
+                u.band_pan[i]
+            );
+        }
     }
 }

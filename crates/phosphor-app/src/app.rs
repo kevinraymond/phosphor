@@ -571,6 +571,14 @@ impl App {
             self.uniforms.pan = features.pan;
             self.uniforms.stereo_width = features.stereo_width;
             self.uniforms.stereo_corr = features.stereo_corr;
+            // A13b per-band pan (#1801). Slot 7 is padding for the vec4 stride.
+            self.uniforms.band_pan[0] = features.band_pan_sub_bass;
+            self.uniforms.band_pan[1] = features.band_pan_bass;
+            self.uniforms.band_pan[2] = features.band_pan_low_mid;
+            self.uniforms.band_pan[3] = features.band_pan_mid;
+            self.uniforms.band_pan[4] = features.band_pan_upper_mid;
+            self.uniforms.band_pan[5] = features.band_pan_presence;
+            self.uniforms.band_pan[6] = features.band_pan_brilliance;
             self.uniforms.section_novelty = features.section_novelty;
             self.uniforms.buildup = features.buildup;
             self.uniforms.drop = features.drop;
@@ -2487,6 +2495,14 @@ impl App {
                         "pan" => self.uniforms.pan = v,
                         "stereo_width" => self.uniforms.stereo_width = v,
                         "stereo_corr" => self.uniforms.stereo_corr = v,
+                        // A13b per-band pan (#1801).
+                        "band_pan_sub_bass" => self.uniforms.band_pan[0] = v,
+                        "band_pan_bass" => self.uniforms.band_pan[1] = v,
+                        "band_pan_low_mid" => self.uniforms.band_pan[2] = v,
+                        "band_pan_mid" => self.uniforms.band_pan[3] = v,
+                        "band_pan_upper_mid" => self.uniforms.band_pan[4] = v,
+                        "band_pan_presence" => self.uniforms.band_pan[5] = v,
+                        "band_pan_brilliance" => self.uniforms.band_pan[6] = v,
                         "section_novelty" => self.uniforms.section_novelty = v,
                         "buildup" => self.uniforms.buildup = v,
                         "drop" => self.uniforms.drop = v,

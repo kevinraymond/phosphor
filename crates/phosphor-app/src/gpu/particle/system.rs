@@ -1608,6 +1608,17 @@ impl ParticleSystem {
         self.uniforms.harmonic_ratio = features.harmonic_ratio;
         self.uniforms.buildup = features.buildup;
         self.uniforms.drop = features.drop;
+        // A13 stereo + A13b per-band pan (#1801). Slot 7 of band_pan is vec4-stride padding.
+        self.uniforms.pan = features.pan;
+        self.uniforms.stereo_width = features.stereo_width;
+        self.uniforms.stereo_corr = features.stereo_corr;
+        self.uniforms.band_pan[0] = features.band_pan_sub_bass;
+        self.uniforms.band_pan[1] = features.band_pan_bass;
+        self.uniforms.band_pan[2] = features.band_pan_low_mid;
+        self.uniforms.band_pan[3] = features.band_pan_mid;
+        self.uniforms.band_pan[4] = features.band_pan_upper_mid;
+        self.uniforms.band_pan[5] = features.band_pan_presence;
+        self.uniforms.band_pan[6] = features.band_pan_brilliance;
     }
 
     /// Run the compute dispatch (particle simulation + prepare indirect args).

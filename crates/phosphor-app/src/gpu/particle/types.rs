@@ -21,8 +21,10 @@ pub struct Particle {
     pub flags: [f32; 4],
 }
 
-/// Particle simulation uniforms: 896 bytes.
-/// Separate from the main 288-byte ShaderUniforms.
+/// Particle simulation uniforms: 944 bytes.
+/// Separate from the main 432-byte ShaderUniforms — the two carry overlapping but not
+/// identical feature sets, and each has its own WGSL mirror that must be kept in step
+/// (see `particle_uniforms_wgsl_layout_matches_rust`).
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct ParticleUniforms {
@@ -197,7 +199,21 @@ pub struct ParticleUniforms {
     pub splat_sorted: f32, // 1.0 = sorted-composite path (sim writes raw intrinsic alpha); 0.0 = OIT
     /// 0 = DC only (no SH buffer bound); 1–3 = view-dependent bands present.
     pub splat_sh_degree: f32,
-    // Total = 896 bytes
+    // 896 bytes above
+
+    // A13 stereo + A13b per-band pan (batched ABI bump for Panorama #1801). The particle path
+    // had no stereo at all — these three have existed in the fragment-path ShaderUniforms since
+    // A13 (#1464) but no sim could read them. Appended as fresh 16-byte blocks so every existing
+    // offset stays stable (#1505 precedent); `_pad_vessel1` above is left as the spare it is.
+    pub pan: f32,          // broadband balance, 0.5 = centred
+    pub stereo_width: f32, // mid/side ratio, 0 = mono
+    pub stereo_corr: f32,  // L/R correlation, 0.5 = decorrelated
+    pub _pad_stereo: f32,
+    /// A13b per-band pan, same order as the 7 bands above (sub_bass..brilliance); slot 7 is
+    /// padding for the vec4 stride. Declared `array<vec4f, 2>` in WGSL — uniform-address-space
+    /// arrays need a 16-byte element stride, as `mfcc`/`chroma` already do. Index via `band_pan()`.
+    pub band_pan: [f32; 8],
+    // Total = 944 bytes
 }
 
 /// Obstacle collision mode.
@@ -951,8 +967,9 @@ mod tests {
     }
 
     #[test]
-    fn particle_uniforms_size_896() {
-        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 896);
+    fn particle_uniforms_size_944() {
+        // 896 through the Splat block, + 16 (A13 stereo) + 32 (A13b band_pan) for #1801.
+        assert_eq!(std::mem::size_of::<ParticleUniforms>(), 944);
     }
 
     #[test]

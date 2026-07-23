@@ -112,6 +112,14 @@ pub struct ShaderUniforms {
     pub contrast_mean: f32,
     pub timbre_flux: f32,
     // 52 bytes (400 total)
+
+    // ---- A13b per-band pan (#1801) ----
+    // 7 band pans + 1 pad = 32 bytes, appended so every offset above stays put. Declared
+    // `array<vec4f, 2>` in WGSL: uniform-address-space arrays need a 16-byte element stride,
+    // the same reason `mfcc`/`chroma` are vec4 arrays there. Index it with the `band_pan()`
+    // helper rather than by hand.
+    pub band_pan: [f32; 8],
+    // 32 bytes (432 total)
 }
 
 pub struct UniformBuffer {
@@ -194,12 +202,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shader_uniforms_size_400() {
-        // 288 (through chroma) + 28 reserved audio scalars = 400. The #1629 "v3" bump
-        // added 13 scalars (A14/A15/A16), absorbing the single pad the #1505 "v2" bump
-        // left at 352. Must stay a multiple of 16 for the array<vec4f> members and
-        // match the WGSL PhosphorUniforms struct byte-for-byte.
-        assert_eq!(std::mem::size_of::<ShaderUniforms>(), 400);
+    fn shader_uniforms_size_432() {
+        // 288 (through chroma) + 28 reserved audio scalars = 400, then the A13b per-band pan
+        // block (#1801) appends 8 slots = 432. The #1629 "v3" bump added 13 scalars
+        // (A14/A15/A16), absorbing the single pad the #1505 "v2" bump left at 352. Must stay a
+        // multiple of 16 for the array<vec4f> members and match the WGSL PhosphorUniforms
+        // struct byte-for-byte.
+        assert_eq!(std::mem::size_of::<ShaderUniforms>(), 432);
     }
 
     #[test]

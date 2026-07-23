@@ -67,6 +67,8 @@ struct PhosphorUniforms {
     contrast_5: f32,
     contrast_mean: f32,
     timbre_flux: f32,
+    // A13b (#1801) per-band pan, sub_bass..brilliance. 0.5 = centred.
+    band_pan: array<vec4f, 2>,
 }
 
 @group(0) @binding(0) var<uniform> u: PhosphorUniforms;

@@ -85,6 +85,29 @@ impl OscSender {
         self.send_float("/phosphor/audio/pan", f.pan * 2.0 - 1.0);
         self.send_float("/phosphor/audio/stereo_width", f.stereo_width);
         self.send_float("/phosphor/audio/stereo_corr", f.stereo_corr * 2.0 - 1.0);
+        // A13b per-band pan (#1801): where each band sits in the image. Emitted bipolar like `pan`.
+        self.send_float(
+            "/phosphor/audio/band_pan/sub_bass",
+            f.band_pan_sub_bass * 2.0 - 1.0,
+        );
+        self.send_float("/phosphor/audio/band_pan/bass", f.band_pan_bass * 2.0 - 1.0);
+        self.send_float(
+            "/phosphor/audio/band_pan/low_mid",
+            f.band_pan_low_mid * 2.0 - 1.0,
+        );
+        self.send_float("/phosphor/audio/band_pan/mid", f.band_pan_mid * 2.0 - 1.0);
+        self.send_float(
+            "/phosphor/audio/band_pan/upper_mid",
+            f.band_pan_upper_mid * 2.0 - 1.0,
+        );
+        self.send_float(
+            "/phosphor/audio/band_pan/presence",
+            f.band_pan_presence * 2.0 - 1.0,
+        );
+        self.send_float(
+            "/phosphor/audio/band_pan/brilliance",
+            f.band_pan_brilliance * 2.0 - 1.0,
+        );
         // A14 HPSS (#1465): percussive / harmonic energies (0..1) and their balance (0..1).
         self.send_float("/phosphor/audio/percussive_energy", f.percussive_energy);
         self.send_float("/phosphor/audio/harmonic_energy", f.harmonic_energy);
