@@ -1182,7 +1182,7 @@ mod tests {
             serde_json::from_str(include_str!("../../../../assets/effects/splat.pfx"))
                 .expect("splat.pfx must deserialize");
         assert!(EffectLoader::is_builtin(&effect));
-        assert_eq!(effect.inputs.len(), 12); // 8 sim slots + 4 CPU camera slots
+        assert_eq!(effect.inputs.len(), 13); // 8 sim slots + 4 CPU camera slots + roundness
         let particles = effect.particles.expect("splat is a particle effect");
         assert_eq!(particles.render_mode, "compute"); // splats need the raster
         assert_eq!(particles.blend, "oit"); // weighted-average OIT resolve
@@ -1512,13 +1512,15 @@ mod tests {
                     0.3,
                     exposure,
                 ];
-                // Slots 8–11 (CPU driver): orbit, distance, pitch, focal bias.
-                // SPLAT_ORBIT=0 + SPLAT_YAW/SPLAT_PITCH freezes a viewing angle.
+                // Slots 8–12 (CPU driver): orbit, distance, pitch, focal bias,
+                // roundness. SPLAT_ORBIT=0 + SPLAT_YAW/SPLAT_PITCH freezes a
+                // viewing angle; SPLAT_ROUNDNESS morphs shard→sphere.
                 ps.splat_ui_params = [
                     env_f("SPLAT_ORBIT", 0.3),
                     cam_dist,
                     env_f("SPLAT_PITCH", 0.15),
                     0.0,
+                    env_f("SPLAT_ROUNDNESS", 0.0),
                 ];
                 ps.update_splat_driver();
                 if std::env::var("SPLAT_YAW").is_ok() {
@@ -1762,7 +1764,7 @@ mod tests {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1.6);
-            ps.splat_ui_params = [0.3, dist, 0.15, 0.0];
+            ps.splat_ui_params = [0.3, dist, 0.15, 0.0, 0.0];
             ps.update_splat_driver();
 
             let t0 = std::time::Instant::now();

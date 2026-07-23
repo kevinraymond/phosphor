@@ -118,12 +118,25 @@ fn splat_sh_color(rec: u32, degree: u32, d: vec3f) -> vec3f {
 // cancelling difference — came out as much as 187× too large on near-rank-1
 // splats, painting them as bright shimmering needles. σ in log space costs 3
 // exp() per splat per frame and is exact. Mirrors gsplat's computeCovariance.
-fn build_sigma3(s: SplatStatic, d_out: ptr<function, vec3f>, o_out: ptr<function, vec3f>) {
+fn build_sigma3(
+    s: SplatStatic,
+    roundness: f32,
+    d_out: ptr<function, vec3f>,
+    o_out: ptr<function, vec3f>,
+) {
     let qa = unpack2x16float(s.rot_a);
     let qb = unpack2x16float(s.rot_b);
     let q = normalize(vec4f(qa.x, qa.y, qb.x, qb.y)); // xyzw
     let ls = unpack2x16float(s.log_scale);
-    let sc = vec3f(exp(ls.x), exp(ls.y), exp(unpack2x16float(s.log_scale_z).x));
+    var lsc = vec3f(ls.x, ls.y, unpack2x16float(s.log_scale_z).x);
+    // Shard → sphere morph. A trained splat is a flat sliver — 60% of this
+    // capture are needles, 40% flakes, 0.1% round — which is why an exploded
+    // scene reads as fur. Blending the three log-scales toward their mean pulls
+    // each Gaussian toward a sphere; doing it in LOG space makes it a geometric
+    // mean, so the ellipsoid's VOLUME is preserved and the scene neither swells
+    // nor thins as it rounds off. Free because the scales are stored as logs.
+    lsc = mix(lsc, vec3f((lsc.x + lsc.y + lsc.z) / 3.0), clamp(roundness, 0.0, 1.0));
+    let sc = exp(lsc);
 
     // Rotation matrix columns, each already scaled — M = R·diag(σ).
     let x = q.x; let y = q.y; let z = q.z; let w = q.w;
@@ -309,9 +322,15 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     // Σ3 comes precomputed from the upload; the J·W rows are the world-space
     // gradients of the two screen-pixel axes (aspect-symmetric because size
     // is height-relative; the y row is negated for the raster's y-flip).
+    // Roundness = the manual slider PLUS the drop envelope, so the two use cases
+    // compose instead of excluding each other: at rest the slider alone holds
+    // (0 = the capture's true shard shape, higher = a static "galaxy" look), and
+    // a drop rounds the scene off on top of it and decays back. `env` already
+    // carries audio_reactivity, so setting that to 0 disables the automatic half.
+    let round_amt = clamp(u.splat_roundness + env, 0.0, 1.0);
     var cov_d: vec3f;
     var cov_o: vec3f;
-    build_sigma3(s, &cov_d, &cov_o); // Σxx,Σyy,Σzz / Σxy,Σxz,Σyz — f32, exact
+    build_sigma3(s, round_amt, &cov_d, &cov_o); // Σxx,Σyy,Σzz / Σxy,Σxz,Σyz — f32
     let focal_px = focal * u.resolution.y * 0.5;
     let iz = 1.0 / t.z;
     let jw0 = (right - fwd * (t.x * iz)) * (focal_px * iz);

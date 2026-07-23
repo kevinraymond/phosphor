@@ -176,9 +176,9 @@ pub fn pack_cloud(cloud: &SplatCloud) -> Vec<SplatStatic> {
 /// Lives on `ParticleSystem` (gated on `def.splat`), updated in `dispatch`
 /// just before the uniform upload.
 ///
-/// UI params arrive as .pfx slots 8–11 (`ParticleSystem::splat_ui_params`,
+/// UI params arrive as .pfx slots 8–12 (`ParticleSystem::splat_ui_params`,
 /// forwarded from the param store like `effect_params`):
-/// `[orbit_speed, cam_distance, cam_pitch, focal_bias]`.
+/// `[orbit_speed, cam_distance, cam_pitch, focal_bias, roundness]`.
 pub struct SplatDriver {
     yaw: f32,
     centroid_ema: f32,
@@ -197,9 +197,13 @@ impl SplatDriver {
     /// Advance camera + envelopes and write the `cam_*`/`splat_*` uniform
     /// fields. Reads audio (`rms`, `buildup`, `drop`, `centroid`) and
     /// `delta_time` from the uniforms already populated this frame.
-    pub fn update(&mut self, u: &mut ParticleUniforms, ui_params: [f32; 4]) {
+    pub fn update(&mut self, u: &mut ParticleUniforms, ui_params: [f32; 5]) {
         let dt = u.delta_time;
-        let [orbit_speed, cam_distance, cam_pitch, focal_bias] = ui_params;
+        let [orbit_speed, cam_distance, cam_pitch, focal_bias, roundness] = ui_params;
+
+        // Shard→sphere morph — forwarded straight through; the sim applies it to
+        // the log-scales. Bindable like any other param (that is the point).
+        u.splat_roundness = roundness.clamp(0.0, 1.0);
 
         // Audio-scaled orbit: still audible motion at silence, gentle push
         // with level. Yaw stays bounded (it feeds sin/cos in the sim).
@@ -595,6 +599,37 @@ mod tests {
     }
 
     #[test]
+    fn roundness_morphs_to_a_sphere_at_constant_volume() {
+        // Mirror of the log-space mix in build_sigma3. Blending log-scales toward
+        // their mean is a GEOMETRIC mean, so the ellipsoid rounds off without the
+        // scene swelling or thinning — that property is the reason for doing it
+        // in log space, and it is what a linear mix of sigmas would break.
+        let sigma = [0.04f32, 0.011, 0.000008]; // a typical capture sliver
+        let ln = sigma.map(f32::ln);
+        let mean = (ln[0] + ln[1] + ln[2]) / 3.0;
+        let vol0: f32 = sigma.iter().product();
+        for r in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
+            let out = ln.map(|l| (l + (mean - l) * r).exp());
+            let vol: f32 = out.iter().product();
+            assert!(
+                (vol / vol0 - 1.0).abs() < 1e-3,
+                "roundness {r} changed volume by {:.1}%",
+                (vol / vol0 - 1.0) * 100.0
+            );
+            let aniso = out.iter().cloned().fold(f32::MIN, f32::max)
+                / out.iter().cloned().fold(f32::MAX, f32::min);
+            let want = (sigma[0] / sigma[2]).powf(1.0 - r);
+            assert!(
+                (aniso / want - 1.0).abs() < 1e-2,
+                "roundness {r}: anisotropy {aniso:.1}, expected {want:.1}"
+            );
+        }
+        // Fully round: all three axes equal.
+        let full = ln.map(|_| mean.exp());
+        assert!((full[0] - full[2]).abs() < 1e-9, "r=1 must be a sphere");
+    }
+
+    #[test]
     fn degenerate_scale_stays_finite() {
         // A pruned splat can carry sigma == 0; ln(0) is -inf. The clamp must keep
         // the record finite so the rebuilt covariance is rank-reduced, not NaN.
@@ -658,14 +693,14 @@ mod tests {
         let mut d = SplatDriver::new();
         let mut u = uniforms_with(1.0 / 60.0);
         u.drop = 1.0;
-        d.update(&mut u, [0.0, 1.6, 0.0, 0.0]);
+        d.update(&mut u, [0.0, 1.6, 0.0, 0.0, 0.0]);
         assert!((u.splat_explode - 1.0).abs() < 1e-6);
         u.drop = 0.0;
-        d.update(&mut u, [0.0, 1.6, 0.0, 0.0]);
+        d.update(&mut u, [0.0, 1.6, 0.0, 0.0, 0.0]);
         let after_one = u.splat_explode;
         assert!(after_one < 1.0 && after_one > 0.9); // τ=0.45s ≫ one frame
         for _ in 0..120 {
-            d.update(&mut u, [0.0, 1.6, 0.0, 0.0]);
+            d.update(&mut u, [0.0, 1.6, 0.0, 0.0, 0.0]);
         }
         assert!(u.splat_explode < 0.02, "envelope must decay out");
     }
@@ -674,10 +709,10 @@ mod tests {
     fn driver_yaw_advances_only_with_orbit() {
         let mut d = SplatDriver::new();
         let mut u = uniforms_with(1.0 / 60.0);
-        d.update(&mut u, [0.0, 1.6, 0.0, 0.0]);
+        d.update(&mut u, [0.0, 1.6, 0.0, 0.0, 0.0]);
         assert_eq!(u.cam_yaw, 0.0);
         for _ in 0..60 {
-            d.update(&mut u, [0.5, 1.6, 0.0, 0.0]);
+            d.update(&mut u, [0.5, 1.6, 0.0, 0.0, 0.0]);
         }
         assert!(u.cam_yaw > 0.05, "yaw should accumulate: {}", u.cam_yaw);
     }
@@ -688,7 +723,7 @@ mod tests {
         let mut u = uniforms_with(1.0 / 60.0);
         u.centroid = 1.0;
         for _ in 0..300 {
-            d.update(&mut u, [0.0, 1.6, 0.0, 0.0]);
+            d.update(&mut u, [0.0, 1.6, 0.0, 0.0, 0.0]);
         }
         // Bright timbre pulls focus forward: focal below cam_distance,
         // clamped to the near edge of the scene depth range.
@@ -700,10 +735,10 @@ mod tests {
     fn driver_distance_clamps_and_buildup_pulls_in() {
         let mut d = SplatDriver::new();
         let mut u = uniforms_with(1.0 / 60.0);
-        d.update(&mut u, [0.0, 100.0, 0.0, 0.0]);
+        d.update(&mut u, [0.0, 100.0, 0.0, 0.0, 0.0]);
         assert!((u.cam_distance - 6.0).abs() < 1e-5);
         u.buildup = 1.0;
-        d.update(&mut u, [0.0, 2.0, 0.0, 0.0]);
+        d.update(&mut u, [0.0, 2.0, 0.0, 0.0, 0.0]);
         assert!((u.cam_distance - 2.0 * 0.85).abs() < 1e-5);
     }
 }

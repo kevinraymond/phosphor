@@ -131,7 +131,7 @@ struct ParticleUniforms {
     // A18 structure (#1797 ABI bump)
     buildup: f32,       // riser/tension logistic, EMA-smoothed 0-1
     drop: f32,          // drop trigger — 1.0 for exactly one frame
-    _pad_vessel0: f32,
+    splat_roundness: f32,   // Splat shard→sphere morph, 0–1 (.pfx slot 12)
     _pad_vessel1: f32,
 
     // Splat orbit camera + audio envelopes (#1800 ABI bump).

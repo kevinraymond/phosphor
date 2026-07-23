@@ -7,6 +7,7 @@
 
 ### Added
 - **Splat renders view-dependent colour** — captures trained with spherical-harmonic bands (`f_rest_*` in the `.ply`, the default for most 3DGS trainers) now re-shade as the camera orbits, instead of showing one flat colour per splat. Sheen, glare and the way a surface turns as you move around it come through. Degree 1, 2 and 3 captures are all read; DC-only scenes and `.splat` files are unaffected and cost nothing extra. A `sh1`/`sh2`/`sh3` badge in the particle panel shows what the loaded scene carries.
+- **New Splat `roundness` parameter, and the drop now rounds the shatter** — a trained capture is made of flat slivers, so an exploding scene used to shred into fur. The drop now morphs each shard toward a sphere as it flies apart and relaxes back, so it breaks into particles instead. The slider adds a permanent amount on top, from 0 (the capture's true shape, unchanged at rest) up to a soft "galaxy" of round points. Set `audio_reactivity` to 0 for the slider alone.
 
 ### Fixed
 - **Splat rendered every scene mirrored** — the camera's right vector was negated, so a loaded capture was a left-right flip of the real thing. Anything asymmetric — text, a face, a logo, which hand holds what — was reversed. Scenes now match how they look in the viewer you authored them in.

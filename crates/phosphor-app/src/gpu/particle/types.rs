@@ -176,10 +176,13 @@ pub struct ParticleUniforms {
 
     // A18 structure (batched ABI bump for Vessel #1797).
     // Appended as a fresh 16-byte block so every existing offset stays stable (#1505 precedent).
-    pub buildup: f32,      // A18 riser/tension logistic, EMA-smoothed 0-1
-    pub drop: f32,         // A18 drop trigger — 1.0 for exactly one frame (counter-latched)
-    pub _pad_vessel0: f32, // spare slots for the next batched feature
-    pub _pad_vessel1: f32,
+    pub buildup: f32, // A18 riser/tension logistic, EMA-smoothed 0-1
+    pub drop: f32,    // A18 drop trigger — 1.0 for exactly one frame (counter-latched)
+    /// Splat shard→sphere morph, 0–1 (.pfx slot 12, CPU-driven). Lives in this
+    /// block rather than the Splat one below only because that block is full;
+    /// keeping it here preserves the 896-byte ABI.
+    pub splat_roundness: f32,
+    pub _pad_vessel1: f32, // spare slot for the next batched feature
 
     // Splat orbit camera + audio envelopes (batched ABI bump for Splat #1800).
     // Appended as two fresh 16-byte blocks so every existing offset stays stable

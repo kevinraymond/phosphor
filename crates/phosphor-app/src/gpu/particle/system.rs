@@ -255,7 +255,7 @@ pub struct ParticleSystem {
     /// .pfx param slots 8–11 `[orbit_speed, cam_distance, cam_pitch,
     /// focal_bias]`, forwarded from the param store like `effect_params`
     /// (only slots 0–7 reach the sim; these are consumed CPU-side).
-    pub splat_ui_params: [f32; 4],
+    pub splat_ui_params: [f32; 5],
     /// Absolute path of the loaded scene (preset save/load + status UI).
     pub splat_scene_path: Option<String>,
     /// Splat count in the source file before subsampling (status UI).
@@ -1328,7 +1328,7 @@ impl ParticleSystem {
             splat_bgl,
             splat_bind_group,
             splat_driver: def.splat.as_ref().map(|_| SplatDriver::new()),
-            splat_ui_params: [0.0; 4],
+            splat_ui_params: [0.0; 5],
             splat_scene_path: None,
             splat_total_count: 0,
             splat_loaded_count: 0,

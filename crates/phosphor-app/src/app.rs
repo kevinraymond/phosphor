@@ -1213,10 +1213,11 @@ impl App {
                     ps.uniforms.obstacle_fit = ps.obstacle_fit as u32;
                     let audio = self.latest_audio.unwrap_or_default();
                     ps.update_audio(&audio);
-                    // Splat (#1800): camera params ride slots 8–11 (only 0–7
-                    // reach the sim); advance the CPU orbit/envelope driver
-                    // with this frame's dt + audio (no-op for non-splat).
-                    ps.splat_ui_params = [p[8], p[9], p[10], p[11]];
+                    // Splat (#1800): camera params ride slots 8–11 and roundness
+                    // slot 12 (only 0–7 reach the sim); advance the CPU
+                    // orbit/envelope driver with this frame's dt + audio (no-op
+                    // for non-splat).
+                    ps.splat_ui_params = [p[8], p[9], p[10], p[11], p[12]];
                     ps.update_splat_driver();
 
                     // Volumetric mode (R3): apply the global toggle to the active
