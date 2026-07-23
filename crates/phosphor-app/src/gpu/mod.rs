@@ -15,6 +15,8 @@ pub mod postprocess;
 pub mod profiler;
 pub mod render_target;
 pub mod shader_compiler;
+#[cfg(test)]
+pub mod test_gpu;
 pub mod types;
 pub mod uniforms;
 pub mod volumetric;

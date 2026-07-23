@@ -561,6 +561,7 @@ impl EffectLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gpu::test_gpu::{gpu_guard, test_gpu};
 
     fn make_effect(author: &str) -> PfxEffect {
         serde_json::from_str(&format!(
@@ -633,27 +634,8 @@ mod tests {
         let sim = include_str!("../../../../assets/shaders/tide_sim.wgsl");
         let bg = include_str!("../../../../assets/shaders/tide_bg.wgsl");
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("probe adapter: {:?}", adapter.get_info());
-        let (device, _queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("tide-compile-probe"),
-                required_features: wgpu::Features::empty(),
-                required_limits: adapter.limits(),
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-                memory_hints: wgpu::MemoryHints::Performance,
-                trace: wgpu::Trace::Off,
-            }))
-            .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, _queue) = test_gpu();
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
         let sim_src = format!("{noise}\n{palette}\n{plib}\n{sim}");
@@ -715,27 +697,8 @@ mod tests {
         let sim = include_str!("../../../../assets/shaders/vessel_sim.wgsl");
         let bg = include_str!("../../../../assets/shaders/vessel_bg.wgsl");
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("probe adapter: {:?}", adapter.get_info());
-        let (device, _queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("vessel-compile-probe"),
-                required_features: wgpu::Features::empty(),
-                required_limits: adapter.limits(),
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-                memory_hints: wgpu::MemoryHints::Performance,
-                trace: wgpu::Trace::Off,
-            }))
-            .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, _queue) = test_gpu();
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
         let sim_src = format!("{noise}\n{palette}\n{sdf}\n{plib}\n{sim}");
@@ -794,27 +757,8 @@ mod tests {
         let sim = include_str!("../../../../assets/shaders/cleave_sim.wgsl");
         let bg = include_str!("../../../../assets/shaders/cleave_bg.wgsl");
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("probe adapter: {:?}", adapter.get_info());
-        let (device, _queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("cleave-compile-probe"),
-                required_features: wgpu::Features::empty(),
-                required_limits: adapter.limits(),
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-                memory_hints: wgpu::MemoryHints::Performance,
-                trace: wgpu::Trace::Off,
-            }))
-            .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, _queue) = test_gpu();
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
         let sim_src = format!("{noise}\n{palette}\n{plib}\n{sim}");
@@ -875,27 +819,8 @@ mod tests {
         let palette = include_str!("../../../../assets/shaders/lib/palette.wgsl");
         let frost = include_str!("../../../../assets/shaders/frost.wgsl");
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("probe adapter: {:?}", adapter.get_info());
-        let (device, _queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("frost-compile-probe"),
-                required_features: wgpu::Features::empty(),
-                required_limits: adapter.limits(),
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-                memory_hints: wgpu::MemoryHints::Performance,
-                trace: wgpu::Trace::Off,
-            }))
-            .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, _queue) = test_gpu();
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
         let src = format!("{UNIFORM_BLOCK}\n{noise}\n{palette}\n{frost}");
@@ -920,26 +845,8 @@ mod tests {
         use crate::gpu::uniforms::{ShaderUniforms, UniformBuffer};
 
         let out_dir = std::env::var("FROST_PNG_DIR").unwrap_or_else(|_| "/tmp".to_string());
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("probe adapter: {:?}", adapter.get_info());
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("frost-preview"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
 
         // Production concatenation: uniform block + libs + effect fragment.
         let noise = include_str!("../../../../assets/shaders/lib/noise.wgsl");
@@ -1225,27 +1132,8 @@ mod tests {
         let resolve =
             include_str!("../../../../assets/shaders/builtin/compute_raster_resolve.wgsl");
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("probe adapter: {:?}", adapter.get_info());
-        let (device, _queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("splat-compile-probe"),
-                required_features: wgpu::Features::empty(),
-                required_limits: adapter.limits(),
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-                memory_hints: wgpu::MemoryHints::Performance,
-                trace: wgpu::Trace::Off,
-            }))
-            .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, _queue) = test_gpu();
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
         let sim_src = format!("{noise}\n{palette}\n{plib}\n{sim}");
@@ -1303,26 +1191,8 @@ mod tests {
         use crate::gpu::particle::splat::generate_test_scene;
 
         let out_dir = std::env::var("SPLAT_PNG_DIR").unwrap_or_else(|_| "/tmp".to_string());
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("probe adapter: {:?}", adapter.get_info());
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("splat-preview"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
 
         // Production sim concatenation + the shipped .pfx def, probe-sized.
         let noise = include_str!("../../../../assets/shaders/lib/noise.wgsl");
@@ -1676,26 +1546,8 @@ mod tests {
         def.max_count = count;
         def.max_scaled_count = 0;
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("perf adapter: {:?}", adapter.get_info());
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("splat-perf"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
 
         let (w, h) = (1920u32, 1080u32);
         let fmt = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -1870,27 +1722,8 @@ mod tests {
         let palette = include_str!("../../../../assets/shaders/lib/palette.wgsl");
         let plib = include_str!("../../../../assets/shaders/lib/particle_lib.wgsl");
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("probe adapter: {:?}", adapter.get_info());
-        let (device, _queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("mir-pack-compile-probe"),
-                required_features: wgpu::Features::empty(),
-                required_limits: adapter.limits(),
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-                memory_hints: wgpu::MemoryHints::Performance,
-                trace: wgpu::Trace::Off,
-            }))
-            .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, _queue) = test_gpu();
 
         let sims = [
             (
@@ -1988,26 +1821,8 @@ fn cs_main() {
 "#;
         const N: usize = 13;
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("probe adapter: {:?}", adapter.get_info());
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("uniform-layout-probe"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
 
         // Distinctive, unequal values so a shifted read cannot coincidentally match.
         let mut u: ParticleUniforms = bytemuck::Zeroable::zeroed();

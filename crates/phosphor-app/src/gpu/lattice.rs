@@ -1034,6 +1034,7 @@ impl LatticeSim {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gpu::test_gpu::{gpu_guard, test_gpu};
 
     #[test]
     fn lattice_uniforms_size() {
@@ -1228,26 +1229,8 @@ mod tests {
     #[test]
     #[ignore = "requires a GPU/software adapter"]
     fn lattice_gpu_smoke() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("smoke adapter: {:?}", adapter.get_info());
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("lattice-smoke"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
 
@@ -1350,25 +1333,8 @@ mod tests {
     #[test]
     #[ignore = "requires a GPU/software adapter"]
     fn lattice_reseed_revives() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("lattice-reseed"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
 
         let grid = 32u32;
         // 445 collapses from a solid seed; cube domain + always-on stepping so it
@@ -1473,25 +1439,8 @@ mod tests {
     #[ignore = "requires a GPU/software adapter; writes PNGs"]
     fn lattice_render_previews() {
         let out_dir = std::env::var("LATTICE_PNG_DIR").unwrap_or_else(|_| "/tmp".to_string());
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("lattice-preview"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
 
         let all: [(&str, &str, u32); 8] = [
             (
@@ -1707,25 +1656,8 @@ mod tests {
             .map(clamp_grid_res)
             .unwrap_or(96);
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("lattice-anim"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
 
         let presets: [(&str, &str); 8] = [
             (
@@ -1984,26 +1916,8 @@ mod tests {
             params.neighborhood = nb;
         }
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("trace adapter: {:?}", adapter.get_info());
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("lattice-trace"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
 
         let sim = LatticeSim::new(&device, TextureFormat::Rgba16Float, params.grid_res);
         let cells = sim.cell_count() as f32;

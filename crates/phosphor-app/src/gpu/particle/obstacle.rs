@@ -186,6 +186,7 @@ fn preprocess_alpha(data: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gpu::test_gpu::{gpu_guard, test_gpu};
 
     #[test]
     fn preprocess_alpha_preserves_real_alpha() {
@@ -237,8 +238,8 @@ mod tests {
     }
 
     struct ObstacleProbe {
-        device: wgpu::Device,
-        queue: wgpu::Queue,
+        device: std::sync::Arc<wgpu::Device>,
+        queue: std::sync::Arc<wgpu::Queue>,
         pipeline: wgpu::ComputePipeline,
         uniform_buf: wgpu::Buffer,
         in_buf: wgpu::Buffer,
@@ -299,26 +300,8 @@ mod tests {
     #[test]
     #[ignore = "requires a GPU/software adapter"]
     fn obstacle_gpu_probe() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..Default::default()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .expect("no wgpu adapter");
-        eprintln!("probe adapter: {:?}", adapter.get_info());
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("obstacle-probe"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("no wgpu device");
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
 
