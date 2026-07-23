@@ -6,6 +6,8 @@
 ## Unreleased
 
 ### Added
+- **New effect: Panorama — the stereo field as a picture** — the screen becomes a map of the mix: horizontal is where a sound sits between your speakers, vertical is its pitch. A centred kick anchors the bottom while hats and reverb tails fan out to the edges, the cloud bends left and right as the image moves, and a mono mix collapses it to a single column. Nothing else in the app shows you the stereo image.
+- **New effect: Ascend — a horizon that tracks brightness, not volume** — cymbal swells lift the field skyward and sub-heavy passages sink it, so it keeps moving through a passage that holds a steady level. A pure tone draws it taut; noise inflates it into drifting haze. Built to layer underneath another effect as a ground plane.
 - **Per-band pan — seven new audio sources for where each frequency sits in the stereo image** — the existing `pan` collapses the whole mix to one number, so a centred kick under wide hi-hats read the same as a mono track. Each of the seven bands now reports its own position, bindable from the matrix and emitted on `/phosphor/audio/band_pan/*`. A band carrying no energy reads centred rather than drifting. Costs one extra FFT per hop, since both channels come out of a single transform.
 
 ### Changed

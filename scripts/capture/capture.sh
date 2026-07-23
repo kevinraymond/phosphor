@@ -255,38 +255,53 @@ step() { oscsend localhost 9000 /phosphor/trigger/next_effect f 1.0; }
 # Boot is Phosphor (hidden) -> visible[1] Array -> visible[2] Aurora.
 step; sleep 0.8; step; sleep 3.0
 
-# Find the canvas by motion rather than by asking the WM — see find_canvas.py for why. Search
-# the union of every window the app owns, which is guaranteed to enclose the client area.
-SX=999999 SY=999999 SR=0 SB=0
-for w in $(xdotool search --name '^Fosfora$'); do
-  eval "$(xdotool getwindowgeometry --shell "$w" 2>/dev/null)" || continue
-  (( X  < SX )) && SX=$X
-  (( Y  < SY )) && SY=$Y
-  (( X + WIDTH  > SR )) && SR=$((X + WIDTH))
-  (( Y + HEIGHT > SB )) && SB=$((Y + HEIGHT))
-done
-log "searching for canvas within ${SX},${SY} $((SR-SX))x$((SB-SY))"
-# Pass the known canvas size so find_canvas.py searches for WHERE that fixed-size window sits,
-# rather than taking a bounding box of all motion. A bounding box is not stable: on one run a
-# terminal repainting just outside the window dragged the top edge up by 45 px and put a strip
-# of title bar into all 38 clips.
-eval "$(xdotool getwindowgeometry --shell "$WIN")"
-read -r X Y W H < <("$REPO/scripts/capture/find_canvas.py" \
-                      --region "$SX" "$SY" "$((SR-SX))" "$((SB-SY))" \
-                      --size "$WIDTH" "$HEIGHT" --display "$DISPLAY") \
-  || die "could not locate the canvas (nothing on screen was animating)"
+# Canvas geometry, both numbers straight from X.
+#
+# `xdotool getwindowgeometry` reports the client window's position in its PARENT's coordinates
+# under a reparenting WM, which is not where it is on screen — for a 1920x1080 client it reported
+# +1021+1671 against a true +960+1579. That reparent offset is why this used to locate the canvas
+# by MOTION instead (find_canvas.py). Motion works, but only when the app is the liveliest thing
+# on screen: it is a search for where a fixed-size rectangle is changing, so a dim effect plus a
+# repainting terminal elsewhere on the desktop can win. When that happened the origin snapped to
+# the WM frame's Y and every clip in the run was a picture of the desktop.
+#
+# `xwininfo -id` reports "Absolute upper-left", which is already screen coordinates with the
+# reparent offset resolved. It is exact, it costs nothing, and it does not care what is animating.
+# Motion detection stays as the fallback for the case xwininfo cannot answer.
+eval "$(xdotool getwindowgeometry --shell "$WIN")"   # WIDTH/HEIGHT: the client's true size
+W=$WIDTH H=$HEIGHT
+X=$(xwininfo -id "$WIN" 2>/dev/null | awk '/Absolute upper-left X/{print $4}')
+Y=$(xwininfo -id "$WIN" 2>/dev/null | awk '/Absolute upper-left Y/{print $4}')
 
-# Take the ORIGIN from motion (the WM's reported client position is off by the reparent offset)
-# but cap the SIZE at the client window's own dimensions. Unrelated desktop motion just outside
-# the window — a terminal repainting — can otherwise widen the box by a few tens of pixels and
-# bleed a strip of desktop into every clip.
-CX=$X CY=$Y                                  # keep the detected origin: the eval below reuses X/Y
-eval "$(xdotool getwindowgeometry --shell "$WIN")"
-X=$CX Y=$CY
-(( W > WIDTH  )) && W=$WIDTH
-(( H > HEIGHT )) && H=$HEIGHT
+if [[ -n $X && -n $Y ]]; then
+  log "capture geometry ${W}x${H}+${X}+${Y}  (origin from xwininfo, size from client window)"
+else
+  log "xwininfo gave no absolute origin — falling back to motion detection"
+  SX=999999 SY=999999 SR=0 SB=0
+  for w in $(xdotool search --name '^Fosfora$'); do
+    eval "$(xdotool getwindowgeometry --shell "$w" 2>/dev/null)" || continue
+    (( X  < SX )) && SX=$X
+    (( Y  < SY )) && SY=$Y
+    (( X + WIDTH  > SR )) && SR=$((X + WIDTH))
+    (( Y + HEIGHT > SB )) && SB=$((Y + HEIGHT))
+  done
+  log "searching for canvas within ${SX},${SY} $((SR-SX))x$((SB-SY))"
+  # Pass the known canvas size so find_canvas.py searches for WHERE that fixed-size window sits,
+  # rather than taking a bounding box of all motion. A bounding box is not stable: on one run a
+  # terminal repainting just outside the window dragged the top edge up by 45 px and put a strip
+  # of title bar into all 38 clips.
+  eval "$(xdotool getwindowgeometry --shell "$WIN")"
+  read -r X Y W H < <("$REPO/scripts/capture/find_canvas.py" \
+                        --region "$SX" "$SY" "$((SR-SX))" "$((SB-SY))" \
+                        --size "$WIDTH" "$HEIGHT" --display "$DISPLAY") \
+    || die "could not locate the canvas (nothing on screen was animating)"
+  # Cap the SIZE at the client window's own dimensions: unrelated desktop motion just outside the
+  # window can otherwise widen the box and bleed a strip of desktop into every clip.
+  (( W > WIDTH  )) && W=$WIDTH
+  (( H > HEIGHT )) && H=$HEIGHT
+  log "capture geometry ${W}x${H}+${X}+${Y}  (origin by motion, size from client window)"
+fi
 W=$((W - W % 2)); H=$((H - H % 2))
-log "capture geometry ${W}x${H}+${X}+${Y}  (origin by motion, size from client window)"
 [[ $W -ge 640 && $H -ge 360 ]] || die "detected canvas ${W}x${H} is implausibly small"
 
 # Save a still of exactly what will be filmed, so a bad region is caught here rather than

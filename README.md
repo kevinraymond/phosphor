@@ -16,7 +16,7 @@
 
 Fosfora is a free, open-source music visualizer built for actually performing with. There's
 nothing to code, no account to make, and no project to set up: open it, play music, and it
-reacts. When you want more, every knob is there — 38 effects, an eight-layer stack, MIDI, OSC,
+reacts. When you want more, every knob is there — 40 effects, an eight-layer stack, MIDI, OSC,
 your phone as a control surface, a webcam, and NDI out to your video mixer.
 
 ## See it move
@@ -36,7 +36,7 @@ Six of the thirty-eight, all at default settings:
 </tr>
 </table>
 
-**→ [See all 38 effects in the gallery](docs/GALLERY.md)**
+**→ [See all 40 effects in the gallery](docs/GALLERY.md)**
 
 ## Past the defaults
 
@@ -109,7 +109,7 @@ cargo run --release --features depth   # webcam + MiDaS depth — needs libssl-d
 
 ## The effects
 
-**38 built-in**, all audio-reactive out of the box, every parameter a slider you can map to
+**40 built-in**, all audio-reactive out of the box, every parameter a slider you can map to
 MIDI or OSC. [Full gallery with clips →](docs/GALLERY.md)
 
 **Shaders** — Aurora · Beam · Drift · Frost · Iris · Prism · Pulse · Shards · Storm · Strata · Tunnel

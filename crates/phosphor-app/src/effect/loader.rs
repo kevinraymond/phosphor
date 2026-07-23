@@ -1815,6 +1815,137 @@ mod tests {
         );
     }
 
+    // Panorama + Ascend (#1801): the two MIR-pack effects. Same guards the
+    // other particle effects carry — the .pfx must parse as a builtin, and
+    // neither shader may mention the uniform struct name, since
+    // prepend_library suppresses UNIFORM_BLOCK injection if it appears
+    // anywhere including a comment (#1855) and the compile probe below
+    // concatenates the block unconditionally, so it cannot catch that.
+    #[test]
+    fn panorama_pfx_parses_as_builtin() {
+        let effect: PfxEffect =
+            serde_json::from_str(include_str!("../../../../assets/effects/panorama.pfx"))
+                .expect("panorama.pfx must deserialize");
+        assert!(EffectLoader::is_builtin(&effect));
+        assert_eq!(effect.inputs.len(), 8);
+        let particles = effect.particles.expect("panorama is a particle effect");
+        assert_eq!(particles.compute_shader, "panorama_sim.wgsl");
+        for src in [
+            include_str!("../../../../assets/shaders/panorama_sim.wgsl"),
+            include_str!("../../../../assets/shaders/panorama_bg.wgsl"),
+        ] {
+            assert!(
+                !src.contains("PhosphorUniforms"),
+                "panorama shaders must not mention the uniform struct name — it suppresses injection"
+            );
+        }
+    }
+
+    #[test]
+    fn ascend_pfx_parses_as_builtin() {
+        let effect: PfxEffect =
+            serde_json::from_str(include_str!("../../../../assets/effects/ascend.pfx"))
+                .expect("ascend.pfx must deserialize");
+        assert!(EffectLoader::is_builtin(&effect));
+        assert_eq!(effect.inputs.len(), 8);
+        let particles = effect.particles.expect("ascend is a particle effect");
+        assert_eq!(particles.compute_shader, "ascend_sim.wgsl");
+        for src in [
+            include_str!("../../../../assets/shaders/ascend_sim.wgsl"),
+            include_str!("../../../../assets/shaders/ascend_bg.wgsl"),
+        ] {
+            assert!(
+                !src.contains("PhosphorUniforms"),
+                "ascend shaders must not mention the uniform struct name — it suppresses injection"
+            );
+        }
+    }
+
+    /// Compile probe for both #1801 effects through the production concatenation.
+    /// Run: cargo test -p phosphor-app -- --ignored mir_pack_shaders_compile
+    #[test]
+    #[ignore = "requires a GPU/software adapter"]
+    fn mir_pack_shaders_compile() {
+        let noise = include_str!("../../../../assets/shaders/lib/noise.wgsl");
+        let palette = include_str!("../../../../assets/shaders/lib/palette.wgsl");
+        let plib = include_str!("../../../../assets/shaders/lib/particle_lib.wgsl");
+
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            ..Default::default()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
+        .expect("no wgpu adapter");
+        eprintln!("probe adapter: {:?}", adapter.get_info());
+        let (device, _queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("mir-pack-compile-probe"),
+                required_features: wgpu::Features::empty(),
+                required_limits: adapter.limits(),
+                experimental_features: wgpu::ExperimentalFeatures::default(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                trace: wgpu::Trace::Off,
+            }))
+            .expect("no wgpu device");
+
+        let sims = [
+            (
+                "panorama_sim.wgsl",
+                include_str!("../../../../assets/shaders/panorama_sim.wgsl"),
+            ),
+            (
+                "ascend_sim.wgsl",
+                include_str!("../../../../assets/shaders/ascend_sim.wgsl"),
+            ),
+        ];
+        for (name, sim) in sims {
+            device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(name),
+                source: wgpu::ShaderSource::Wgsl(
+                    format!("{noise}\n{palette}\n{plib}\n{sim}").into(),
+                ),
+            });
+            // Pipeline creation forces full validation (entry point, bindings).
+            let _ = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(name),
+                layout: None,
+                module: &module,
+                entry_point: Some("cs_main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+            let err = pollster::block_on(device.pop_error_scope());
+            assert!(err.is_none(), "{name} failed validation: {err:?}");
+        }
+
+        let bgs = [
+            (
+                "panorama_bg.wgsl",
+                include_str!("../../../../assets/shaders/panorama_bg.wgsl"),
+            ),
+            (
+                "ascend_bg.wgsl",
+                include_str!("../../../../assets/shaders/ascend_bg.wgsl"),
+            ),
+        ];
+        for (name, bg) in bgs {
+            device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let _ = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(name),
+                source: wgpu::ShaderSource::Wgsl(
+                    format!("{UNIFORM_BLOCK}\n{noise}\n{palette}\n{bg}").into(),
+                ),
+            });
+            let err = pollster::block_on(device.pop_error_scope());
+            assert!(err.is_none(), "{name} failed validation: {err:?}");
+        }
+    }
+
     /// Proves the Rust `ParticleUniforms` and the WGSL mirror in `particle_lib.wgsl` agree at the
     /// **field** level, not just in total size.
     ///
