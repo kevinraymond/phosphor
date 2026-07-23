@@ -260,7 +260,15 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
     // StereoAnalyzer remaps to 0..1, and `stereo_width` is a mid/side ratio already in 0..1, so all
     // three pass through the normalizer (percentile ranging would distort a producer-normalized
     // value). Smoothed to steady the field; Scale toward 0 on a stalled device.
-    def("pan", Passthrough, SmoothParams::ar(0.03, 0.15), Scale),
+    //
+    // `pan` and `stereo_corr` smooth SYMMETRICALLY (#1920). Asymmetric attack/release is right
+    // for an energy envelope — snap to the transient, decay gently — but a value centred at 0.5
+    // encodes a POSITION, and a faster rise than fall makes it spend more time above centre than
+    // below. Shipped ar(0.03, 0.15) put a source alternating 0.2/0.8 at ~4 Hz at a mean of 0.659
+    // against a true 0.500: a sixth of the field, biased right, on any oscillating source.
+    // `stereo_width` keeps the asymmetric pair deliberately — it is a magnitude, not a position,
+    // so there is no centre to creep away from. Pinned by `bipolar_smoothing_is_symmetric`.
+    def("pan", Passthrough, SmoothParams::ar(0.08, 0.08), Scale),
     def(
         "stereo_width",
         Passthrough,
@@ -270,7 +278,7 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
     def(
         "stereo_corr",
         Passthrough,
-        SmoothParams::ar(0.03, 0.15),
+        SmoothParams::ar(0.08, 0.08),
         Scale,
     ),
     // A18 structure (#1469) — detector-owned. `section_novelty` is self-normalized 0..1 and
@@ -528,22 +536,34 @@ mod tests {
         assert_eq!(FEATURES[80].name, "band_pan_brilliance");
     }
 
-    /// A13b per-band pan must smooth symmetrically. The smoother uses `attack` when a value is
-    /// rising and `release` when it is falling, so asymmetric constants bias any oscillating
-    /// signal toward whichever direction is faster. On a *position* that is a visible artifact:
-    /// with `pan`'s ar(0.03, 0.15), a source alternating hard-left/hard-right averages ≈0.66
-    /// instead of 0.5 and the stereo image creeps right. This test exists because the obvious
-    /// "make it consistent with `pan`" edit reintroduces exactly that bug.
+    /// Every BIPOLAR feature — one centred at 0.5 encoding a position rather than an amount —
+    /// must smooth symmetrically. The smoother uses `attack` when a value is rising and
+    /// `release` when it is falling, so asymmetric constants bias any oscillating signal toward
+    /// whichever direction is faster. On a position that is a visible artifact: under the
+    /// ar(0.03, 0.15) these all shipped with, a source alternating hard-left/hard-right averages
+    /// ≈0.66 instead of 0.5 and the stereo image creeps right (#1920).
+    ///
+    /// `stereo_width` is deliberately absent: it is a mid/side magnitude, so it has no centre to
+    /// creep away from and keeps the asymmetric pair. This test exists because the obvious
+    /// "make the stereo rows consistent with each other" edit reintroduces the bug.
     #[test]
-    fn band_pan_smoothing_is_symmetric() {
-        for def in FEATURES.iter().filter(|d| d.name.starts_with("band_pan_")) {
+    fn bipolar_smoothing_is_symmetric() {
+        let bipolar =
+            |name: &str| name.starts_with("band_pan_") || matches!(name, "pan" | "stereo_corr");
+        let mut checked = 0;
+        for def in FEATURES.iter().filter(|d| bipolar(d.name)) {
             assert_eq!(
                 def.smooth.attack, def.smooth.release,
                 "{} must smooth symmetrically — a position, not an energy envelope",
                 def.name
             );
             assert!(!def.smooth.bypass, "{} should still be smoothed", def.name);
+            checked += 1;
         }
+        assert_eq!(
+            checked, 9,
+            "expected 7 band_pan_* rows plus pan and stereo_corr"
+        );
     }
 
     /// Pins the A2 (#1453) per-feature normalization policy for every slot:

@@ -3,6 +3,11 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## Unreleased
+
+### Fixed
+- **The stereo image crept to the right** — `pan` and `stereo_corr` rose faster than they fell, so anything moving between the speakers settled right of where it actually sat: a hi-hat panning hard left/right averaged 0.66 where 0.50 is centre. Both now smooth evenly in each direction. `stereo_width` is unchanged, being a width rather than a position.
+
 ## v1.15.0 — 2026-07-23
 
 ### Added
