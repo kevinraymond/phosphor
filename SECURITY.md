@@ -7,8 +7,8 @@ maintained — please update before reporting an issue.
 
 | Version          | Supported |
 | ---------------- | --------- |
-| 1.12.x (latest)  | ✅        |
-| < 1.12           | ❌        |
+| 1.14.x (latest)  | ✅        |
+| < 1.14           | ❌        |
 
 ## Reporting a Vulnerability
 
