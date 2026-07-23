@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "bindings": [
+    {
+      "id": "b_001",
+      "name": "",
+      "enabled": true,
+      "scope": "Preset",
+      "source": "audio.kick",
+      "target": "param.0.Splat.audio_reactivity",
+      "transforms": [
+        {
+          "type": "smooth",
+          "factor": 0.7
+        }
+      ]
+    },
+    {
+      "id": "b_002",
+      "name": "",
+      "enabled": true,
+      "scope": "Preset",
+      "source": "audio.rms",
+      "target": "layer.0.opacity",
+      "transforms": [
+        {
+          "type": "remap",
+          "in_lo": 0.0,
+          "in_hi": 0.8,
+          "out_lo": 0.3,
+          "out_hi": 1.0
+        },
+        {
+          "type": "smooth",
+          "factor": 0.85
+        }
+      ]
+    },
+    {
+      "id": "b_003",
+      "name": "",
+      "enabled": true,
+      "scope": "Preset",
+      "source": "audio.centroid",
+      "target": "param.0.Splat.exposure",
+      "transforms": [
+        {
+          "type": "smooth",
+          "factor": 0.9
+        }
+      ]
+    },
+    {
+      "id": "b_004",
+      "name": "",
+      "enabled": true,
+      "scope": "Preset",
+      "source": "audio.loudness_m",
+      "target": "param.0.Splat.orbit_speed",
+      "transforms": []
+    },
+    {
+      "id": "b_005",
+      "name": "",
+      "enabled": true,
+      "scope": "Preset",
+      "source": "audio.band.0",
+      "target": "param.0.Splat.audio_reactivity",
+      "transforms": [
+        {
+          "type": "smooth",
+          "factor": 0.8
+        }
+      ]
+    },
+    {
+      "id": "b_006",
+      "name": "",
+      "enabled": true,
+      "scope": "Preset",
+      "source": "audio.band.1",
+      "target": "param.0.Splat.explode_amount",
+      "transforms": [
+        {
+          "type": "smooth",
+          "factor": 0.8
+        }
+      ]
+    },
+    {
+      "id": "b_007",
+      "name": "",
+      "enabled": true,
+      "scope": "Preset",
+      "source": "audio.band.2",
+      "target": "param.0.Splat.scatter_amount",
+      "transforms": [
+        {
+          "type": "smooth",
+          "factor": 0.8
+        }
+      ]
+    },
+    {
+      "id": "b_008",
+      "name": "",
+      "enabled": true,
+      "scope": "Preset",
+      "source": "audio.band.3",
+      "target": "param.0.Splat.focus_strength",
+      "transforms": [
+        {
+          "type": "smooth",
+          "factor": 0.8
+        }
+      ]
+    },
+    {
+      "id": "b_009",
+      "name": "",
+      "enabled": true,
+      "scope": "Preset",
+      "source": "audio.band.4",
+      "target": "param.0.Splat.splat_scale",
+      "transforms": [
+        {
+          "type": "smooth",
+          "factor": 0.8
+        }
+      ]
+    },
+    {
+      "id": "b_010",
+      "name": "",
+      "enabled": true,
+      "scope": "Preset",
+      "source": "audio.band.5",
+      "target": "param.0.Splat.opacity_gain",
+      "transforms": [
+        {
+          "type": "smooth",
+          "factor": 0.8
+        }
+      ]
+    },
+    {
+      "id": "b_011",
+      "name": "",
+      "enabled": true,
+      "scope": "Preset",
+      "source": "audio.band.6",
+      "target": "param.0.Splat.idle_breathe",
+      "transforms": [
+        {
+          "type": "smooth",
+          "factor": 0.8
+        }
+      ]
+    }
+  ]
+}

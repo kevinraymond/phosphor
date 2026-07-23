@@ -47,7 +47,7 @@ setups you can build from the panels, each one a preset you can save and recall:
 <tr>
 <td width="33%"><img src="assets/media/tiles/adv_obstacle.webp" width="100%" alt="Obstacle collision"><br><b>Flow around a body</b><br><sub>Water parts around a silhouette — a photo, or your webcam</sub></td>
 <td width="33%"><img src="assets/media/tiles/adv_stack.webp" width="100%" alt="Layer stack"><br><b>Four layers, blended</b><br><sub>Voronoi and curtains screened over a particle flock</sub></td>
-<td width="33%"><img src="assets/media/tiles/adv_splat.webp" width="100%" alt="Gaussian splat scene"><br><b>A 3D capture, playing</b><br><sub>Photoscanned Gaussians that shatter on the drop</sub></td>
+<td width="33%"><img src="assets/media/tiles/adv_splat.webp" width="100%" alt="Gaussian splat scene"><br><b>A 3D capture, playing</b><br><sub>A photoscan rounded into points, breathing with the mix</sub></td>
 </tr>
 <tr>
 <td><img src="assets/media/tiles/adv_bindings.webp" width="100%" alt="Custom bindings"><br><b>Wired to the music</b><br><sub>Drums, harmony and the drop on separate parameters</sub></td>
