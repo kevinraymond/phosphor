@@ -36,6 +36,76 @@ struct SplatStatic {
 }
 @group(2) @binding(1) var<storage, read> splat_static: array<SplatStatic>;
 
+// View-dependent spherical harmonics, bands 1–3 (#1862). 45 f16 coefficients
+// per splat (15 bands × RGB, channel-major with a 15-wide stride at every
+// degree) packed into 24 u32 words; the last 3 halves are padding.
+//
+// RECORD 0 IS A HEADER, NOT A SPLAT — splat i lives at index i+1. Words 0–8
+// hold the inverse scene rotation as a row-major 3×3 of raw f32 bits: SH lobes
+// are defined in the source frame, but the loader rotates geometry into the
+// render frame by the .pfx `rotation_degrees`, so the view direction is rotated
+// BACK through this before evaluation (rotating the coefficients themselves
+// would need Wigner-D matrices for bands 2–3).
+//
+// DC-only scenes bind a single zeroed dummy record and set u.splat_sh_degree
+// to 0, which skips every load below.
+struct SplatSh {
+    data: array<u32, 24>,
+}
+@group(2) @binding(2) var<storage, read> splat_sh: array<SplatSh>;
+
+// Coefficient `slot` (0..44) of SH record `rec`, unpacked from its f16 half.
+fn sh_coeff(rec: u32, slot: u32) -> f32 {
+    let pair = unpack2x16float(splat_sh[rec].data[slot >> 1u]);
+    return select(pair.x, pair.y, (slot & 1u) == 1u);
+}
+
+// Real SH basis of the 3DGS convention — identical constants and sign pattern
+// to INRIA's reference rasterizer (computeColorFromSH) and gsplat/SuperSplat's
+// evalSH, so a capture shades the same here as in the viewer it was authored
+// in. `d` is the SOURCE-frame direction from camera to splat, normalized.
+// Returns the view-dependent delta only; the DC term is already in base.rgb.
+fn splat_sh_color(rec: u32, degree: u32, d: vec3f) -> vec3f {
+    let x = d.x;
+    let y = d.y;
+    let z = d.z;
+    var basis: array<f32, 15>;
+    basis[0] = -0.4886025119 * y;
+    basis[1] = 0.4886025119 * z;
+    basis[2] = -0.4886025119 * x;
+    var n = 3u;
+    if degree >= 2u {
+        let xx = x * x;
+        let yy = y * y;
+        let zz = z * z;
+        basis[3] = 1.0925484306 * (x * y);
+        basis[4] = -1.0925484306 * (y * z);
+        basis[5] = 0.3153915653 * (2.0 * zz - xx - yy);
+        basis[6] = -1.0925484306 * (x * z);
+        basis[7] = 0.5462742153 * (xx - yy);
+        n = 8u;
+        if degree >= 3u {
+            basis[8] = -0.5900435899 * y * (3.0 * xx - yy);
+            basis[9] = 2.8906114426 * (x * y) * z;
+            basis[10] = -0.4570457995 * y * (4.0 * zz - xx - yy);
+            basis[11] = 0.3731763326 * z * (2.0 * zz - 3.0 * xx - 3.0 * yy);
+            basis[12] = -0.4570457995 * x * (4.0 * zz - xx - yy);
+            basis[13] = 1.4453057213 * z * (xx - yy);
+            basis[14] = -0.5900435899 * x * (xx - 3.0 * yy);
+            n = 15u;
+        }
+    }
+    var rgb = vec3f(0.0);
+    for (var k = 0u; k < n; k = k + 1u) {
+        rgb += basis[k] * vec3f(
+            sh_coeff(rec, k),
+            sh_coeff(rec, 15u + k),
+            sh_coeff(rec, 30u + k),
+        );
+    }
+    return rgb;
+}
+
 // Σ3 is precomputed CPU-side (R·S·SᵀRᵀ is camera-independent; building it
 // per frame per splat cost ~9 ms at 2M — live perf finding) and stored
 // ×COV_SCALE to keep world-unit σ² values out of f16 subnormals.
@@ -296,8 +366,30 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     // the RAW intrinsic alpha (opacity·falloff·carve) — no OIT depth-weight wz
     // and no OIT_ALPHA_SCALE fold. The OIT path keeps a_out.
     let a_sorted = clamp(alpha * carve, 0.0, 1.0);
+    // View-dependent colour: rotate the camera→splat direction back into the
+    // source frame (header record 0) and add the SH bands to the DC term.
+    // NOTE the DC term arrived through pack4x8unorm, so it is already clamped
+    // to [0,1] — a capture whose DC exceeds 1 has lost the headroom a negative
+    // view term would have used. Pre-existing to the 8-bit colour packing, not
+    // introduced by SH.
+    var rgb = base.rgb;
+    let sh_degree = u32(u.splat_sh_degree);
+    if sh_degree > 0u {
+        let dw = normalize(world - ro);
+        let r0 = vec3f(bitcast<f32>(splat_sh[0].data[0]),
+                       bitcast<f32>(splat_sh[0].data[1]),
+                       bitcast<f32>(splat_sh[0].data[2]));
+        let r1 = vec3f(bitcast<f32>(splat_sh[0].data[3]),
+                       bitcast<f32>(splat_sh[0].data[4]),
+                       bitcast<f32>(splat_sh[0].data[5]));
+        let r2 = vec3f(bitcast<f32>(splat_sh[0].data[6]),
+                       bitcast<f32>(splat_sh[0].data[7]),
+                       bitcast<f32>(splat_sh[0].data[8]));
+        let d = vec3f(dot(r0, dw), dot(r1, dw), dot(r2, dw));
+        rgb = max(rgb + splat_sh_color(idx + 1u, sh_degree, d), vec3f(0.0));
+    }
     p.color = vec4f(
-        clamp(base.rgb * (0.5 + param(7u) * 1.5), vec3f(0.0), vec3f(1.0)),
+        clamp(rgb * (0.5 + param(7u) * 1.5), vec3f(0.0), vec3f(1.0)),
         select(a_out, a_sorted, u.splat_sorted > 0.5)
     );
     // .zw = packed screen conic for the raster's anisotropic branch.

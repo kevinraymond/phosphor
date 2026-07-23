@@ -18,6 +18,8 @@ use std::thread;
 
 use crossbeam_channel::{Receiver, TryRecvError, bounded};
 
+use crate::gpu::half::f32_to_f16;
+
 /// Transform applied to normalize the source scene (recorded for debugging /
 /// status UI; the cloud itself is already transformed).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -52,6 +54,19 @@ pub struct SplatCloud {
     pub colors: Vec<[f32; 3]>,
     /// Post-sigmoid opacity, 0..1 (splats below 1/255 are culled at parse).
     pub opacities: Vec<f32>,
+    /// View-dependent SH coefficients (bands 1–3), f16 bit patterns, laid out
+    /// **channel-major**: `[0..15]` = R, `[15..30]` = G, `[30..45]` = B — the
+    /// PLY `f_rest_*` order. Empty when [`sh_degree`](Self::sh_degree) is 0.
+    /// f16 at parse time keeps a 1.3M-splat load near 90 MB instead of 180.
+    pub sh: Vec<[u16; SH_COEFFS]>,
+    /// 0 = DC only (no `f_rest`, or an unrecognized count), 1–3 = bands present.
+    pub sh_degree: u8,
+    /// Inverse of the `rotation_degrees` scene rotation. SH lobes are defined in
+    /// the **source** frame, but `normalize_cloud` rotates positions and quats
+    /// into the render frame — so the sim rotates the view direction back
+    /// through this before evaluating, rather than SH-rotating 45 coefficients
+    /// per splat (which needs Wigner-D matrices for bands 2–3).
+    pub sh_rot_inv: glam::Mat3,
     /// Absolute path actually loaded.
     pub source_path: String,
     /// Vertex count in the file before cull/subsample (status UI).
@@ -204,6 +219,11 @@ fn splitmix64(state: &mut u64) -> u64 {
 /// are culled before subsampling (typically 5–20% of a trained scene).
 const OPACITY_CULL: f32 = 1.0 / 255.0;
 
+/// Number of view-dependent SH coefficients at degree 3: 15 bands × 3 channels.
+/// Lower-degree captures fill a prefix per channel and leave the rest zero, so
+/// one fixed-width record serves every degree.
+pub const SH_COEFFS: usize = 45;
+
 /// One decoded source splat, prior to normalization.
 struct RawSplat {
     pos: [f32; 3],
@@ -211,6 +231,8 @@ struct RawSplat {
     rot: [f32; 4],
     color: [f32; 3],
     opacity: f32,
+    /// f16 bit patterns, channel-major; all zero when the file has no `f_rest`.
+    sh: [u16; SH_COEFFS],
 }
 
 /// Reservoir sampler (Algorithm R) writing straight into the cloud's SoA
@@ -231,6 +253,9 @@ impl Reservoir {
     }
 
     fn offer(&mut self, cloud: &mut SplatCloud, s: RawSplat) {
+        // SH rides the same reservoir decisions as the rest of the attributes,
+        // so a subsampled scene keeps each retained splat's own coefficients.
+        let keep_sh = cloud.sh_degree > 0;
         self.seen += 1;
         if cloud.positions.len() < self.target {
             cloud.positions.push(s.pos);
@@ -238,6 +263,9 @@ impl Reservoir {
             cloud.rotations.push(s.rot);
             cloud.colors.push(s.color);
             cloud.opacities.push(s.opacity);
+            if keep_sh {
+                cloud.sh.push(s.sh);
+            }
             return;
         }
         // Replace a random slot with probability target/seen.
@@ -248,6 +276,9 @@ impl Reservoir {
             cloud.rotations[j] = s.rot;
             cloud.colors[j] = s.color;
             cloud.opacities[j] = s.opacity;
+            if keep_sh {
+                cloud.sh[j] = s.sh;
+            }
         }
     }
 }
@@ -284,6 +315,9 @@ fn empty_cloud(path: &Path, total: u32) -> SplatCloud {
         rotations: Vec::new(),
         colors: Vec::new(),
         opacities: Vec::new(),
+        sh: Vec::new(),
+        sh_degree: 0,
+        sh_rot_inv: glam::Mat3::IDENTITY,
         source_path: path.to_string_lossy().to_string(),
         total_in_file: total,
         transform: SplatTransform::default(),
@@ -296,7 +330,7 @@ fn empty_cloud(path: &Path, total: u32) -> SplatCloud {
 
 /// Byte offsets of the required 3DGS properties within one vertex record.
 /// Found by property NAME, so property-order variance between exporters is
-/// handled; `f_rest_*` / normals just contribute to the stride.
+/// handled; normals just contribute to the stride.
 struct PlyLayout {
     vertex_count: u32,
     stride: usize,
@@ -307,6 +341,24 @@ struct PlyLayout {
     opacity: usize,
     scale: [usize; 3],
     rot: [usize; 4],
+    /// Byte offsets of `f_rest_0..N`, indexed by N (empty when absent, i.e.
+    /// [`sh_degree`](Self::sh_degree) 0). Sorted by the numeric suffix, not by
+    /// header order, for the same exporter-variance reason as the rest.
+    f_rest: Vec<usize>,
+    /// 0 (DC only) or 1–3, from the per-channel coefficient count.
+    sh_degree: u8,
+}
+
+/// SH degree from the total `f_rest` count: coefficients are 3 channels ×
+/// (`(deg+1)² − 1`) bands, so 9 → 1, 24 → 2, 45 → 3. Anything else is a format
+/// we do not recognize; treat it as DC-only rather than mis-decode it.
+fn sh_degree_from_count(total: usize) -> u8 {
+    match total {
+        9 => 1,
+        24 => 2,
+        SH_COEFFS => 3,
+        _ => 0,
+    }
 }
 
 fn ply_type_size(ty: &str) -> Option<usize> {
@@ -421,6 +473,34 @@ fn parse_ply_header(reader: &mut impl BufRead) -> Result<PlyLayout, String> {
         Ok(*off)
     };
 
+    // View-dependent SH: gather every float32 `f_rest_N` and order by N. A
+    // non-float or out-of-range suffix means this is not an INRIA-style export,
+    // so drop the whole set to DC-only instead of decoding garbage.
+    let mut f_rest: Vec<(usize, usize)> = Vec::new(); // (index, offset)
+    for (name, off, ty) in &offsets {
+        let Some(suffix) = name.strip_prefix("f_rest_") else {
+            continue;
+        };
+        match suffix.parse::<usize>() {
+            Ok(i) if i < SH_COEFFS && (ty == "float" || ty == "float32") => f_rest.push((i, *off)),
+            _ => {
+                f_rest.clear();
+                break;
+            }
+        }
+    }
+    f_rest.sort_unstable_by_key(|(i, _)| *i);
+    let sh_degree = if f_rest.iter().enumerate().all(|(n, (i, _))| n == *i) {
+        sh_degree_from_count(f_rest.len())
+    } else {
+        0 // gaps in the sequence — not a layout we can index
+    };
+    let f_rest: Vec<usize> = if sh_degree > 0 {
+        f_rest.into_iter().map(|(_, off)| off).collect()
+    } else {
+        Vec::new()
+    };
+
     Ok(PlyLayout {
         vertex_count,
         stride,
@@ -436,6 +516,8 @@ fn parse_ply_header(reader: &mut impl BufRead) -> Result<PlyLayout, String> {
             find("rot_2")?,
             find("rot_3")?,
         ],
+        f_rest,
+        sh_degree,
     })
 }
 
@@ -452,6 +534,7 @@ fn parse_ply_stream(
 ) -> Result<SplatCloud, String> {
     let layout = parse_ply_header(reader)?;
     let mut cloud = empty_cloud(path, layout.vertex_count);
+    cloud.sh_degree = layout.sh_degree;
     let mut reservoir = Reservoir::new(target_count as usize);
 
     let total = layout.vertex_count as usize;
@@ -497,6 +580,16 @@ fn parse_ply_stream(
                         (SH_C0 * read_f32(rec, layout.f_dc[2]) + 0.5).max(0.0),
                     ],
                     opacity,
+                    sh: {
+                        // Raw coefficients — the SH basis constants are applied
+                        // GPU-side at evaluation, exactly as the reference
+                        // renderers do. Stays all-zero for DC-only files.
+                        let mut sh = [0u16; SH_COEFFS];
+                        for (dst, &off) in sh.iter_mut().zip(layout.f_rest.iter()) {
+                            *dst = f32_to_f16(read_f32(rec, off));
+                        }
+                        sh
+                    },
                 },
             );
         }
@@ -568,6 +661,9 @@ fn parse_splat_stream(
                         rec[26] as f32 / 255.0,
                     ],
                     opacity,
+                    // The .splat format carries no view-dependent bands by
+                    // design — colors are stored display-ready.
+                    sh: [0u16; SH_COEFFS],
                 },
             );
         }
@@ -656,6 +752,9 @@ fn normalize_cloud(cloud: &mut SplatCloud, scene_scale: f32, rotation_degrees: [
             *r = q.normalize().to_array();
         }
     }
+    // SH coefficients are NOT rotated (bands 2–3 would need Wigner-D matrices);
+    // the sim rotates the view direction back into the source frame instead.
+    cloud.sh_rot_inv = glam::Mat3::from_quat(rot_q.inverse());
 
     cloud.transform = SplatTransform {
         center,
@@ -908,6 +1007,12 @@ mod tests {
         "rot_3",
     ];
 
+    /// Distinct, f16-exact value for `f_rest_n` (1/8 steps round-trip through
+    /// f16 without loss, so tests can assert equality rather than a tolerance).
+    fn sh_probe_value(n: usize) -> f32 {
+        1.0 + n as f32 / 8.0
+    }
+
     /// Raw (pre-activation) source values for one test vertex.
     #[derive(Clone, Copy, Default)]
     struct TestSplat {
@@ -957,7 +1062,12 @@ mod tests {
                     "rot_1" => v.rot[1],
                     "rot_2" => v.rot[2],
                     "rot_3" => v.rot[3],
-                    _ => 0.123, // normals + f_rest filler
+                    // f_rest_N gets a value that encodes N, so an SH decode
+                    // that transposes channels or loses ordering is visible.
+                    other => match other.strip_prefix("f_rest_") {
+                        Some(n) => sh_probe_value(n.parse::<usize>().unwrap()),
+                        None => 0.123, // normals filler
+                    },
                 };
                 bytes.extend_from_slice(&val.to_le_bytes());
             }
@@ -1050,6 +1160,129 @@ mod tests {
         let cloud = parse_bytes(&bytes, 10).unwrap();
         assert_eq!(cloud.positions[1], [0.0, 5.0, 0.0]);
         assert!((cloud.colors[1][0] - (SH_C0 * 0.5 + 0.5)).abs() < 1e-6);
+    }
+
+    /// A canonical property list whose `f_rest` block has exactly `n` entries.
+    fn props_with_f_rest(n: usize) -> Vec<String> {
+        CANONICAL_PROPS
+            .iter()
+            .flat_map(|p| {
+                if *p == "f_rest_all" {
+                    (0..n).map(|i| format!("f_rest_{i}")).collect()
+                } else {
+                    vec![(*p).to_string()]
+                }
+            })
+            .collect()
+    }
+
+    /// PLY bytes for the canonical layout with an `n`-entry `f_rest` block.
+    fn make_ply_with_f_rest(n: usize, verts: &[TestSplat]) -> Vec<u8> {
+        let props = props_with_f_rest(n);
+        let refs: Vec<&str> = props.iter().map(String::as_str).collect();
+        make_test_ply(&refs, verts)
+    }
+
+    fn parse_with_f_rest(n: usize) -> SplatCloud {
+        // Two vertices: the second only decodes if the f_rest block contributed
+        // exactly its bytes to the stride.
+        let bytes = make_ply_with_f_rest(n, &[visible_splat(), visible_splat()]);
+        parse_bytes(&bytes, 10).unwrap()
+    }
+
+    #[test]
+    fn ply_sh_decodes_all_45_in_source_order() {
+        let cloud = parse_with_f_rest(SH_COEFFS);
+        assert_eq!(cloud.sh_degree, 3);
+        assert_eq!(cloud.sh.len(), 2);
+        // Channel-major: f_rest_0..14 = R, 15..29 = G, 30..44 = B. A transposed
+        // decode would still fill 45 slots — only the ORDER catches it, and
+        // only if it is checked on every index.
+        for v in 0..2 {
+            for i in 0..SH_COEFFS {
+                assert_eq!(
+                    cloud.sh[v][i],
+                    f32_to_f16(sh_probe_value(i)),
+                    "vertex {v} coefficient {i} out of order"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ply_sh_degree_from_coefficient_count() {
+        assert_eq!(parse_with_f_rest(9).sh_degree, 1);
+        assert_eq!(parse_with_f_rest(24).sh_degree, 2);
+        assert_eq!(parse_with_f_rest(45).sh_degree, 3);
+        // Degree 1 fills a 3-wide prefix per channel and leaves the rest zero.
+        let deg1 = parse_with_f_rest(9);
+        assert_eq!(deg1.sh[0][8], f32_to_f16(sh_probe_value(8)));
+        assert_eq!(deg1.sh[0][9], 0);
+    }
+
+    #[test]
+    fn ply_without_f_rest_is_dc_only() {
+        let cloud = parse_with_f_rest(0);
+        assert_eq!(cloud.sh_degree, 0);
+        // No per-splat allocation at all for a DC-only capture.
+        assert!(cloud.sh.is_empty());
+    }
+
+    #[test]
+    fn ply_unrecognized_f_rest_count_falls_back_to_dc() {
+        // 12 coefficients is not 3×(3|8|15) — decoding it as if it were would
+        // shift every band. Must degrade to DC, not guess.
+        let cloud = parse_with_f_rest(12);
+        assert_eq!(cloud.sh_degree, 0);
+        assert!(cloud.sh.is_empty());
+        // ...and the stride is still right, so geometry is unaffected.
+        assert_eq!(cloud.count, 2);
+    }
+
+    #[test]
+    fn ply_sh_gap_in_sequence_falls_back_to_dc() {
+        // f_rest_0..7 plus f_rest_9: the right COUNT (9) but a hole, so index N
+        // no longer means band N. Must not be decoded as degree 1.
+        let mut props: Vec<String> = props_with_f_rest(8);
+        let at = props.iter().position(|p| p == "opacity").unwrap();
+        props.insert(at, "f_rest_9".to_string());
+        let refs: Vec<&str> = props.iter().map(String::as_str).collect();
+        let bytes = make_test_ply(&refs, &[visible_splat()]);
+        let cloud = parse_bytes(&bytes, 10).unwrap();
+        assert_eq!(cloud.sh_degree, 0);
+    }
+
+    #[test]
+    fn sh_survives_subsampling() {
+        // The reservoir must move SH in lockstep with the other attributes, or
+        // splat i renders with splat j's view-dependent colour.
+        let mut verts = Vec::new();
+        for i in 0..64 {
+            let mut v = visible_splat();
+            v.pos = [i as f32, 0.0, 0.0];
+            verts.push(v);
+        }
+        let bytes = make_ply_with_f_rest(SH_COEFFS, &verts);
+        let cloud = parse_bytes(&bytes, 8).unwrap();
+        assert_eq!(cloud.count, 8);
+        assert_eq!(cloud.sh.len(), 8, "SH must be subsampled with the rest");
+    }
+
+    #[test]
+    fn normalization_records_inverse_sh_rotation() {
+        // SH is evaluated in the SOURCE frame, so the recorded matrix must undo
+        // the rotation the loader applied to the geometry.
+        let cloud = {
+            let bytes = make_ply_with_f_rest(SH_COEFFS, &[visible_splat()]);
+            let mut c = parse_bytes(&bytes, 10).unwrap();
+            normalize_cloud(&mut c, 1.0, [90.0, 0.0, 0.0]);
+            c
+        };
+        // A source-frame +Y direction must come back out of the render frame.
+        let fwd = glam::Quat::from_euler(glam::EulerRot::XYZ, 90f32.to_radians(), 0.0, 0.0);
+        let rendered = fwd * glam::Vec3::Y;
+        let back = cloud.sh_rot_inv * rendered;
+        assert!((back - glam::Vec3::Y).length() < 1e-5, "got {back:?}");
     }
 
     #[test]

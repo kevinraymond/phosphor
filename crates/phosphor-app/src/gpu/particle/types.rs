@@ -192,7 +192,8 @@ pub struct ParticleUniforms {
     pub splat_focal_depth: f32, // DoF focal plane in view-depth units (centroid EMA + focal_bias)
     pub splat_explode: f32,     // drop envelope: max(env·exp(−dt/0.45), drop)
     pub splat_sorted: f32, // 1.0 = sorted-composite path (sim writes raw intrinsic alpha); 0.0 = OIT
-    pub _pad_splat1: f32,
+    /// 0 = DC only (no SH buffer bound); 1–3 = view-dependent bands present.
+    pub splat_sh_degree: f32,
     // Total = 896 bytes
 }
 

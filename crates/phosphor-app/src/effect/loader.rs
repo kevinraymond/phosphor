@@ -1369,13 +1369,23 @@ mod tests {
         // Use the effect's own scene transform (incl. the Y-down→Y-up 180°-X flip)
         // so the offscreen A/B exercises the real load path, not an unrotated one.
         let scene_scale = def.splat.as_ref().map_or(1.0, |s| s.scene_scale);
-        let scene_rot = def
-            .splat
-            .as_ref()
-            .map_or([0.0, 0.0, 0.0], |s| s.rotation_degrees);
+        // SPLAT_ROT=x,y,z overrides the .pfx Euler offsets — the SH path is the
+        // one thing that reads the scene rotation back out (it un-rotates the
+        // view direction), so testing it needs the rotation to be a variable.
+        let scene_rot = match std::env::var("SPLAT_ROT") {
+            Ok(v) => {
+                let e: Vec<f32> = v.split(',').filter_map(|c| c.trim().parse().ok()).collect();
+                assert_eq!(e.len(), 3, "SPLAT_ROT wants three comma-separated degrees");
+                [e[0], e[1], e[2]]
+            }
+            Err(_) => def
+                .splat
+                .as_ref()
+                .map_or([0.0, 0.0, 0.0], |s| s.rotation_degrees),
+        };
         let mut ps = ParticleSystem::new(&device, &queue, fmt, &def, &sim_src, false);
         ps.resize_compute_raster(&device, w, h);
-        let cloud = if let Some(p) = ply_path.as_ref() {
+        let mut cloud = if let Some(p) = ply_path.as_ref() {
             use std::sync::atomic::{AtomicBool, AtomicU8};
             let prog = AtomicU8::new(0);
             let cancel = AtomicBool::new(false);
@@ -1391,7 +1401,16 @@ mod tests {
         } else {
             generate_test_scene(50_000)
         };
-        eprintln!("scene splats: {}", cloud.count);
+        // SPLAT_SH=0 drops a capture to DC only — the A/B that isolates the
+        // view-dependent contribution at identical geometry (#1862).
+        if std::env::var("SPLAT_SH").is_ok_and(|v| v == "0") {
+            cloud.sh_degree = 0;
+            cloud.sh = Vec::new();
+        }
+        eprintln!(
+            "scene splats: {} (SH degree {})",
+            cloud.count, cloud.sh_degree
+        );
         ps.upload_splat_cloud(&device, &queue, &cloud);
 
         let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -1494,8 +1513,13 @@ mod tests {
                     exposure,
                 ];
                 // Slots 8–11 (CPU driver): orbit, distance, pitch, focal bias.
-                // SPLAT_ORBIT=0 + SPLAT_YAW freezes a chosen viewing angle.
-                ps.splat_ui_params = [env_f("SPLAT_ORBIT", 0.3), cam_dist, 0.15, 0.0];
+                // SPLAT_ORBIT=0 + SPLAT_YAW/SPLAT_PITCH freezes a viewing angle.
+                ps.splat_ui_params = [
+                    env_f("SPLAT_ORBIT", 0.3),
+                    cam_dist,
+                    env_f("SPLAT_PITCH", 0.15),
+                    0.0,
+                ];
                 ps.update_splat_driver();
                 if std::env::var("SPLAT_YAW").is_ok() {
                     ps.uniforms.cam_yaw = env_f("SPLAT_YAW", 0.0);
@@ -1661,9 +1685,43 @@ mod tests {
         let fmt = wgpu::TextureFormat::Rgba8UnormSrgb;
         let mut ps = ParticleSystem::new(&device, &queue, fmt, &def, &sim_src, false);
         ps.resize_compute_raster(&device, w, h);
-        eprintln!("generating {count} procedural splats…");
-        let cloud = generate_test_scene(count as usize);
-        ps.upload_splat_cloud(&device, &queue, &cloud);
+        // SPLAT_PLY measures a REAL capture instead of the procedural knot —
+        // needed for the two things the synthetic scene cannot show: the cost of
+        // view-dependent SH (the knot has none) and the close-zoom overdraw the
+        // sorted path's 1024 px radius cap allows (#1862).
+        let cloud = match std::env::var("SPLAT_PLY") {
+            Ok(p) => {
+                use std::sync::atomic::{AtomicBool, AtomicU8};
+                eprintln!("loading {p}…");
+                let (prog, cancel) = (AtomicU8::new(0), AtomicBool::new(false));
+                let scene_rot = def
+                    .splat
+                    .as_ref()
+                    .map_or([0.0, 0.0, 0.0], |s| s.rotation_degrees);
+                crate::gpu::particle::splat_source::load_splat_file(
+                    std::path::Path::new(&p),
+                    count,
+                    1.0,
+                    scene_rot,
+                    &prog,
+                    &cancel,
+                )
+                .expect("load SPLAT_PLY")
+            }
+            Err(_) => {
+                eprintln!("generating {count} procedural splats…");
+                generate_test_scene(count as usize)
+            }
+        };
+        if std::env::var("SPLAT_SH").is_ok_and(|v| v == "0") {
+            // A/B the SH evaluation cost at identical geometry.
+            let mut c = cloud;
+            c.sh_degree = 0;
+            c.sh = Vec::new();
+            ps.upload_splat_cloud(&device, &queue, &c);
+        } else {
+            ps.upload_splat_cloud(&device, &queue, &cloud);
+        }
 
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("splat-perf-target"),
@@ -1699,7 +1757,12 @@ mod tests {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.5);
             ps.uniforms.effect_params = [0.8, 0.75, 0.5, focus_ov, scale_ov, 1.0, 0.3, 0.33];
-            ps.splat_ui_params = [0.3, 1.6, 0.15, 0.0];
+            // SPLAT_CAM_DIST < 1.6 zooms in — the r_cap overdraw stress case.
+            let dist: f32 = std::env::var("SPLAT_CAM_DIST")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1.6);
+            ps.splat_ui_params = [0.3, dist, 0.15, 0.0];
             ps.update_splat_driver();
 
             let t0 = std::time::Instant::now();

@@ -48,6 +48,78 @@ pub struct SplatStatic {
     pub _spare: u32,
 }
 
+/// Per-splat view-dependent SH coefficients: 96 bytes, uploaded once per scene
+/// at `@group(2) @binding(2)`. 45 f16 halves (bands 1–3 × RGB, channel-major —
+/// the PLY `f_rest` order) in 24 u32 words; the trailing 3 halves are padding.
+///
+/// **Record 0 of the buffer is a header, not a splat** — splat *i* lives at
+/// index *i + 1*. The header carries the inverse scene rotation as a 3×3
+/// (words 0–8, one f32 each, row-major), because SH lobes are defined in the
+/// source frame while `normalize_cloud` rotates the geometry into the render
+/// frame; the sim rotates the view direction back through it rather than
+/// SH-rotating every coefficient (bands 2–3 would need Wigner-D matrices).
+///
+/// f16 rather than the i8-plus-scale the compressed-PLY ecosystem uses: at the
+/// scene sizes in play (≤1.5M splats ⇒ ≤144 MB) the 4× saving does not pay for
+/// a quantization-scale surface to get wrong. i8 is the lever if it ever does.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Pod, Zeroable)]
+pub struct SplatShRec {
+    pub data: [u32; 24],
+}
+
+/// Bands present per channel at each degree — 3, 8, 15 for degrees 1–3.
+fn bands_for_degree(degree: u8) -> usize {
+    match degree {
+        1 => 3,
+        2 => 8,
+        3 => 15,
+        _ => 0,
+    }
+}
+
+/// Pack a scene's SH coefficients for upload: a header record followed by one
+/// record per splat. Returns `None` for DC-only scenes — the caller binds a
+/// dummy buffer instead, so a scene without `f_rest` costs 96 bytes, not
+/// 96 MB.
+pub fn pack_sh(cloud: &SplatCloud) -> Option<Vec<SplatShRec>> {
+    if cloud.sh_degree == 0 || cloud.sh.len() < cloud.count {
+        return None;
+    }
+    let mut out = Vec::with_capacity(cloud.count + 1);
+
+    // Header: inverse scene rotation, row-major, as raw f32 bits.
+    let mut header = SplatShRec { data: [0; 24] };
+    let cols = cloud.sh_rot_inv.to_cols_array();
+    for row in 0..3 {
+        for col in 0..3 {
+            // glam is column-major; transpose into row-major for the shader.
+            header.data[row * 3 + col] = cols[col * 3 + row].to_bits();
+        }
+    }
+    out.push(header);
+
+    // The GPU record is fixed-width, so a degree-1 or -2 capture fills a prefix
+    // per channel and leaves the rest zero — matching the shader, which skips
+    // the absent bands entirely via `splat_sh_degree`.
+    let bands = bands_for_degree(cloud.sh_degree);
+    for sh in &cloud.sh[..cloud.count] {
+        let mut rec = SplatShRec { data: [0; 24] };
+        for ch in 0..3 {
+            for b in 0..bands {
+                // Source is channel-major with a per-channel stride of `bands`;
+                // the GPU record uses the canonical 15-wide stride so the
+                // shader indexes the same way at every degree.
+                let half = sh[ch * bands + b];
+                let slot = ch * 15 + b;
+                rec.data[slot / 2] |= (half as u32) << (16 * (slot % 2));
+            }
+        }
+        out.push(rec);
+    }
+    Some(out)
+}
+
 /// Matches WGSL `pack2x16float`: `a` in the low half.
 fn pack2x16float(a: f32, b: f32) -> u32 {
     (f32_to_f16(a) as u32) | ((f32_to_f16(b) as u32) << 16)
@@ -172,6 +244,9 @@ pub fn generate_test_scene(count: usize) -> SplatCloud {
         rotations: Vec::with_capacity(count),
         colors: Vec::with_capacity(count),
         opacities: Vec::with_capacity(count),
+        sh: Vec::new(),
+        sh_degree: 0,
+        sh_rot_inv: glam::Mat3::IDENTITY,
         source_path: "procedural:torus-knot".to_string(),
         total_in_file: count as u32,
         transform: SplatTransform::default(),
@@ -234,6 +309,121 @@ mod tests {
 
     fn unpack2x16(v: u32) -> (f32, f32) {
         (f16_to_f32(v as u16), f16_to_f32((v >> 16) as u16))
+    }
+
+    /// A cloud of `n` splats carrying `degree` SH bands, coefficient c of splat
+    /// i set to a distinct, f16-exact value.
+    fn sh_cloud(n: usize, degree: u8, rot: glam::Quat) -> SplatCloud {
+        use super::super::splat_source::{SH_COEFFS, SplatTransform};
+        let bands = bands_for_degree(degree);
+        let sh = (0..n)
+            .map(|i| {
+                let mut rec = [0u16; SH_COEFFS];
+                for c in 0..bands * 3 {
+                    rec[c] = f32_to_f16(1.0 + i as f32 + c as f32 / 8.0);
+                }
+                rec
+            })
+            .collect();
+        SplatCloud {
+            count: n,
+            positions: vec![[0.0; 3]; n],
+            scales: vec![[0.01; 3]; n],
+            rotations: vec![[0.0, 0.0, 0.0, 1.0]; n],
+            colors: vec![[0.5; 3]; n],
+            opacities: vec![1.0; n],
+            sh,
+            sh_degree: degree,
+            sh_rot_inv: glam::Mat3::from_quat(rot.inverse()),
+            source_path: String::new(),
+            total_in_file: n as u32,
+            transform: SplatTransform::default(),
+        }
+    }
+
+    /// Read GPU-record coefficient `slot` the way `sh_coeff` does in WGSL.
+    fn sh_slot(rec: &SplatShRec, slot: usize) -> f32 {
+        let pair = unpack2x16(rec.data[slot / 2]);
+        if slot.is_multiple_of(2) {
+            pair.0
+        } else {
+            pair.1
+        }
+    }
+
+    #[test]
+    fn pack_sh_none_for_dc_only_scene() {
+        // A DC-only capture must not allocate 96 B × N; the caller binds a dummy.
+        assert!(pack_sh(&sh_cloud(4, 0, glam::Quat::IDENTITY)).is_none());
+    }
+
+    #[test]
+    fn pack_sh_header_is_the_inverse_scene_rotation() {
+        let rot = glam::Quat::from_euler(glam::EulerRot::XYZ, 180f32.to_radians(), 0.0, 0.0);
+        let recs = pack_sh(&sh_cloud(1, 3, rot)).unwrap();
+        // Row-major in words 0–8, so row r dotted with a vector is (M·v).r —
+        // this is exactly how splat_sim.wgsl reconstructs it.
+        let m = glam::Mat3::from_cols_array(&[
+            f32::from_bits(recs[0].data[0]),
+            f32::from_bits(recs[0].data[3]),
+            f32::from_bits(recs[0].data[6]),
+            f32::from_bits(recs[0].data[1]),
+            f32::from_bits(recs[0].data[4]),
+            f32::from_bits(recs[0].data[7]),
+            f32::from_bits(recs[0].data[2]),
+            f32::from_bits(recs[0].data[5]),
+            f32::from_bits(recs[0].data[8]),
+        ]);
+        // Undoing the scene rotation must return a rendered direction to source.
+        let back = m * (rot * glam::Vec3::Y);
+        assert!((back - glam::Vec3::Y).length() < 1e-5, "got {back:?}");
+    }
+
+    #[test]
+    fn pack_sh_offsets_splats_past_the_header() {
+        let recs = pack_sh(&sh_cloud(3, 3, glam::Quat::IDENTITY)).unwrap();
+        assert_eq!(recs.len(), 4, "header + one record per splat");
+        // Splat i at index i+1 — an off-by-one here shades every splat with its
+        // neighbour's coefficients, which looks plausible and is nearly
+        // invisible on a dense capture.
+        for i in 0..3 {
+            assert!(
+                (sh_slot(&recs[i + 1], 0) - (1.0 + i as f32)).abs() < 1e-3,
+                "splat {i} landed at the wrong record"
+            );
+        }
+    }
+
+    #[test]
+    fn pack_sh_widens_low_degree_to_the_canonical_stride() {
+        // Source is channel-major with a per-channel stride of `bands`; the GPU
+        // record always strides 15 so the shader indexes identically at every
+        // degree. Degree 1: source [R0 R1 R2 G0 G1 G2 B0 B1 B2] must land at
+        // GPU slots 0,1,2 / 15,16,17 / 30,31,32 with everything else zero.
+        let recs = pack_sh(&sh_cloud(1, 1, glam::Quat::IDENTITY)).unwrap();
+        let r = &recs[1];
+        for ch in 0..3 {
+            for b in 0..3 {
+                let expect = 1.0 + (ch * 3 + b) as f32 / 8.0;
+                assert!(
+                    (sh_slot(r, ch * 15 + b) - expect).abs() < 1e-3,
+                    "channel {ch} band {b}: got {}",
+                    sh_slot(r, ch * 15 + b)
+                );
+            }
+            // The bands this capture does not carry stay zero, so the shader's
+            // degree guard and the data agree even if one of them is wrong.
+            for b in 3..15 {
+                assert_eq!(sh_slot(r, ch * 15 + b), 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn splat_sh_rec_layout() {
+        // 96 B, 24 words — must match `struct SplatSh` in splat_sim.wgsl.
+        assert_eq!(std::mem::size_of::<SplatShRec>(), 96);
+        assert_eq!(std::mem::align_of::<SplatShRec>(), 4);
     }
 
     #[test]
@@ -306,6 +496,9 @@ mod tests {
             rotations: vec![[0.0, 0.0, q, q]],
             colors: vec![[1.0, 1.0, 1.0]],
             opacities: vec![1.0],
+            sh: Vec::new(),
+            sh_degree: 0,
+            sh_rot_inv: glam::Mat3::IDENTITY,
             source_path: String::new(),
             total_in_file: 1,
             transform: Default::default(),

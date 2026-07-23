@@ -285,6 +285,7 @@ impl ApplicationHandler for PhosphorApp {
                                 builtin_images: Vec::new(), // set below
                                 has_splat: ps.def.splat.is_some(),
                                 splat_sorted: ps.is_splat_sorted(),
+                                splat_sh_degree: ps.splat_sh_degree(),
                                 splat_scene_name: ps
                                     .splat_scene_path
                                     .as_deref()

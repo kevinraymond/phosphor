@@ -3,6 +3,11 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## Unreleased
+
+### Added
+- **Splat renders view-dependent colour** — captures trained with spherical-harmonic bands (`f_rest_*` in the `.ply`, the default for most 3DGS trainers) now re-shade as the camera orbits, instead of showing one flat colour per splat. Sheen, glare and the way a surface turns as you move around it come through. Degree 1, 2 and 3 captures are all read; DC-only scenes and `.splat` files are unaffected and cost nothing extra. A `sh1`/`sh2`/`sh3` badge in the particle panel shows what the loaded scene carries.
+
 ## v1.13.0 — 2026-07-22
 
 ### Changed

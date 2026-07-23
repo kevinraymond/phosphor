@@ -143,7 +143,7 @@ struct ParticleUniforms {
     splat_focal_depth: f32, // DoF focal plane in view-depth units
     splat_explode: f32,     // drop envelope: max(env·exp(−dt/0.45), drop)
     splat_sorted: f32,      // 1.0 = sorted-composite path (raw intrinsic alpha); 0.0 = OIT
-    _pad_splat1: f32,
+    splat_sh_degree: f32,   // 0 = DC only; 1–3 = view-dependent SH bands in splat_sh
 }
 
 // Access effect param by index (mirrors fragment shader's param() function).

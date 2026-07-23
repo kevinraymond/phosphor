@@ -49,6 +49,8 @@ pub struct ParticleInfo {
     pub has_splat: bool,
     /// Sorted alpha-over path active (vs weighted-average OIT). Drives the badge.
     pub splat_sorted: bool,
+    /// SH degree of the loaded scene: 0 = DC only (no badge), 1–3 = view-dependent.
+    pub splat_sh_degree: u8,
     /// Loaded scene filename, or empty when no scene has landed yet.
     pub splat_scene_name: String,
     /// Splats uploaded (post cull/subsample) / splats in the source file.
@@ -135,6 +137,17 @@ pub fn draw_particle_panel(ui: &mut Ui, info: &ParticleInfo) {
             feature_badge(ui, "sorted", tc.accent);
         } else {
             feature_badge(ui, &info.blend_mode, tc.text_secondary);
+        }
+        // View-dependent SH bands present in the capture (#1862) — absent for a
+        // DC-only scene, which is the common case for .splat and older exports.
+        if info.splat_sh_degree > 0 {
+            feature_badge_with_tooltip(
+                ui,
+                &format!("sh{}", info.splat_sh_degree),
+                tc.accent,
+                "Capture carries view-dependent spherical harmonics: colour \
+                 re-shades as the camera orbits",
+            );
         }
         // Max scaled count
         if info.max_scaled_count > 0 {

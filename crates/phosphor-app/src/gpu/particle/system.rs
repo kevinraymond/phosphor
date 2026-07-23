@@ -10,7 +10,7 @@ use super::compute_raster::ComputeRasterizer;
 use super::flow_field::FlowFieldTexture;
 use super::obstacle::ObstacleTexture;
 use super::spatial_hash::SpatialHashGrid;
-use super::splat::{SplatDriver, SplatStatic};
+use super::splat::{SplatDriver, SplatShRec, SplatStatic};
 use super::splat_source::SplatCloud;
 use super::sprite::SpriteAtlas;
 use super::types::{
@@ -244,6 +244,11 @@ pub struct ParticleSystem {
     // binding 1 (binding 0 is the lib's unconditional trail_buffer decl) —
     // mutually exclusive with trails. Driver owns the orbit camera state.
     splat_static_buffer: Option<wgpu::Buffer>,
+    /// View-dependent SH coefficients at binding 2 (#1862) — always bound so
+    /// one pipeline layout serves every scene; a 96-byte dummy when DC-only.
+    splat_sh_buffer: Option<wgpu::Buffer>,
+    /// 0 = DC only, 1–3 = bands in `splat_sh_buffer`. Forwarded to the sim.
+    splat_sh_degree: u8,
     splat_bgl: Option<BindGroupLayout>,
     splat_bind_group: Option<BindGroup>,
     splat_driver: Option<SplatDriver>,
@@ -624,30 +629,30 @@ impl ParticleSystem {
         // pipeline layout so the sim's @group(2) bindings validate. The buffer
         // starts zeroed (wgpu guarantee): every slot unpacks opacity 0 = dead
         // until a scene uploads, so the effect renders empty, never garbage.
-        let (splat_bgl, splat_static_buffer, splat_bind_group) = if def.splat.is_some() {
-            let bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("particle-splat-bgl"),
-                entries: &[compute_storage_ro(1)],
-            });
-            let size = (std::mem::size_of::<SplatStatic>() as u64 * max_particles as u64).max(32);
-            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("splat-static"),
-                size,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let bg = device.create_bind_group(&BindGroupDescriptor {
-                label: Some("particle-splat-bg"),
-                layout: &bgl,
-                entries: &[BindGroupEntry {
-                    binding: 1,
-                    resource: buffer.as_entire_binding(),
-                }],
-            });
-            (Some(bgl), Some(buffer), Some(bg))
-        } else {
-            (None, None, None)
-        };
+        // Binding 2 is the optional view-dependent SH buffer (#1862). It is
+        // always bound so one pipeline layout serves every scene, but sized to
+        // the LOADED splat count rather than max_particles — a DC-only capture
+        // pays one dummy record instead of 96 B × 2M.
+        let (splat_bgl, splat_static_buffer, splat_sh_buffer, splat_bind_group) =
+            if def.splat.is_some() {
+                let bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                    label: Some("particle-splat-bgl"),
+                    entries: &[compute_storage_ro(1), compute_storage_ro(2)],
+                });
+                let size =
+                    (std::mem::size_of::<SplatStatic>() as u64 * max_particles as u64).max(32);
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("splat-static"),
+                    size,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let sh_buffer = create_splat_sh_buffer(device, None);
+                let bg = create_splat_bind_group(device, &bgl, &buffer, &sh_buffer);
+                (Some(bgl), Some(buffer), Some(sh_buffer), Some(bg))
+            } else {
+                (None, None, None, None)
+            };
 
         // Create spatial hash before pipeline if interaction is enabled,
         // so the query BGL is included in the initial compute pipeline layout.
@@ -1318,6 +1323,8 @@ impl ParticleSystem {
             wboit_composite_bind_group,
             wboit_composite_bgl,
             splat_static_buffer,
+            splat_sh_buffer,
+            splat_sh_degree: 0,
             splat_bgl,
             splat_bind_group,
             splat_driver: def.splat.as_ref().map(|_| SplatDriver::new()),
@@ -2214,23 +2221,33 @@ impl ParticleSystem {
             mapped_at_creation: false,
         });
         queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&packed));
-        let bg = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("particle-splat-bg"),
-            layout: bgl,
-            entries: &[BindGroupEntry {
-                binding: 1,
-                resource: buffer.as_entire_binding(),
-            }],
+
+        // View-dependent SH (#1862) — sized to this scene, or a dummy record
+        // when the capture is DC-only. Truncated in lockstep with `packed` so
+        // splat i still sits at SH index i+1.
+        let sh = super::splat::pack_sh(cloud).map(|mut recs| {
+            recs.truncate(packed.len() + 1);
+            recs
         });
+        let sh_degree = if sh.is_some() { cloud.sh_degree } else { 0 };
+        let sh_buffer = create_splat_sh_buffer(device, sh.as_deref());
+        if let Some(recs) = &sh {
+            queue.write_buffer(&sh_buffer, 0, bytemuck::cast_slice(recs));
+        }
+        let bg = create_splat_bind_group(device, bgl, &buffer, &sh_buffer);
+
         self.splat_static_buffer = Some(buffer);
+        self.splat_sh_buffer = Some(sh_buffer);
+        self.splat_sh_degree = sh_degree;
         self.splat_bind_group = Some(bg);
         self.splat_scene_path = Some(cloud.source_path.clone());
         self.splat_total_count = cloud.total_in_file;
         self.splat_loaded_count = packed.len() as u32;
         log::info!(
-            "Splat scene loaded: {} splats ({} in file) from {}",
+            "Splat scene loaded: {} splats ({} in file), SH degree {} from {}",
             packed.len(),
             cloud.total_in_file,
+            sh_degree,
             cloud.source_path
         );
     }
@@ -2246,6 +2263,7 @@ impl ParticleSystem {
         // Re-assert each frame so hot-reload can never leave the sim's alpha
         // branch stale (sorted = raw intrinsic alpha; OIT = weighted a_out).
         self.uniforms.splat_sorted = if self.splat_sorted { 1.0 } else { 0.0 };
+        self.uniforms.splat_sh_degree = self.splat_sh_degree as f32;
     }
 
     /// Advance the particle image source (video playback). If the frame changed,
@@ -2966,6 +2984,12 @@ impl ParticleSystem {
         self.splat_sorted
     }
 
+    /// SH degree of the loaded splat scene: 0 = DC only, 1–3 = view-dependent
+    /// bands present (status badge).
+    pub fn splat_sh_degree(&self) -> u8 {
+        self.splat_sh_degree
+    }
+
     /// Lazily build the volumetric renderer on first enable. Cheap to keep
     /// unbuilt (no cost when volumetric mode is never used).
     pub fn init_volumetric(&mut self, device: &Device, hdr_format: TextureFormat) {
@@ -3499,6 +3523,45 @@ fn create_sprite_bind_group(
             BindGroupEntry {
                 binding: 1,
                 resource: BindingResource::Sampler(&sprite.sampler),
+            },
+        ],
+    })
+}
+
+/// Storage for a scene's view-dependent SH records (#1862), or a single zeroed
+/// dummy record when the capture is DC-only. `None` keeps the binding valid at
+/// 96 bytes so one pipeline layout serves both cases; the sim never reads it
+/// because `splat_sh_degree` is 0.
+fn create_splat_sh_buffer(device: &Device, records: Option<&[SplatShRec]>) -> wgpu::Buffer {
+    let size =
+        records.map_or(1, |r| r.len().max(1)) as u64 * std::mem::size_of::<SplatShRec>() as u64;
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("splat-sh"),
+        size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+/// The group-2 splat bind group: static attributes at binding 1, SH at 2.
+/// Shared by `new()` and `upload_splat_cloud` so the two never drift.
+fn create_splat_bind_group(
+    device: &Device,
+    layout: &BindGroupLayout,
+    static_buffer: &wgpu::Buffer,
+    sh_buffer: &wgpu::Buffer,
+) -> BindGroup {
+    device.create_bind_group(&BindGroupDescriptor {
+        label: Some("particle-splat-bg"),
+        layout,
+        entries: &[
+            BindGroupEntry {
+                binding: 1,
+                resource: static_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: sh_buffer.as_entire_binding(),
             },
         ],
     })
