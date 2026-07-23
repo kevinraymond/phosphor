@@ -21,7 +21,7 @@ your phone as a control surface, a webcam, and NDI out to your video mixer.
 
 ## See it move
 
-Six of the thirty-eight, all at default settings:
+Six of the forty, all at default settings:
 
 <table>
 <tr>

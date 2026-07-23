@@ -234,6 +234,13 @@ jobs:
           VERSION="${TAG#v}"
           # Extract this version's section from CHANGELOG.md (between ## vX.Y.Z headers)
           awk "/^## v${VERSION}[[:space:]]/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md > release_notes.md
+          # Backstop for the tag-release CHANGELOG gate: a tag pushed by hand skips that
+          # check entirely, and publishing a release whose only content is the footer is
+          # worse than failing here.
+          if ! grep -q '[^[:space:]]' release_notes.md; then
+            echo "::error::No CHANGELOG.md section for v${VERSION} — refusing to publish empty release notes"
+            exit 1
+          fi
           # Append static footer (downloads table, getting started, requirements)
           cat .github/release-notes-footer.md >> release_notes.md
 

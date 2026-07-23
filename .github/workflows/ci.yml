@@ -171,6 +171,19 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PAT }}
 
+      # Gate the tag on the CHANGELOG, because release.yml extracts the release body by
+      # awk-matching '## vX.Y.Z' and publishes an empty one if that header is missing.
+      # Twice now (v1.11.0, v1.13.0) it was. No tag means no release, so this fails in the
+      # one place where the mistake is still cheap to fix. It cannot live in a normal CI
+      # job: paths-ignore skips '**.md', so a CHANGELOG-only push never reaches one.
+      - name: Check CHANGELOG
+        run: scripts/check_changelog.py
+
+      # Same reasoning for the docs: paths-ignore means nothing else in CI ever runs this,
+      # so a stale effect count or a broken relative link rides out to a release unnoticed.
+      - name: Check docs
+        run: scripts/check_docs.py
+
       - name: Check version and tag
         run: |
           # Read version from Cargo.toml

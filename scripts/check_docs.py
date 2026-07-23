@@ -33,6 +33,17 @@ HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*$", re.M)
 # GitHub honours both `id=` and the older `name=` form on explicit anchors.
 HTML_ANCHOR = re.compile(r"<a\s+(?:id|name)=\"([^\"]+)\"", re.I)
 
+# Spelled-out counts, so prose like "Six of the thirty-eight" is checked as strictly as
+# "**38 built-in**". Only the tens range the catalogue can plausibly sit in — anything
+# outside it is prose, not a count, and must not be matched.
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60}
+_ONES = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+         "eight": 8, "nine": 9}  # fmt: skip
+NUMBER_WORDS = dict(_TENS)
+NUMBER_WORDS.update(
+    {f"{t}-{o}": tv + ov for t, tv in _TENS.items() for o, ov in _ONES.items()}
+)
+
 
 def slug(text: str) -> str:
     """GitHub's heading-anchor rule: lowercase, strip punctuation, spaces to hyphens."""
@@ -124,9 +135,18 @@ def check_gallery() -> list[str]:
     for doc in ("README.md", "docs/TUTORIALS.md"):
         p = REPO / doc
         if p.exists():
-            for m in re.finditer(r"\*\*(\d+) built-in", p.read_text()):
+            body = p.read_text()
+            for m in re.finditer(r"\*\*(\d+) built-in", body):
                 if int(m.group(1)) != len(shipped):
                     errors.append(f"{doc} claims {m.group(1)} built-in effects, not {len(shipped)}")
+            # README spells the count out ("Six of the thirty-eight"), which the digit
+            # patterns above sail straight past — it sat two releases stale that way.
+            for m in re.finditer(r"\bof the ([a-z]+(?:-[a-z]+)?)\b", body):
+                claimed = NUMBER_WORDS.get(m.group(1))
+                if claimed is not None and claimed != len(shipped):
+                    errors.append(
+                        f"{doc} says 'of the {m.group(1)}' ({claimed}), {len(shipped)} are shipped"
+                    )
     return errors
 
 

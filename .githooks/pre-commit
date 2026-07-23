@@ -3,6 +3,13 @@
 
 set -e
 
+# Guard the CHANGELOG headers release.yml awk-matches to build the release body. CI gates
+# the tag on this too, but catching it here means it never reaches a release commit.
+if ! scripts/check_changelog.py; then
+    echo "ERROR: CHANGELOG check failed. See scripts/check_changelog.py."
+    exit 1
+fi
+
 # Check cargo fmt
 if ! cargo fmt --all -- --check 2>/dev/null; then
     echo "ERROR: cargo fmt check failed. Run 'cargo fmt --all' to fix."
