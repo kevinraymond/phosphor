@@ -8,9 +8,11 @@
 // vel_size.xyz even for culled splats.
 //
 // Camera: scalar orbit camera (u.cam_yaw/pitch/distance/focal, driven CPU-side
-// by SplatDriver) using the volumetric ray-marcher basis convention, inverted:
-// world → view → perspective divide → NDC in pos_life.xy, view depth in
-// pos_life.z (free in the raster path), projected radius in vel_size.w.
+// by SplatDriver): world → view → perspective divide → NDC in pos_life.xy, view
+// depth in pos_life.z (free in the raster path), projected radius in vel_size.w.
+// This deliberately does NOT share the volumetric ray-marcher's basis, which
+// negates `right` and so renders mirrored — harmless for a procedural volume,
+// wrong for a capture of something real. See the basis construction below.
 //
 // Audio: u.splat_explode (drop envelope) throws splats radially outward and a
 // spring reforms the scene; onsets scatter a hash-picked subset; u.centroid
@@ -27,12 +29,12 @@
 // (slots 8–11 are CPU-side camera params — not visible to the sim)
 
 struct SplatStatic {
-    pos: vec3f,   // world position, scene normalized       (offset 0)
-    color: u32,   // pack4x8unorm(r, g, b, opacity)         (offset 12)
-    cov_a: u32,   // pack2x16float(Σxx, Σyy) × COV_SCALE    (offset 16)
-    cov_b: u32,   // pack2x16float(Σzz, Σxy) × COV_SCALE    (offset 20)
-    cov_c: u32,   // pack2x16float(Σxz, Σyz) × COV_SCALE    (offset 24)
-    _spare: u32,  //                                        (offset 28)
+    pos: vec3f,        // world position, scene normalized  (offset 0)
+    color: u32,        // pack4x8unorm(r, g, b, opacity)    (offset 12)
+    rot_a: u32,        // pack2x16float(qx, qy)             (offset 16)
+    rot_b: u32,        // pack2x16float(qz, qw)             (offset 20)
+    log_scale: u32,    // pack2x16float(ln σx, ln σy)       (offset 24)
+    log_scale_z: u32,  // pack2x16float(ln σz, 0)           (offset 28)
 }
 @group(2) @binding(1) var<storage, read> splat_static: array<SplatStatic>;
 
@@ -106,10 +108,37 @@ fn splat_sh_color(rec: u32, degree: u32, d: vec3f) -> vec3f {
     return rgb;
 }
 
-// Σ3 is precomputed CPU-side (R·S·SᵀRᵀ is camera-independent; building it
-// per frame per splat cost ~9 ms at 2M — live perf finding) and stored
-// ×COV_SCALE to keep world-unit σ² values out of f16 subnormals.
-const COV_SCALE: f32 = 1024.0;
+// Build the 3D covariance Σ3 = M·Mᵀ, M = R(q)·diag(σ), in f32 from the stored
+// quaternion and LOG scales. Returned as (diagonal, off-diagonal) in the packing
+// sym3_mul expects: d = (Σxx, Σyy, Σzz), o = (Σxy, Σxz, Σyz).
+//
+// This used to be precomputed CPU-side and stored as six f16 halves ×1024. That
+// format cannot hold a real capture: σ² spans ~15 decades against f16's ~12, so
+// the thin axis of most surfels flushed to zero and `det_core` below — a
+// cancelling difference — came out as much as 187× too large on near-rank-1
+// splats, painting them as bright shimmering needles. σ in log space costs 3
+// exp() per splat per frame and is exact. Mirrors gsplat's computeCovariance.
+fn build_sigma3(s: SplatStatic, d_out: ptr<function, vec3f>, o_out: ptr<function, vec3f>) {
+    let qa = unpack2x16float(s.rot_a);
+    let qb = unpack2x16float(s.rot_b);
+    let q = normalize(vec4f(qa.x, qa.y, qb.x, qb.y)); // xyzw
+    let ls = unpack2x16float(s.log_scale);
+    let sc = vec3f(exp(ls.x), exp(ls.y), exp(unpack2x16float(s.log_scale_z).x));
+
+    // Rotation matrix columns, each already scaled — M = R·diag(σ).
+    let x = q.x; let y = q.y; let z = q.z; let w = q.w;
+    let c0 = vec3f(1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + z * w), 2.0 * (x * z - y * w)) * sc.x;
+    let c1 = vec3f(2.0 * (x * y - z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z + x * w)) * sc.y;
+    let c2 = vec3f(2.0 * (x * z + y * w), 2.0 * (y * z - x * w), 1.0 - 2.0 * (x * x + y * y)) * sc.z;
+
+    // Σ3 = M·Mᵀ = Σ_k c_k ⊗ c_k (columns of M are the scaled rotation axes).
+    *d_out = c0 * c0 + c1 * c1 + c2 * c2;
+    *o_out = vec3f(
+        c0.x * c0.y + c1.x * c1.y + c2.x * c2.y, // Σxy
+        c0.x * c0.z + c1.x * c1.z + c2.x * c2.z, // Σxz
+        c0.y * c0.z + c1.y * c1.z + c2.y * c2.z, // Σyz
+    );
+}
 
 // Symmetric 3×3 (6 unique entries) times a vector.
 fn sym3_mul(d: vec3f, o: vec3f, v: vec3f) -> vec3f {
@@ -236,14 +265,22 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         * sin(u.time * 1.7 + uhash_f(idx ^ 0x85ebca6bu) * 6.2831853);
     let world = s.pos + off + breath;
 
-    // ---- orbit camera (volumetric basis convention, inverted) ----
+    // ---- orbit camera ----
     let cy = u.cam_yaw;
     let cp = u.cam_pitch;
     let ro = vec3f(cos(cy) * cos(cp), sin(cp), sin(cy) * cos(cp))
         * max(u.cam_distance, 0.2);
     let fwd = normalize(-ro);
-    let right = normalize(cross(vec3f(0.0, 1.0, 0.0), fwd));
-    let up = cross(fwd, right);
+    // right = fwd × worldUp. The ray-marchers this camera was modelled on use
+    // cross(worldUp, fwd) — the NEGATION — which mirrors the image horizontally.
+    // On a procedural volume that is invisible (there is no handedness to get
+    // wrong), so it went unnoticed there and was inherited here, where it made
+    // a photogrammetric capture render as its own mirror image. Sanity check:
+    // fwd = (0,0,−1), worldUp = +Y must give right = +X.
+    // `up` must flip with it (cross(fwd, right) was cancelling the same sign
+    // error, which is why the old basis was mirrored yet upright).
+    let right = normalize(cross(fwd, vec3f(0.0, 1.0, 0.0)));
+    let up = cross(right, fwd);
     let rel = world - ro;
     let t = vec3f(dot(rel, right), dot(rel, up), dot(rel, fwd)); // t.z = view depth
 
@@ -272,20 +309,24 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     // Σ3 comes precomputed from the upload; the J·W rows are the world-space
     // gradients of the two screen-pixel axes (aspect-symmetric because size
     // is height-relative; the y row is negated for the raster's y-flip).
-    let cov_d = vec3f(unpack2x16float(s.cov_a), unpack2x16float(s.cov_b).x); // Σxx, Σyy, Σzz
-    let cov_o = vec3f(unpack2x16float(s.cov_b).y, unpack2x16float(s.cov_c)); // Σxy, Σxz, Σyz
+    var cov_d: vec3f;
+    var cov_o: vec3f;
+    build_sigma3(s, &cov_d, &cov_o); // Σxx,Σyy,Σzz / Σxy,Σxz,Σyz — f32, exact
     let focal_px = focal * u.resolution.y * 0.5;
     let iz = 1.0 / t.z;
     let jw0 = (right - fwd * (t.x * iz)) * (focal_px * iz);
     let jw1 = (fwd * (t.y * iz) - up) * (focal_px * iz);
-    // splat_scale scales σ linearly → covariance by s²; COV_SCALE unfolds.
+    // splat_scale scales σ linearly → covariance by s².
     let ps4 = max(param(4u), 0.05);
-    let s2 = ps4 * ps4 * (1.0 / COV_SCALE);
+    let s2 = ps4 * ps4;
     let sv0 = sym3_mul(cov_d, cov_o, jw0);
     var caa = dot(jw0, sv0) * s2; // Σ2 in px²
     var cbb = dot(jw1, sv0) * s2;
     var ccc = dot(jw1, sym3_mul(cov_d, cov_o, jw1)) * s2;
-    let det_core = max(caa * ccc - cbb * cbb, 1e-8);
+    // det of a projected surfel is legitimately ~0 (that is what "flat" means),
+    // so this floors at 0 rather than clamping up: the alpha factor below must
+    // be allowed to go to zero, which is what kills edge-on needles.
+    let det_core = max(caa * ccc - cbb * cbb, 0.0);
 
     // DoF circle of confusion from the centroid-driven focal plane + AA
     // low-pass, both isotropic covariance adds; energy-conserving via the
@@ -302,35 +343,75 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
     var det = max(caa * ccc - cbb * cbb, 1e-8);
     var alpha = base.a * param(5u) * sqrt(det_core / det_full);
 
-    // Footprint radius from the major eigenvalue, cutoff q = 12 (exp(−6)).
-    // The cap shrinks the covariance uniformly (keeps eccentricity) instead of
-    // clipping. OIT keeps the 8px 3×3-tile scatter bound (load-bearing for the
-    // raster); the sorted billboard draw has no tile bound, so it matches
-    // SuperSplat's per-axis vmin = min(1024, viewport) — the 8px cap was the
-    // pointillist-crust culprit at close zoom (surface splats want 20–100px).
+    // Footprint radius from the major eigenvalue. The fragment cuts at q = 8, so
+    // sqrt(8·λmax) is the exact extent — the old sqrt(12·λmax) drew a quad 22%
+    // wider in each axis (~1.5× the fragment area) for nothing.
     let lmax = 0.5 * (caa + ccc) + sqrt(max(0.25 * (caa - ccc) * (caa - ccc) + cbb * cbb, 0.0));
-    var r_px = sqrt(12.0 * lmax);
-    let r_cap = select(8.0, min(1024.0, min(u.resolution.x, u.resolution.y)), u.splat_sorted > 0.5);
-    if r_px > r_cap {
-        let shrink = (r_cap / r_px) * (r_cap / r_px);
+    var r_px = sqrt(8.0 * lmax);
+    // OIT keeps its 8px 3×3-tile scatter bound (load-bearing for compute_raster)
+    // and pays for it with a uniform shrink of the covariance. The SORTED path
+    // does NOT touch the covariance: gsplat bounds the QUAD per axis and leaves
+    // the conic exact, so an oversized splat gets clipped instead of shrunk —
+    // see splat_render.wgsl. Shrinking it here is what let huge far-field splats
+    // wash a scene capture to white.
+    if u.splat_sorted < 0.5 && r_px > 8.0 {
+        let shrink = (8.0 / r_px) * (8.0 / r_px);
         caa *= shrink;
         cbb *= shrink;
         ccc *= shrink;
-        r_px = r_cap;
+        r_px = 8.0;
     }
-    // Keep the 2D covariance diagonal f16-safe even after a pathological shrink
-    // (SuperSplat floors the minor eigenvalue at 0.1) — else a thin-needle conic
-    // overflows f16 and NaN-poisons the sorted blend (the black-square artifact).
-    // No-op for normal splats (diagonals already ≥ AA floor 0.3).
+    // Keep the conic f16-safe: a thin-needle conic can overflow f16 and
+    // NaN-poison the sorted blend (the old black-square artifact). No-op for
+    // normal splats — the AA floor already puts both diagonals ≥ 0.3.
     caa = max(caa, 0.05);
     ccc = max(ccc, 0.05);
     det = max(caa * ccc - cbb * cbb, 1e-8);
-    // Conic = inverse covariance, packed f16 for the raster (flags.zw).
-    let inv_det = 1.0 / det;
-    let conic_a = ccc * inv_det;
-    let conic_b = -cbb * inv_det;
-    let conic_c = caa * inv_det;
-    let r_ndc = r_px * 2.0 / u.resolution.y; // raster: radius_px = vel_size.w·H/2
+
+    // ---- flags.zw payload: quad axes (sorted) OR the conic (OIT) ----
+    // The two consumers are mutually exclusive — system.rs gates use_compute_raster
+    // off whenever the sorted path is active — so the same two words carry whichever
+    // format that path needs.
+    //
+    // The sorted renderer gets the QUAD AXES, computed here in f32 where Σ2 is
+    // exact. It must NOT be handed the conic and left to invert it: the conic is
+    // f16-packed, and inverting a near-singular 2×2 from f16 inputs is the same
+    // catastrophic cancellation that the covariance format change fixed. Measured
+    // on trooper.ply at cam_distance 0.6, that inversion produced a NEGATIVE
+    // determinant for 197 splats — which clamps, explodes Σ2, and turns ordinary
+    // blobs into 280 hard-edged screen-crossing slivers.
+    var pack_z: u32;
+    var pack_w: u32;
+    if u.splat_sorted > 0.5 {
+        // gsplat initCornerCov: eigen-decompose Σ2, clamp each half-extent
+        // independently at vmin, and orient the quad along the eigenvectors.
+        let mid = 0.5 * (caa + ccc);
+        let rad = length(vec2f(0.5 * (caa - ccc), cbb));
+        let lam1 = mid + rad;
+        let lam2 = max(mid - rad, 0.1); // gsplat's minor-eigenvalue floor
+        let cap = min(1024.0, min(u.resolution.x, u.resolution.y));
+        let e1 = 2.0 * min(sqrt(2.0 * lam1), cap); // half-extent, q = 8 at the edge
+        let e2 = 2.0 * min(sqrt(2.0 * lam2), cap);
+        // Major-axis direction. Degenerates to (0,0) for a perfectly axis-aligned
+        // splat (cbb == 0, lam1 == caa), which normalize() would turn into NaN.
+        let ev = vec2f(cbb, lam1 - caa);
+        let evl = length(ev);
+        let axis1 = select(vec2f(1.0, 0.0), ev / evl, evl > 1e-9);
+        pack_z = pack2x16float(e1 * axis1);
+        pack_w = pack2x16float(e2 * vec2f(axis1.y, -axis1.x));
+    } else {
+        // Conic = inverse covariance for the compute raster's anisotropic branch.
+        let inv_det = 1.0 / det;
+        pack_z = pack2x16float(vec2f(ccc * inv_det, caa * inv_det));
+        pack_w = pack2x16float(vec2f(-cbb * inv_det, 0.0));
+    }
+
+    // Bounding radius for the frustum cull and the OIT raster's scatter extent.
+    // Clamped to gsplat's vmin on the sorted path so one enormous splat cannot
+    // defeat the offscreen test and drag the whole scene through the sort; the
+    // COVARIANCE is untouched, only this bound.
+    let vmin = min(1024.0, min(u.resolution.x, u.resolution.y));
+    let r_ndc = min(r_px, vmin) * 2.0 / u.resolution.y; // raster: radius_px = vel_size.w·H/2
 
     // ---- OIT weight + obstacle carve + cull ----
     // Front-favouring depth weight (scene spans [dist−1, dist+1]), floored so
@@ -392,13 +473,8 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
         clamp(rgb * (0.5 + param(7u) * 1.5), vec3f(0.0), vec3f(1.0)),
         select(a_out, a_sorted, u.splat_sorted > 0.5)
     );
-    // .zw = packed screen conic for the raster's anisotropic branch.
-    p.flags = vec4f(
-        age,
-        u.lifetime,
-        bitcast<f32>(pack2x16float(vec2f(conic_a, conic_c))),
-        bitcast<f32>(pack2x16float(vec2f(conic_b, 0.0)))
-    );
+    // .zw = quad axes (sorted) or the screen conic (OIT raster) — see above.
+    p.flags = vec4f(age, u.lifetime, bitcast<f32>(pack_z), bitcast<f32>(pack_w));
     write_particle(idx, p);
     if !culled {
         mark_alive(idx);

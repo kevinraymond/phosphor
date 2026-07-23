@@ -10,7 +10,9 @@
 //
 // The anisotropic EWA conic (inverse 2D covariance) is computed once per splat
 // by splat_sim.wgsl and packed f16 into flags.zw; the fragment evaluates the
-// Gaussian exp(-0.5·q) exactly as the compute rasterizer does.
+// Gaussian exp(-0.5·q) exactly as the compute rasterizer does. The vertex stage
+// inverts that conic back to Σ2 to build an ORIENTED quad on the ellipse's
+// eigenvectors with per-axis extents, matching gsplat's initCornerCov.
 
 struct RenderUniforms {
     resolution: vec2f,
@@ -35,8 +37,7 @@ struct RenderUniforms {
 struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) @interpolate(flat) col: vec4f,
-    @location(1) @interpolate(flat) conic: vec3f, // A, B, C (1/px²)
-    @location(2) local_px: vec2f,                 // pixel offset from center (x-right, y-down)
+    @location(1) uv: vec2f, // quad-space coords, ±1 at the corners
 }
 
 @vertex
@@ -46,7 +47,6 @@ fn vs_main(
 ) -> VertexOutput {
     let idx = sorted_indices[instance_index];
     let pl = pos_life[idx];
-    let vs = vel_size[idx];
     var out: VertexOutput;
 
     // Park offscreen if not alive. The scatter only places marked-alive indices,
@@ -54,8 +54,7 @@ fn vs_main(
     if pl.w <= 0.0 {
         out.position = vec4f(2.0, 2.0, 2.0, 1.0);
         out.col = vec4f(0.0);
-        out.conic = vec3f(0.0);
-        out.local_px = vec2f(0.0);
+        out.uv = vec2f(2.0); // q = 32 > 8, so the fragment discards regardless
         return out;
     }
 
@@ -72,23 +71,21 @@ fn vs_main(
         default: { corner = vec2f(0.0); }
     }
 
-    let r_ndc = vs.w;
-    let aspect = ru.resolution.x / max(ru.resolution.y, 1.0);
-    let offset_ndc = corner * r_ndc * vec2f(1.0 / aspect, 1.0);
-    out.position = vec4f(pl.xy + offset_ndc, 0.0, 1.0);
+    // Oriented quad axes, already eigen-decomposed and per-axis clamped by
+    // splat_sim in f32:  flags.z = pack2x16float(v1), flags.w = pack2x16float(v2).
+    // v1 is the major half-extent vector, v2 the minor, both in the sim's
+    // x-right / y-DOWN pixel space.
+    let v1 = unpack2x16float(bitcast<u32>(flags[idx].z));
+    let v2 = unpack2x16float(bitcast<u32>(flags[idx].w));
 
-    // Pixel-space offset from the splat center. Both axes span ±r_px (aspect is
-    // absorbed by the NDC offset above). y is negated so the space is x-right /
-    // y-DOWN, matching the pixel convention the sim baked into the conic — else
-    // anisotropic splats render mirrored.
-    let r_px = r_ndc * ru.resolution.y * 0.5;
-    out.local_px = vec2f(corner.x, -corner.y) * r_px;
-
-    // Screen-space conic = inverse 2D covariance, packed f16 by splat_sim:
-    //   flags.z = pack2x16float(A, C),  flags.w = pack2x16float(B, 0)
-    let ac = unpack2x16float(bitcast<u32>(flags[idx].z));
-    let b = unpack2x16float(bitcast<u32>(flags[idx].w)).x;
-    out.conic = vec3f(ac.x, b, ac.y);
+    let quad_px = corner.x * v1 + corner.y * v2;
+    out.uv = corner;
+    out.position = vec4f(
+        pl.x + quad_px.x * 2.0 / ru.resolution.x,
+        pl.y - quad_px.y * 2.0 / ru.resolution.y,
+        0.0,
+        1.0,
+    );
     out.col = color[idx];
     return out;
 }
@@ -97,12 +94,13 @@ const EXP4: f32 = 0.018315639; // exp(-4), the SuperSplat falloff renorm constan
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    let dx = in.local_px.x;
-    let dy = in.local_px.y;
-    let q = in.conic.x * dx * dx + 2.0 * in.conic.y * dx * dy + in.conic.z * dy * dy;
-    // NaN/Inf-safe cutoff at q = 8 (SuperSplat's 2.83σ quad extent, A = q/8). A
-    // poisoned conic (f16 overflow on a degenerate splat) yields NaN q, which
-    // fails this test and discards — no black-square blend poisoning.
+    // The quad axes ARE the ellipse's eigenvectors scaled to the q = 8 contour,
+    // so the Gaussian is isotropic in quad space: q = 8·|uv|². No conic, no
+    // inverse covariance, nothing to cancel — which is the point. Evaluating a
+    // screen-space conic here instead means somebody has to invert a
+    // near-singular 2×2 built from f16, and that turns thin splats into
+    // screen-crossing slivers.
+    let q = 8.0 * dot(in.uv, in.uv);
     if !(q <= 8.0) {
         discard;
     }

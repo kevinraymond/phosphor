@@ -2,13 +2,25 @@
 //!
 //! [`SplatStatic`] is the 32-byte per-splat attribute record the sim reads at
 //! `@group(2) @binding(1)` (binding 0 is the lib's trail-buffer declaration).
-//! Positions stay f32 (f16 quantization jitters at close zoom); the 3D
-//! covariance is PRECOMPUTED here from the source quat+scales (Σ3 = R·S·SᵀRᵀ
-//! is camera-independent — building it per frame per splat cost ~9 ms at 2M
-//! in the sim, live perf finding) and rides six f16 halves ×[`COV_SCALE`];
+//! Positions stay f32 (f16 quantization jitters at close zoom); the source
+//! rotation rides four f16 halves and the scales ride three more as LOGARITHMS;
 //! color+opacity are 8-bit unorm. Zero-padding is the count mechanism: slots
 //! past the scene unpack `opacity == 0` and the sim parks them dead, so no
 //! separate splat-count uniform exists.
+//!
+//! **Why log-scale, and why the sim rebuilds Σ3 each frame.** This record used to
+//! carry a PRECOMPUTED Σ3 = R·S·SᵀRᵀ as six f16 halves ×1024, which is
+//! camera-independent and saves the per-frame rebuild. It cannot represent real
+//! capture data: on `trooper.ply` the σ² values span **15.4 decades** against
+//! f16's ~12, so 19.8% flushed to zero and 59.5% of splats lost their smallest
+//! Σ3 entry entirely. The bulk still projected correctly, but for the
+//! near-rank-1 surfels typical of a 3DGS capture (median anisotropy 5242:1) the
+//! energy-conserving factor `sqrt(det_core/det_full)` is a catastrophically
+//! cancelling difference, and the quantization noise made it up to **187× too
+//! large** — a few thousand splats rendered as bright shimmering needles that
+//! should have been invisible. σ needs only 7.7 decades and log σ needs none,
+//! so the sim now builds Σ3 in f32 from quat+scale, exactly as SuperSplat's
+//! `gsplatCorner.js` does.
 //!
 //! [`SplatDriver`] owns the CPU-side camera/envelope state (yaw accumulator,
 //! centroid EMA, drop-explode envelope) and writes the `cam_*`/`splat_*`
@@ -20,15 +32,14 @@ use super::splat_source::SplatCloud;
 use super::types::ParticleUniforms;
 use crate::gpu::half::f32_to_f16;
 
-/// f16 range helper for covariance entries: world-unit σ² values sit around
-/// 1e-6..1e-2 (subnormal territory for f16), so Σ3 is stored ×1024 and the
-/// sim folds 1/1024 back in after projection. Must match `COV_SCALE` in
-/// `splat_sim.wgsl`.
-pub const COV_SCALE: f32 = 1024.0;
+/// Floor for the stored log-scale. `ln(σ)` for a degenerate/pruned splat can be
+/// −∞ (σ == 0); clamping keeps the f16 finite and the rebuilt Σ3 exactly rank-
+/// reduced rather than NaN. e^-30 ≈ 1e-13 is far below one pixel at any zoom.
+const MIN_LOG_SCALE: f32 = -30.0;
 
 /// Packed per-splat static attributes: 32 bytes, uploaded once per scene.
 /// WGSL mirror (declared in `splat_sim.wgsl`):
-/// `struct SplatStatic { pos: vec3f, color: u32, cov_a: u32, cov_b: u32, cov_c: u32, _spare: u32 }`
+/// `struct SplatStatic { pos: vec3f, color: u32, rot_a: u32, rot_b: u32, log_scale: u32, log_scale_z: u32 }`
 /// (vec3f align 16 / size 12 puts `color` at offset 12; struct stride 32 —
 /// byte-identical to this layout.)
 #[repr(C)]
@@ -38,14 +49,14 @@ pub struct SplatStatic {
     pub pos: [f32; 3],
     /// `pack4x8unorm(r, g, b, opacity)` — r in the low byte.
     pub color: u32,
-    /// `pack2x16float(Σxx, Σyy)` — 3D covariance × [`COV_SCALE`].
-    pub cov_a: u32,
-    /// `pack2x16float(Σzz, Σxy)`.
-    pub cov_b: u32,
-    /// `pack2x16float(Σxz, Σyz)`.
-    pub cov_c: u32,
-    /// Reserved.
-    pub _spare: u32,
+    /// `pack2x16float(qx, qy)` — unit rotation quaternion, xyzw order.
+    pub rot_a: u32,
+    /// `pack2x16float(qz, qw)`.
+    pub rot_b: u32,
+    /// `pack2x16float(ln σx, ln σy)` — NOT σ; see the module docs.
+    pub log_scale: u32,
+    /// `pack2x16float(ln σz, 0)`.
+    pub log_scale_z: u32,
 }
 
 /// Per-splat view-dependent SH coefficients: 96 bytes, uploaded once per scene
@@ -131,35 +142,31 @@ fn pack4x8unorm(x: f32, y: f32, z: f32, w: f32) -> u32 {
     q(x) | (q(y) << 8) | (q(z) << 16) | (q(w) << 24)
 }
 
-/// Pack a decoded scene into the GPU layout, precomputing each splat's 3D
-/// covariance Σ3 = R·S·SᵀRᵀ (camera-independent). Length equals
+/// Pack a decoded scene into the GPU layout. Rotation and scale go across as
+/// authored (scale logarithmically); the sim rebuilds Σ3 = R·S·SᵀRᵀ in f32 —
+/// see the module docs for why that is not precomputed here. Length equals
 /// `cloud.count`; the upload path zero-fills the remaining `max_particles`
 /// slots (dead).
 pub fn pack_cloud(cloud: &SplatCloud) -> Vec<SplatStatic> {
+    let log = |v: f32| {
+        if v > 0.0 {
+            v.ln().max(MIN_LOG_SCALE)
+        } else {
+            MIN_LOG_SCALE
+        }
+    };
     (0..cloud.count)
         .map(|i| {
             let c = cloud.colors[i];
             let s = cloud.scales[i];
             let r = cloud.rotations[i];
-            let m = glam::Mat3::from_quat(glam::Quat::from_xyzw(r[0], r[1], r[2], r[3]))
-                * glam::Mat3::from_diagonal(glam::Vec3::new(s[0], s[1], s[2]));
-            let sigma3 = m * m.transpose();
             SplatStatic {
                 pos: cloud.positions[i],
                 color: pack4x8unorm(c[0], c[1], c[2], cloud.opacities[i]),
-                cov_a: pack2x16float(
-                    sigma3.x_axis.x * COV_SCALE, // Σxx
-                    sigma3.y_axis.y * COV_SCALE, // Σyy
-                ),
-                cov_b: pack2x16float(
-                    sigma3.z_axis.z * COV_SCALE, // Σzz
-                    sigma3.y_axis.x * COV_SCALE, // Σxy
-                ),
-                cov_c: pack2x16float(
-                    sigma3.z_axis.x * COV_SCALE, // Σxz
-                    sigma3.z_axis.y * COV_SCALE, // Σyz
-                ),
-                _spare: 0,
+                rot_a: pack2x16float(r[0], r[1]),
+                rot_b: pack2x16float(r[2], r[3]),
+                log_scale: pack2x16float(log(s[0]), log(s[1])),
+                log_scale_z: pack2x16float(log(s[2]), 0.0),
             }
         })
         .collect()
@@ -431,10 +438,10 @@ mod tests {
         assert_eq!(std::mem::size_of::<SplatStatic>(), 32);
         assert_eq!(offset_of!(SplatStatic, pos), 0);
         assert_eq!(offset_of!(SplatStatic, color), 12);
-        assert_eq!(offset_of!(SplatStatic, cov_a), 16);
-        assert_eq!(offset_of!(SplatStatic, cov_b), 20);
-        assert_eq!(offset_of!(SplatStatic, cov_c), 24);
-        assert_eq!(offset_of!(SplatStatic, _spare), 28);
+        assert_eq!(offset_of!(SplatStatic, rot_a), 16);
+        assert_eq!(offset_of!(SplatStatic, rot_b), 20);
+        assert_eq!(offset_of!(SplatStatic, log_scale), 24);
+        assert_eq!(offset_of!(SplatStatic, log_scale_z), 28);
     }
 
     #[test]
@@ -464,36 +471,13 @@ mod tests {
         assert_eq!(mid & 0xFF, 128);
     }
 
-    #[test]
-    fn pack_cloud_roundtrip() {
-        let cloud = generate_test_scene(64);
-        let packed = pack_cloud(&cloud);
-        assert_eq!(packed.len(), 64);
-        for (i, p) in packed.iter().enumerate() {
-            assert_eq!(p.pos, cloud.positions[i]);
-            // Test scene uses identity quats → Σ3 = diag(sx², sy², sz²).
-            let s = cloud.scales[i];
-            let (xx, yy) = unpack2x16(p.cov_a);
-            let (zz, xy) = unpack2x16(p.cov_b);
-            let tol = |v: f32| (v.abs() * 2e-3).max(1e-4);
-            assert!((xx - s[0] * s[0] * COV_SCALE).abs() < tol(xx), "xx");
-            assert!((yy - s[1] * s[1] * COV_SCALE).abs() < tol(yy), "yy");
-            assert!((zz - s[2] * s[2] * COV_SCALE).abs() < tol(zz), "zz");
-            assert!(xy.abs() < 1e-3, "off-diagonal must vanish for identity");
-            let a = ((p.color >> 24) & 0xFF) as f32 / 255.0;
-            assert!((a - cloud.opacities[i]).abs() < 1.0 / 255.0 + 1e-6);
-        }
-    }
-
-    #[test]
-    fn pack_cloud_rotated_covariance() {
-        // Z+90° quat with anisotropic scales: x/y variances swap, off-diag ~0.
-        let q = std::f32::consts::FRAC_1_SQRT_2;
-        let cloud = SplatCloud {
+    /// One splat cloud with the given scales and rotation.
+    fn one_splat(scale: [f32; 3], rot: [f32; 4]) -> SplatCloud {
+        SplatCloud {
             count: 1,
             positions: vec![[0.0, 0.0, 0.0]],
-            scales: vec![[0.02, 0.005, 0.005]],
-            rotations: vec![[0.0, 0.0, q, q]],
+            scales: vec![scale],
+            rotations: vec![rot],
             colors: vec![[1.0, 1.0, 1.0]],
             opacities: vec![1.0],
             sh: Vec::new(),
@@ -502,11 +486,157 @@ mod tests {
             source_path: String::new(),
             total_in_file: 1,
             transform: Default::default(),
+        }
+    }
+
+    /// CPU mirror of `build_sigma3` in splat_sim.wgsl — same column-outer-product
+    /// formulation, reading the same packed record. Returns (diag, off-diag) in
+    /// the (Σxx,Σyy,Σzz)/(Σxy,Σxz,Σyz) order `sym3_mul` expects.
+    fn build_sigma3_like_wgsl(p: &SplatStatic) -> ([f32; 3], [f32; 3]) {
+        let (qx, qy) = unpack2x16(p.rot_a);
+        let (qz, qw) = unpack2x16(p.rot_b);
+        let q = glam::Vec4::new(qx, qy, qz, qw).normalize();
+        let (lx, ly) = unpack2x16(p.log_scale);
+        let lz = unpack2x16(p.log_scale_z).0;
+        let (sx, sy, sz) = (lx.exp(), ly.exp(), lz.exp());
+        let (x, y, z, w) = (q.x, q.y, q.z, q.w);
+        let c0 = glam::Vec3::new(
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y + z * w),
+            2.0 * (x * z - y * w),
+        ) * sx;
+        let c1 = glam::Vec3::new(
+            2.0 * (x * y - z * w),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z + x * w),
+        ) * sy;
+        let c2 = glam::Vec3::new(
+            2.0 * (x * z + y * w),
+            2.0 * (y * z - x * w),
+            1.0 - 2.0 * (x * x + y * y),
+        ) * sz;
+        let d = c0 * c0 + c1 * c1 + c2 * c2;
+        let o = glam::Vec3::new(
+            c0.x * c0.y + c1.x * c1.y + c2.x * c2.y,
+            c0.x * c0.z + c1.x * c1.z + c2.x * c2.z,
+            c0.y * c0.z + c1.y * c1.z + c2.y * c2.z,
+        );
+        (d.to_array(), o.to_array())
+    }
+
+    #[test]
+    fn pack_cloud_roundtrip() {
+        let cloud = generate_test_scene(64);
+        let packed = pack_cloud(&cloud);
+        assert_eq!(packed.len(), 64);
+        for (i, p) in packed.iter().enumerate() {
+            assert_eq!(p.pos, cloud.positions[i]);
+            let s = cloud.scales[i];
+            let (lx, ly) = unpack2x16(p.log_scale);
+            let lz = unpack2x16(p.log_scale_z).0;
+            for (got, want) in [(lx, s[0]), (ly, s[1]), (lz, s[2])] {
+                // Scale survives as a RATIO, which is the whole point of storing
+                // the log: absolute f16 error on ln σ is a relative error on σ.
+                assert!(
+                    (got.exp() / want - 1.0).abs() < 1e-2,
+                    "sigma {want} round-tripped to {}",
+                    got.exp()
+                );
+            }
+            let a = ((p.color >> 24) & 0xFF) as f32 / 255.0;
+            assert!((a - cloud.opacities[i]).abs() < 1.0 / 255.0 + 1e-6);
+        }
+    }
+
+    #[test]
+    fn sigma3_rebuild_matches_r_s_st_rt() {
+        // The shader's column-outer-product build must equal R·S·SᵀRᵀ for an
+        // arbitrary rotation — the formulation is easy to get subtly wrong in a
+        // way that only shows as mis-oriented ellipses on a real capture.
+        let q = glam::Quat::from_euler(glam::EulerRot::XYZ, 0.7, -1.1, 0.35);
+        let scale = [0.02, 0.005, 0.0008];
+        let p = &pack_cloud(&one_splat(scale, q.to_array()))[0];
+        let m = glam::Mat3::from_quat(q) * glam::Mat3::from_diagonal(scale.into());
+        let want = m * m.transpose();
+        let (d, o) = build_sigma3_like_wgsl(p);
+        let tol = |v: f32| (v.abs() * 5e-3).max(1e-9);
+        for (got, exp, name) in [
+            (d[0], want.x_axis.x, "xx"),
+            (d[1], want.y_axis.y, "yy"),
+            (d[2], want.z_axis.z, "zz"),
+            (o[0], want.y_axis.x, "xy"),
+            (o[1], want.z_axis.x, "xz"),
+            (o[2], want.z_axis.y, "yz"),
+        ] {
+            assert!(
+                (got - exp).abs() < tol(exp),
+                "{name}: got {got}, want {exp}"
+            );
+        }
+    }
+
+    #[test]
+    fn covariance_format_spans_a_real_capture() {
+        // The regression this format change exists for. trooper.ply's sigmas run
+        // from ~4e-9 to ~0.18 after normalization — sigma^2 spans 15.4 decades,
+        // which f16 (~12 total) cannot hold, so the old sigma^2 x 1024 packing
+        // flushed the thin axis of most surfels to zero. Log-sigma spans none of
+        // it: every value below must survive as a ratio.
+        for sigma in [1.8e-1_f32, 2.2e-3, 1.0e-5, 3.7e-9, 1.0e-12] {
+            let p = &pack_cloud(&one_splat([sigma; 3], [0.0, 0.0, 0.0, 1.0]))[0];
+            let (d, _) = build_sigma3_like_wgsl(p);
+            let want = sigma * sigma;
+            assert!(
+                d[0] > 0.0 && (d[0] / want - 1.0).abs() < 5e-2,
+                "sigma {sigma}: Sigma_xx {} vs {want} (old f16 format flushed this)",
+                d[0]
+            );
+        }
+    }
+
+    #[test]
+    fn degenerate_scale_stays_finite() {
+        // A pruned splat can carry sigma == 0; ln(0) is -inf. The clamp must keep
+        // the record finite so the rebuilt covariance is rank-reduced, not NaN.
+        let p = &pack_cloud(&one_splat([0.0, 0.01, 0.0], [0.0, 0.0, 0.0, 1.0]))[0];
+        let (d, o) = build_sigma3_like_wgsl(p);
+        assert!(
+            d.iter().chain(o.iter()).all(|v| v.is_finite()),
+            "non-finite covariance from a zero scale: {d:?} {o:?}"
+        );
+        assert!(
+            d[0] < 1e-20,
+            "zero scale must stay negligible, got {}",
+            d[0]
+        );
+    }
+
+    #[test]
+    fn camera_basis_is_not_mirrored() {
+        // Mirror of the basis construction in splat_sim.wgsl. The shipped
+        // renderer used cross(worldUp, fwd), the NEGATION of the conventional
+        // right vector, so every capture rendered as its own mirror image for
+        // two releases — invisible to the offscreen probe, which has nothing to
+        // be mirrored against. This pins the convention.
+        let world_up = glam::Vec3::Y;
+        let basis = |fwd: glam::Vec3| {
+            let right = fwd.cross(world_up).normalize();
+            (right, right.cross(fwd))
         };
-        let p = &pack_cloud(&cloud)[0];
-        let (xx, yy) = unpack2x16(p.cov_a);
-        assert!((xx - 0.005 * 0.005 * COV_SCALE).abs() < 1e-3, "xx got {xx}");
-        assert!((yy - 0.02 * 0.02 * COV_SCALE).abs() < 2e-3, "yy got {yy}");
+        // Canonical camera: looking down -Z, up +Y. Right MUST be +X.
+        let (right, up) = basis(-glam::Vec3::Z);
+        assert!((right - glam::Vec3::X).length() < 1e-6, "right = {right:?}");
+        assert!((up - glam::Vec3::Y).length() < 1e-6, "up = {up:?}");
+
+        // And for the orbit camera the sim actually builds: at yaw 0 the eye sits
+        // on +X, so world +Z must land on the viewer's LEFT (negative t.x).
+        let ro = glam::Vec3::new(1.0, 0.0, 0.0);
+        let (right, _) = basis(-ro.normalize());
+        assert!(
+            glam::Vec3::Z.dot(right) < 0.0,
+            "world +Z should project left of centre, got dot {}",
+            glam::Vec3::Z.dot(right)
+        );
     }
 
     #[test]

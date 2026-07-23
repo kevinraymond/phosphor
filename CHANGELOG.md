@@ -8,7 +8,10 @@
 ### Added
 - **Splat renders view-dependent colour** — captures trained with spherical-harmonic bands (`f_rest_*` in the `.ply`, the default for most 3DGS trainers) now re-shade as the camera orbits, instead of showing one flat colour per splat. Sheen, glare and the way a surface turns as you move around it come through. Degree 1, 2 and 3 captures are all read; DC-only scenes and `.splat` files are unaffected and cost nothing extra. A `sh1`/`sh2`/`sh3` badge in the particle panel shows what the loaded scene carries.
 
-## v1.13.0 — 2026-07-22
+### Fixed
+- **Splat rendered every scene mirrored** — the camera's right vector was negated, so a loaded capture was a left-right flip of the real thing. Anything asymmetric — text, a face, a logo, which hand holds what — was reversed. Scenes now match how they look in the viewer you authored them in.
+- **Bright shimmering streaks across a capture at close range** — the flattest splats, which should be nearly invisible edge-on, were rendered up to 187× too bright as long moving needles. The covariance was stored in a format too narrow for real capture data (19.8% of values collapsed to zero on the demo scene); it now survives intact.
+- **Splat got substantially faster** — 800K splats at 1080p went from 314 to 721 FPS at the default framing, and from 74 to 315 FPS zoomed in close, because each splat now draws a quad shaped like the splat instead of an oversized square box around it.
 
 ### Changed
 - **Documentation moved into `docs/`, README rewritten for players** — the four reference documents now live in `docs/`, joined by a new `docs/GALLERY.md` and `docs/CREDITS.md`. The README leads with a hero clip and a download link instead of an architecture table, and hands off depth to `docs/`.
