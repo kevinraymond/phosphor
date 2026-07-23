@@ -341,6 +341,46 @@ impl BindingBus {
         self.merge_preset_bindings(persistence::load_preset(preset_name));
     }
 
+    /// Drop the Preset-scoped bindings aimed at `layer_idx`, and return how
+    /// many went. Called when the user picks an effect for that layer.
+    ///
+    /// `load_effect_on_layer` resets the layer's params to the new effect's
+    /// defaults, but the bindings pointing at them stayed live and re-drove
+    /// those params on the very next frame — so clicking an effect to get back
+    /// to its stock look reset the sliders for exactly one frame and then the
+    /// preset's audio map moved them again.
+    ///
+    /// Layer-scoped rather than a blanket clear: swapping one effect inside a
+    /// four-layer preset must not silently kill the other three layers' work.
+    /// Global-scoped bindings are app-wide by design and are never touched.
+    pub fn clear_preset_bindings_for_layer(&mut self, layer_idx: usize) -> usize {
+        // The trailing dot is load-bearing: without it, clearing layer 1 also
+        // takes every `param.10.*` and `param.1x.*` target with it.
+        let param_prefix = format!("param.{layer_idx}.");
+        let layer_prefix = format!("layer.{layer_idx}.");
+        let doomed: Vec<String> = self
+            .bindings
+            .iter()
+            .filter(|b| {
+                b.scope == BindingScope::Preset
+                    && (b.target.starts_with(&param_prefix) || b.target.starts_with(&layer_prefix))
+            })
+            .map(|b| b.id.clone())
+            .collect();
+        if doomed.is_empty() {
+            return 0;
+        }
+        self.bindings.retain(|b| !doomed.contains(&b.id));
+        for id in &doomed {
+            self.runtimes.remove(id);
+        }
+        // No `save_global` here — nothing global-scoped changed. Flagging the
+        // preset scope dirty lights the amber unsaved bar, which is also the
+        // way back: re-selecting the preset reloads the sidecar intact.
+        self.preset_scope_dirty = true;
+        doomed.len()
+    }
+
     /// Merge preset-scoped bindings into the bus, re-assigning any id that
     /// collides with an existing (global) binding. The `b_{n}` counter is
     /// per-file, so a preset authored in another session can reuse an id a
@@ -887,5 +927,77 @@ mod tests {
         s.extend(snap("audio.snare", 1.0));
         let out = bus.evaluate_snapshot(s);
         assert_eq!(out.iter().filter(|o| o.rising).count(), 1);
+    }
+
+    #[test]
+    fn effect_swap_drops_only_that_layers_preset_bindings() {
+        let mut bus = empty_bus();
+        let param = bus.add_binding(
+            "audio.band.4".into(),
+            "param.0.Splat.splat_scale".into(),
+            BindingScope::Preset,
+        );
+        let opacity = bus.add_binding(
+            "audio.rms".into(),
+            "layer.0.opacity".into(),
+            BindingScope::Preset,
+        );
+        let other_layer = bus.add_binding(
+            "audio.centroid".into(),
+            "param.2.Aurora.hue".into(),
+            BindingScope::Preset,
+        );
+        let global = bus.add_binding(
+            "audio.kick".into(),
+            "param.0.Splat.exposure".into(),
+            BindingScope::Global,
+        );
+        bus.preset_scope_dirty = false;
+
+        assert_eq!(bus.clear_preset_bindings_for_layer(0), 2);
+
+        let left: Vec<&str> = bus.bindings.iter().map(|b| b.id.as_str()).collect();
+        assert_eq!(left, vec![other_layer.as_str(), global.as_str()]);
+        // A global binding at the same target is app-wide by design.
+        assert!(bus.runtimes.contains_key(&global));
+        assert!(!bus.runtimes.contains_key(&param));
+        assert!(!bus.runtimes.contains_key(&opacity));
+        assert!(bus.preset_scope_dirty);
+    }
+
+    #[test]
+    fn effect_swap_matches_the_layer_index_not_its_prefix() {
+        let mut bus = empty_bus();
+        bus.add_binding(
+            "audio.band.0".into(),
+            "param.10.Cleave.hue".into(),
+            BindingScope::Preset,
+        );
+        bus.add_binding(
+            "audio.band.1".into(),
+            "layer.12.opacity".into(),
+            BindingScope::Preset,
+        );
+
+        assert_eq!(bus.clear_preset_bindings_for_layer(1), 0);
+        assert_eq!(bus.bindings.len(), 2);
+    }
+
+    #[test]
+    fn effect_swap_on_an_unbound_layer_is_a_no_op() {
+        let mut bus = empty_bus();
+        bus.add_binding(
+            "audio.rms".into(),
+            "layer.0.opacity".into(),
+            BindingScope::Preset,
+        );
+        bus.preset_scope_dirty = false;
+
+        assert_eq!(bus.clear_preset_bindings_for_layer(3), 0);
+        assert_eq!(bus.bindings.len(), 1);
+        assert!(
+            !bus.preset_scope_dirty,
+            "an untouched layer must not light the unsaved-preset bar"
+        );
     }
 }

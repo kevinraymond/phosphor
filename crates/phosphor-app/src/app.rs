@@ -1776,12 +1776,28 @@ impl App {
         Some(ps)
     }
 
-    /// Load an effect on the active layer.
+    /// Load an effect on the active layer, as a deliberate user choice —
+    /// the effect browser, the next/prev-effect trigger, the web client.
+    ///
+    /// Picking an effect is a fresh start for that layer, so the preset
+    /// bindings aimed at it go with the params `load_effect_on_layer` is about
+    /// to reset. This lives here and NOT in `load_effect_on_layer` because
+    /// that is also how a preset applies itself, how a shader hot-reload
+    /// rebuilds, and how a particle-quality change re-instantiates the layer —
+    /// none of which are the user leaving the preset, and one of which would
+    /// delete the bindings `load_preset` had just finished loading.
     pub fn load_effect(&mut self, index: usize) {
-        self.load_effect_on_layer(self.layer_stack.active_layer, index);
+        let layer_idx = self.layer_stack.active_layer;
+        let dropped = self.binding_bus.clear_preset_bindings_for_layer(layer_idx);
+        if dropped > 0 {
+            log::info!("Dropped {dropped} preset binding(s) targeting layer {layer_idx}");
+        }
+        self.load_effect_on_layer(layer_idx, index);
     }
 
     /// Load an effect on a specific layer.
+    ///
+    /// Deliberately does not touch bindings — see `load_effect` for why.
     pub fn load_effect_on_layer(&mut self, layer_idx: usize, effect_index: usize) {
         let effect = match self.effect_loader.effects.get(effect_index).cloned() {
             Some(e) => e,
