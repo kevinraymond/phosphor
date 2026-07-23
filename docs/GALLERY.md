@@ -45,7 +45,7 @@ GPU compute simulations, from a few thousand particles up to two million.
 <tr>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/accretion.webp" width="100%" alt="Accretion"><br><b>Accretion</b><br><sub>Gravitational N-body simulation — audio injects massive seed particles that attract swarms, forming accretion discs, orbital systems, and slingshot ejections</sub></td>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/array.webp" width="100%" alt="Array"><br><b>Array</b><br><sub>Toroidal speaker emitters per audio band — each fires disc-shaped rings of particles outward like sound becoming visible</sub></td>
-<td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/ascend.webp" width="100%" alt="Ascend"><br><b>Ascend</b><br><sub>A horizon that rises with the brightness of the sound rather than its volume — cymbal swells lift it skyward, sub-heavy passages sink it, and a pure tone draws…</sub></td>
+<td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/ascend.webp" width="100%" alt="Ascend"><br><b>Ascend</b><br><sub>A spectral mountain range that rises with the brightness of the sound rather than its volume — the seven frequency bands raise their own peaks across the width,…</sub></td>
 </tr>
 <tr>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/cascade.webp" width="100%" alt="Cascade"><br><b>Cascade</b><br><sub>Screen edges emit audio-segmented particle streams inward — bass from bottom, mids from sides, highs from top, creating visual interference where streams overlap</sub></td>

@@ -1779,6 +1779,181 @@ mod tests {
         }
     }
 
+    /// Offscreen render of the reworked Ascend ridgeline (#1441) under a few
+    /// synthetic spectra, so the terrain shape can be eyeballed without the app.
+    /// Renders only the particle pass (no bg feedback / bloom) — enough to read
+    /// the ridge silhouette and confirm the bands sculpt it. Writes PNGs to
+    /// ASCEND_PNG_DIR (default /tmp); the asserts only guard not-black / not-blown.
+    /// Run: ASCEND_PNG_DIR=/some/dir cargo test -p phosphor-app --release -- --ignored ascend_render_previews
+    #[test]
+    #[ignore = "requires a GPU/software adapter; writes PNGs"]
+    fn ascend_render_previews() {
+        use crate::audio::features::AudioFeatures;
+        use crate::gpu::frame_capture::FrameCapture;
+        use crate::gpu::particle::ParticleSystem;
+
+        let out_dir = std::env::var("ASCEND_PNG_DIR").unwrap_or_else(|_| "/tmp".to_string());
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
+
+        let noise = include_str!("../../../../assets/shaders/lib/noise.wgsl");
+        let palette = include_str!("../../../../assets/shaders/lib/palette.wgsl");
+        let plib = include_str!("../../../../assets/shaders/lib/particle_lib.wgsl");
+        let sim = include_str!("../../../../assets/shaders/ascend_sim.wgsl");
+        let sim_src = format!("{noise}\n{palette}\n{plib}\n{sim}");
+        let effect: PfxEffect =
+            serde_json::from_str(include_str!("../../../../assets/effects/ascend.pfx")).unwrap();
+        let mut def = effect.particles.unwrap();
+        def.max_scaled_count = 0; // keep max_count as authored
+
+        // The 8 sim params in .pfx order (altitude, relief, shimmer, flow, hue,
+        // glow, baseline, trail_decay).
+        let params: [f32; 8] = [0.7, 0.6, 0.45, 0.4, 0.5, 0.55, 0.3, 0.84];
+
+        let (w, h) = (960u32, 540u32);
+        let fmt = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+        // Each scene is a band spectrum + brightness, chosen to show the ridge
+        // respond: bass sinks it low-left, bright lifts a right-leaning range,
+        // full raises the whole massif.
+        let bands = |v: [f32; 7]| v;
+        let scenes: [(&str, [f32; 7], f32, f32); 3] = [
+            // name, [sub_bass..brilliance], rolloff, rms
+            (
+                "bass",
+                bands([0.85, 0.7, 0.35, 0.15, 0.08, 0.05, 0.03]),
+                0.18,
+                0.6,
+            ),
+            (
+                "bright",
+                bands([0.05, 0.1, 0.2, 0.35, 0.55, 0.8, 0.9]),
+                0.85,
+                0.6,
+            ),
+            (
+                "full",
+                bands([0.5, 0.55, 0.5, 0.6, 0.5, 0.55, 0.5]),
+                0.5,
+                0.7,
+            ),
+        ];
+
+        for (name, b, rolloff, rms) in scenes {
+            let mut ps = ParticleSystem::new(&device, &queue, fmt, &def, &sim_src, false);
+
+            let feat = AudioFeatures {
+                sub_bass: b[0],
+                bass: b[1],
+                low_mid: b[2],
+                mid: b[3],
+                upper_mid: b[4],
+                presence: b[5],
+                brilliance: b[6],
+                rolloff,
+                rms,
+                bandwidth: 0.4,
+                centroid: rolloff,
+                zcr: 0.2,
+                ..Default::default()
+            };
+
+            let target = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("ascend-preview-target"),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: fmt,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let target_view = target.create_view(&Default::default());
+
+            // ~2.5 s of frames at 60 Hz so the field fully populates and settles
+            // onto the ridge (lifetime is 3 s).
+            let frames = 150u32;
+            for f in 0..frames {
+                let time = f as f32 / 60.0;
+                ps.update_uniforms(1.0 / 60.0, time, [w as f32, h as f32], 0.0);
+                ps.update_audio(&feat);
+                ps.uniforms.effect_params = params;
+
+                let is_last = f == frames - 1;
+                let mut fc =
+                    is_last.then(|| FrameCapture::new(&device, w, h, fmt, "ascend-capture"));
+                let frame_view = fc.as_ref().map_or(&target_view, |fc| &fc.view);
+
+                let mut enc = device.create_command_encoder(&Default::default());
+                ps.dispatch(&mut enc, &queue);
+                {
+                    // Clear to near-black; ps.render composites additively (LoadOp::Load).
+                    let _pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("ascend-preview-clear"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: frame_view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color {
+                                    r: 0.01,
+                                    g: 0.01,
+                                    b: 0.02,
+                                    a: 1.0,
+                                }),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                }
+                ps.render(&mut enc, &queue, frame_view);
+                if let Some(fc) = fc.as_ref() {
+                    fc.copy_to_staging(&mut enc);
+                }
+                queue.submit([enc.finish()]);
+                ps.flip();
+
+                if let Some(fc) = fc.as_mut() {
+                    device
+                        .poll(wgpu::PollType::Wait {
+                            submission_index: None,
+                            timeout: None,
+                        })
+                        .unwrap();
+                    fc.request_map();
+                    let data = loop {
+                        device
+                            .poll(wgpu::PollType::Wait {
+                                submission_index: None,
+                                timeout: None,
+                            })
+                            .unwrap();
+                        if let Some(d) = fc.take_mapped_data(&device) {
+                            break d;
+                        }
+                    };
+                    let mean =
+                        data.iter().map(|&x| x as f64).sum::<f64>() / (data.len() as f64 * 255.0);
+                    let path = format!("{out_dir}/ascend_{name}.png");
+                    image::RgbaImage::from_raw(w, h, data.clone())
+                        .expect("raw->image")
+                        .save(&path)
+                        .expect("save png");
+                    eprintln!("wrote {path} (mean {mean:.4})");
+                    assert!(mean > 0.001, "{name} rendered near-black (mean {mean:.4})");
+                    assert!(mean < 0.80, "{name} blew out (mean {mean:.4})");
+                }
+            }
+        }
+    }
+
     /// Proves the Rust `ParticleUniforms` and the WGSL mirror in `particle_lib.wgsl` agree at the
     /// **field** level, not just in total size.
     ///

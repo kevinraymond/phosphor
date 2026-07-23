@@ -5,6 +5,9 @@
 
 ## Unreleased
 
+### Changed
+- **Ascend is now a spectral mountain range instead of a flat band** — the seven frequency bands each raise their own peak across the width, so the horizon is terrain that dances band-by-band, and brightness lifts the whole range up the frame rather than nudging a low bar pinned to the bottom. A kick punches the range up on the beat. It shipped in v1.15.0 as a nearly-flat line that only slid up and down.
+
 ### Fixed
 - **A particle effect with `trail_length` 0 whose shader still drew trails rendered a black screen** — the layer went black and flooded the log with thousands of errors a second, with no hint the two settings were coupled. It also hit any trail effect scaled past 500K particles, where trails switch off automatically. Both now render correctly.
 - **The stereo image crept to the right** — `pan` and `stereo_corr` rose faster than they fell, so anything moving between the speakers settled right of where it actually sat: a hi-hat panning hard left/right averaged 0.66 where 0.50 is centre. Both now smooth evenly in each direction. `stereo_width` is unchanged, being a width rather than a position.
