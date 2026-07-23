@@ -379,46 +379,54 @@ pub const FEATURES: [FeatureDef; NUM_FEATURES] = [
     // Passthrough (percentile ranging would stretch a mix that genuinely sits near centre out to
     // the edges, inventing a stereo image that is not there). Scale toward 0 on a stalled device
     // is inherited from `pan` for consistency, though a held 0.5 would read as "centred".
+    //
+    // SMOOTHING IS SYMMETRIC, deliberately differing from `pan`'s ar(0.03, 0.15). The smoother
+    // picks attack when rising and release when falling, which is right for an energy envelope
+    // (snap to a transient, decay gently) but wrong for a *position*: moving right would be 5x
+    // faster than moving left, so a hi-hat alternating hard-left/hard-right settles near 0.66
+    // instead of 0.5 and the whole image creeps right. Symmetric constants make an oscillating
+    // source average to its true centre. `pan` and `stereo_corr` are bipolar too and carry the
+    // same bias — pre-existing, shipped, and worth revisiting together rather than silently here.
     def(
         "band_pan_sub_bass",
         Passthrough,
-        SmoothParams::ar(0.03, 0.15),
+        SmoothParams::ar(0.08, 0.08),
         Scale,
     ),
     def(
         "band_pan_bass",
         Passthrough,
-        SmoothParams::ar(0.03, 0.15),
+        SmoothParams::ar(0.08, 0.08),
         Scale,
     ),
     def(
         "band_pan_low_mid",
         Passthrough,
-        SmoothParams::ar(0.03, 0.15),
+        SmoothParams::ar(0.08, 0.08),
         Scale,
     ),
     def(
         "band_pan_mid",
         Passthrough,
-        SmoothParams::ar(0.03, 0.15),
+        SmoothParams::ar(0.08, 0.08),
         Scale,
     ),
     def(
         "band_pan_upper_mid",
         Passthrough,
-        SmoothParams::ar(0.03, 0.15),
+        SmoothParams::ar(0.08, 0.08),
         Scale,
     ),
     def(
         "band_pan_presence",
         Passthrough,
-        SmoothParams::ar(0.03, 0.15),
+        SmoothParams::ar(0.08, 0.08),
         Scale,
     ),
     def(
         "band_pan_brilliance",
         Passthrough,
-        SmoothParams::ar(0.03, 0.15),
+        SmoothParams::ar(0.08, 0.08),
         Scale,
     ),
 ];
@@ -518,6 +526,24 @@ mod tests {
         // A13b appended after the v3 tail, so every index above is unmoved.
         assert_eq!(FEATURES[74].name, "band_pan_sub_bass");
         assert_eq!(FEATURES[80].name, "band_pan_brilliance");
+    }
+
+    /// A13b per-band pan must smooth symmetrically. The smoother uses `attack` when a value is
+    /// rising and `release` when it is falling, so asymmetric constants bias any oscillating
+    /// signal toward whichever direction is faster. On a *position* that is a visible artifact:
+    /// with `pan`'s ar(0.03, 0.15), a source alternating hard-left/hard-right averages ≈0.66
+    /// instead of 0.5 and the stereo image creeps right. This test exists because the obvious
+    /// "make it consistent with `pan`" edit reintroduces exactly that bug.
+    #[test]
+    fn band_pan_smoothing_is_symmetric() {
+        for def in FEATURES.iter().filter(|d| d.name.starts_with("band_pan_")) {
+            assert_eq!(
+                def.smooth.attack, def.smooth.release,
+                "{} must smooth symmetrically — a position, not an energy envelope",
+                def.name
+            );
+            assert!(!def.smooth.bypass, "{} should still be smoothed", def.name);
+        }
     }
 
     /// Pins the A2 (#1453) per-feature normalization policy for every slot:
