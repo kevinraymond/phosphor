@@ -23,7 +23,12 @@
 # and cycling skips `hidden` effects. The app boots on Phosphor (hidden), so the first
 # next_effect lands on visible[1], not visible[0] — hence the wrap at the end.
 #
-# Usage:  scripts/capture/capture.sh [-o OUTDIR] [-s SECONDS] [--effects N] [--dry-run]
+# `--only` films a named subset without paying for the other 32. The ring is still walked in
+# full — the wrap index above is load-bearing and shrinking it mislabels every clip — but an
+# unwanted effect is stepped past immediately instead of costing a whole loop pass, so six
+# effects take six passes (~4 min) rather than thirty-eight (~25 min).
+#
+# Usage:  scripts/capture/capture.sh [-o OUTDIR] [--only SLUG,SLUG] [--effects N] [--dry-run]
 
 set -Eeuo pipefail
 
@@ -36,14 +41,16 @@ FPS=60
 DRY=0
 LIMIT=0
 LISTEN=1
+ONLY=
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     -o|--out)     OUT=$2; shift 2 ;;
     --effects)    LIMIT=$2; shift 2 ;;
+    --only)       ONLY=$2; shift 2 ;;
     --dry-run)    DRY=1; shift ;;
     --no-listen)  LISTEN=0; shift ;;
-    -h|--help)    sed -n '2,25p' "$0"; exit 0 ;;
+    -h|--help)    sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -110,6 +117,25 @@ N=${#NAMES[@]}
 # shrinking N would corrupt the wrap-around index and mislabel every clip.
 TAKE=$N
 (( LIMIT > 0 && LIMIT < N )) && TAKE=$LIMIT
+
+# --only: a set of slugs to film. Everything else is stepped past for free.
+declare -A WANT=()
+if [[ -n $ONLY ]]; then
+  ALL_SLUGS=" $(printf '%s\n' "${NAMES[@]}" | cut -f1 | tr '\n' ' ')"
+  IFS=',' read -ra REQ <<<"$ONLY"
+  for s in "${REQ[@]}"; do
+    # A typo here would otherwise film nothing at all and say nothing about it —
+    # the exact class of silent failure the rest of this script exists to prevent.
+    [[ $ALL_SLUGS == *" $s "* ]] || die "--only: '$s' is not an effect slug.
+     Known slugs: $(printf '%s\n' "${NAMES[@]}" | cut -f1 | tr '\n' ' ')"
+    WANT[$s]=1
+  done
+  TAKE=${#WANT[@]}
+  log "--only: filming ${!WANT[*]}"
+  log "skipping the other $((N - TAKE)) effect(s) — they are stepped past, not filmed"
+fi
+want() { [[ -z $ONLY ]] || [[ -n ${WANT[$1]:-} ]]; }
+
 log "$TAKE of $N effects; loop ${LOOP_SECS}s; ~$(python3 -c "print(f'{$TAKE*$LOOP_SECS/60:.1f}')") min of capture"
 
 # --------------------------------------------------------------------- audio loop
@@ -135,8 +161,13 @@ if [[ ! -f $DEMO_PLY ]]; then
 fi
 
 if (( DRY )); then
-  log "dry run — effect order:"
-  for ((i=0;i<N;i++)); do printf '  %2d  %s\n' $((i+1)) "${NAMES[i]}" >&2; done
+  log "dry run — effect order (* = filmed, the rest are stepped past):"
+  for ((k=0;k<N;k++)); do
+    idx=$(( (k+2) % N ))
+    IFS=$'\t' read -r slug name <<<"${NAMES[idx]}"
+    mark=' '; want "$slug" && mark='*'
+    printf '  %s %2d  %-16s %s\n' "$mark" $((k+1)) "$slug" "$name" >&2
+  done
   exit 0
 fi
 
@@ -297,16 +328,42 @@ elapsed = $(now) - $PLAY_T0
 print(max(1, math.ceil((elapsed + 3.0) / $LOOP_SECS)))")
 log "phase-locked to playback; first record window opens in pass $PASS0"
 
+# The earliest pass whose record window still leaves this effect a real settle. With --only,
+# reaching the next wanted effect means firing several next_effect triggers back to back, and
+# the run of skips before the FIRST one can be 30-odd — which would otherwise eat into the
+# settle half and film an effect that had barely appeared. Letting the slot slip a whole pass
+# when that happens costs 39s once; filming an unsettled effect costs the clip.
+MIN_SETTLE=$(python3 -c "print(f'{0.75*$LOOP_SECS*$SETTLE_FRAC:.3f}')")
+usable_slot() {   # usable_slot <earliest pass index>
+  python3 -c "
+import math
+elapsed = $(now) - $PLAY_T0
+lead = $LOOP_SECS*$SETTLE_FRAC
+print(max($1, math.ceil((elapsed + $MIN_SETTLE - lead) / $LOOP_SECS)))"
+}
+
 # Canvas detection left us on Aurora = visible[2], so capture starts there and wraps all the
-# way round, covering every effect exactly once.
-for ((k=0;k<TAKE;k++)); do
+# way round, covering every effect exactly once. `slot` counts RECORDED passes, `k` counts ring
+# positions — with --only they are no longer the same number.
+slot=$PASS0
+n=0
+for ((k=0;k<N;k++)); do
+  (( n >= TAKE )) && break
   idx=$(( (k+2) % N ))
   IFS=$'\t' read -r slug name <<<"${NAMES[idx]}"
-  printf '\033[36m[capture]\033[0m %2d/%d  %-22s' $((k+1)) "$TAKE" "$name" >&2
+
+  if ! want "$slug"; then
+    step; sleep 0.15
+    continue
+  fi
+
+  n=$((n+1))
+  printf '\033[36m[capture]\033[0m %2d/%d  %-22s' "$n" "$TAKE" "$name" >&2
 
   # Record window opens at a fixed offset into each loop pass, so every effect is filmed over
   # the same bars — which is the claim docs/GALLERY.md makes about these clips.
-  wait_until "$(python3 -c "print(($PASS0+$k)*$LOOP_SECS + $LOOP_SECS*$SETTLE_FRAC)")"
+  slot=$(usable_slot "$slot")
+  wait_until "$(python3 -c "print($slot*$LOOP_SECS + $LOOP_SECS*$SETTLE_FRAC)")"
   ffmpeg -hide_banner -loglevel error -y \
          -f x11grab -framerate $FPS -video_size "${W}x${H}" -i "$DISPLAY+$X,$Y" \
          -t "$REC_SECS" -c:v libx264 -preset veryfast -crf 16 -pix_fmt yuv420p \
@@ -315,6 +372,7 @@ for ((k=0;k<TAKE;k++)); do
 
   # Switch during the next pass's settle half, then wait out the rest of the slot.
   step
+  slot=$((slot+1))
 done
 
 log "done — $TAKE clips in $OUT"

@@ -16,6 +16,9 @@
 # same musical moment.
 #
 # Usage:  scripts/capture/build_media.sh -i CLIPDIR [-o OUTDIR] [--at SECONDS] [--hero a,b,c]
+#
+# A --hero entry is `slug[+AT][@DIR]`: `@DIR` reads the clip from somewhere other than -i, and
+# `+AT` cuts that one entry at its own offset instead of the global drop.
 
 set -Eeuo pipefail
 
@@ -155,10 +158,26 @@ log "building hero from: $HERO_LIST"
 HERO_DUR=$(python3 -c "print(f'{1*4*60/$BPM:.4f}')")
 args=() ; filt=() ; n=0
 IFS=',' read -ra HERO <<<"$HERO_LIST"
-for slug in "${HERO[@]}"; do
-  f=$IN/$slug.mp4
-  [[ -f $f ]] || { log "  skip $slug (no clip)"; continue; }
-  args+=(-ss "$AT" -t "$HERO_DUR" -i "$f")
+for entry in "${HERO[@]}"; do
+  # Entry syntax: slug[+AT][@DIR]
+  #
+  #   @DIR pulls one cut from somewhere other than -i. The advanced demos are filmed by a
+  #   different script into a different directory, and the hero wants one of them next to five
+  #   default-settings clips. Both scripts use the same loop and the same SETTLE_FRAC, so a clip
+  #   from either is at the same musical offset and the cut still lands on the same beat.
+  #
+  #   +AT overrides the global drop offset for that one cut. The default AT is the drop, which is
+  #   the right moment for almost everything — but an effect whose audio map takes it dark or
+  #   chaotic through the drop wants a different bar, and forcing one offset on all six either
+  #   spoils that cut or drags the other five off the drop.
+  head=${entry%%@*}
+  dir=$IN; [[ $entry == *@* ]] && dir=${entry#*@}
+  slug=${head%%+*}
+  at=$AT; [[ $head == *+* ]] && at=${head#*+}
+  f=$dir/$slug.mp4
+  [[ -f $f ]] || { log "  skip $slug (no clip at $f)"; continue; }
+  [[ $at == "$AT" ]] || log "  $slug at ${at}s (overriding ${AT}s)"
+  args+=(-ss "$at" -t "$HERO_DUR" -i "$f")
   filt+=("[$n:v]fps=24,scale=${HERO_W}:-2:flags=lanczos,setpts=PTS-STARTPTS[v$n];")
   n=$((n+1))
 done
