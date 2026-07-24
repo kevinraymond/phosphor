@@ -181,6 +181,11 @@ jobs:
 
       # Same reasoning for the docs: paths-ignore means nothing else in CI ever runs this,
       # so a stale effect count or a broken relative link rides out to a release unnoticed.
+      # Catch-22 (hit shipping v1.17.0 — Chromatica shipped without gallery/count updates):
+      # when this guard fails, a docs-ONLY fix is itself skipped by paths-ignore and never
+      # re-runs the job, so the tag stays stuck. Bundle the doc fix with a non-'**.md' change
+      # (a version bump, or an edit to this file) to retrigger. Proper fix would be to move
+      # tag-release to its own workflow keyed on Cargo.toml/CHANGELOG/docs paths.
       - name: Check docs
         run: scripts/check_docs.py
 
