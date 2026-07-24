@@ -192,7 +192,11 @@ impl App {
                         Ok(executor) => {
                             let sources: Vec<String> = passes
                                 .iter()
-                                .filter_map(|p| effect_loader.load_effect_source(&p.shader).ok())
+                                .filter_map(|p| {
+                                    effect_loader
+                                        .load_effect_source_with_inputs(&p.shader, p.inputs.len())
+                                        .ok()
+                                })
                                 .collect();
                             let mut store = ParamStore::new();
                             store.load_from_defs(&effect.inputs);
@@ -207,6 +211,7 @@ impl App {
                                 hdr_format,
                                 &source,
                                 gpu.pipeline_cache.as_ref(),
+                                0,
                             )?;
                             let feedback = PingPongTarget::new_cleared(
                                 &gpu.device,
@@ -238,6 +243,7 @@ impl App {
                         hdr_format,
                         &source,
                         gpu.pipeline_cache.as_ref(),
+                        0,
                     )?;
                     let feedback = PingPongTarget::new_cleared(
                         &gpu.device,
@@ -264,6 +270,7 @@ impl App {
                     hdr_format,
                     &source,
                     gpu.pipeline_cache.as_ref(),
+                    0,
                 )?;
                 let feedback = PingPongTarget::new_cleared(
                     &gpu.device,
@@ -1362,7 +1369,10 @@ impl App {
                     if !pass_relevant {
                         continue;
                     }
-                    match self.effect_loader.load_effect_source(&pass_def.shader) {
+                    match self
+                        .effect_loader
+                        .load_effect_source_with_inputs(&pass_def.shader, pass_def.inputs.len())
+                    {
                         Ok(source) => {
                             let changed =
                                 e.shader_sources.get(i).map_or(true, |prev| *prev != source);
@@ -1378,6 +1388,7 @@ impl App {
                                     source,
                                     &self.gpu.device,
                                     hdr_format,
+                                    pass_def.inputs.len(),
                                 );
                             }
                         }
@@ -1871,6 +1882,7 @@ impl App {
                 hdr_format,
                 &default_source,
                 self.gpu.pipeline_cache.as_ref(),
+                0,
             ) {
                 let pass_executor = PassExecutor::single_pass(
                     pipeline,
@@ -1934,7 +1946,11 @@ impl App {
                 // Track shader sources for hot-reload
                 e.shader_sources = passes
                     .iter()
-                    .filter_map(|p| self.effect_loader.load_effect_source(&p.shader).ok())
+                    .filter_map(|p| {
+                        self.effect_loader
+                            .load_effect_source_with_inputs(&p.shader, p.inputs.len())
+                            .ok()
+                    })
                     .collect();
                 self.shader_watcher.drain_changes();
                 log::info!(
@@ -2009,6 +2025,7 @@ impl App {
             hdr_format,
             &source,
             self.gpu.pipeline_cache.as_ref(),
+            0,
         ) {
             Ok(pipeline) => {
                 let executor = PassExecutor::single_pass(

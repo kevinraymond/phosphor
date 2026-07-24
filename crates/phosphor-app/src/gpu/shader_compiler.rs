@@ -16,6 +16,8 @@ pub enum CompileRequest {
         source: String,
         device: Device,
         format: TextureFormat,
+        /// Multi-pass graph input count for this pass's bind-group layout (#1481).
+        input_count: usize,
     },
     /// Compile a compute shader into a compute pipeline.
     ComputeShader {
@@ -76,6 +78,7 @@ impl ShaderCompiler {
         source: String,
         device: &Device,
         format: TextureFormat,
+        input_count: usize,
     ) {
         let _ = self.request_tx.send(CompileRequest::RenderPass {
             layer_idx,
@@ -83,6 +86,7 @@ impl ShaderCompiler {
             source,
             device: device.clone(),
             format,
+            input_count,
         });
     }
 
@@ -116,8 +120,9 @@ impl ShaderCompiler {
                     source,
                     device,
                     format,
+                    input_count,
                 } => {
-                    let result = ShaderPipeline::new(&device, format, &source, None)
+                    let result = ShaderPipeline::new(&device, format, &source, None, input_count)
                         .map_err(|e| e.to_string());
                     let _ = tx.send(CompileResult::RenderPass {
                         layer_idx,

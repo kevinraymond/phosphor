@@ -175,6 +175,25 @@ fn spectrogram(uv: vec2f) -> f32 {
 }
 "#;
 
+/// Build the WGSL declarations for `input_count` multi-pass graph inputs (#1481).
+/// Each input `i` gets a raw texture `inputI_tex` at binding `7+2i`, a sampler
+/// `inputI_sampler` at `8+2i`, and a convenience accessor `inputI(uv)`.
+fn build_input_bindings(input_count: usize) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    for i in 0..input_count {
+        let tex = 7 + 2 * i;
+        let smp = 8 + 2 * i;
+        let _ = write!(
+            s,
+            "@group(0) @binding({tex}) var input{i}_tex: texture_2d<f32>;\n\
+             @group(0) @binding({smp}) var input{i}_sampler: sampler;\n\
+             fn input{i}(uv: vec2f) -> vec4f {{ return textureSampleLevel(input{i}_tex, input{i}_sampler, uv, 0.0); }}\n"
+        );
+    }
+    s
+}
+
 pub struct EffectLoader {
     pub effects: Vec<PfxEffect>,
     pub current_effect: Option<usize>,
@@ -299,10 +318,29 @@ impl EffectLoader {
         assets_dir().join("shaders").join(shader_rel)
     }
 
-    pub fn load_effect_source(&self, shader_rel: &str) -> Result<String> {
+    /// Load a fragment-pass shader with the uniform block + library preamble, and
+    /// declare `input_count` multi-pass graph inputs (#1481) so the shader can sample
+    /// prior passes' outputs as `input0(uv)..inputN-1(uv)` (or the raw `inputI_tex` /
+    /// `inputI_sampler`). Single-shader passes pass `input_count = 0`.
+    pub fn load_effect_source_with_inputs(
+        &self,
+        shader_rel: &str,
+        input_count: usize,
+    ) -> Result<String> {
         let path = self.resolve_shader_path(shader_rel);
         let source = std::fs::read_to_string(&path)?;
-        Ok(self.prepend_library(&source))
+        Ok(self.prepend_library_with_inputs(&source, input_count))
+    }
+
+    /// Prepend the uniform block + library, then declare `input_count` pass-graph
+    /// input bindings. Module-scope declarations are order-independent in WGSL, so
+    /// the input block simply prepends ahead of the library preamble.
+    pub fn prepend_library_with_inputs(&self, source: &str, input_count: usize) -> String {
+        let base = self.prepend_library(source);
+        if input_count == 0 {
+            return base;
+        }
+        format!("{}\n{}", build_input_bindings(input_count), base)
     }
 
     /// Load a compute shader source. Prepends the noise library and particle library
@@ -562,6 +600,35 @@ impl EffectLoader {
 mod tests {
     use super::*;
     use crate::gpu::test_gpu::{gpu_guard, test_gpu};
+
+    // Multi-pass graph (#1481): the injected WGSL declares one texture+sampler pair
+    // and one accessor per input, at bindings 7+2i / 8+2i, and nothing when there
+    // are no inputs.
+    #[test]
+    fn input_bindings_wgsl_shape() {
+        assert!(build_input_bindings(0).is_empty());
+
+        let two = build_input_bindings(2);
+        // input0 at 7/8, input1 at 9/10, each with a raw texture, sampler, accessor.
+        assert!(two.contains("@binding(7) var input0_tex: texture_2d<f32>;"));
+        assert!(two.contains("@binding(8) var input0_sampler: sampler;"));
+        assert!(two.contains("fn input0(uv: vec2f) -> vec4f"));
+        assert!(two.contains("@binding(9) var input1_tex: texture_2d<f32>;"));
+        assert!(two.contains("@binding(10) var input1_sampler: sampler;"));
+        assert!(two.contains("fn input1(uv: vec2f) -> vec4f"));
+
+        // The inputs-aware preamble carries the uniform block AND the input decls;
+        // input_count 0 is byte-identical to the plain library preamble.
+        let loader = EffectLoader::for_test("");
+        let frag = "@fragment fn fs_main() -> @location(0) vec4f { return vec4f(0.0); }";
+        assert_eq!(
+            loader.prepend_library_with_inputs(frag, 0),
+            loader.prepend_library(frag),
+        );
+        let with_one = loader.prepend_library_with_inputs(frag, 1);
+        assert!(with_one.contains("PhosphorUniforms"));
+        assert!(with_one.contains("fn input0(uv: vec2f) -> vec4f"));
+    }
 
     fn make_effect(author: &str) -> PfxEffect {
         serde_json::from_str(&format!(
@@ -857,7 +924,7 @@ mod tests {
         let (w, h) = (960u32, 540u32);
         let fmt = wgpu::TextureFormat::Rgba8UnormSrgb;
         let pipeline =
-            ShaderPipeline::new(&device, fmt, &fragment_source, None).expect("frost pipeline");
+            ShaderPipeline::new(&device, fmt, &fragment_source, None, 0).expect("frost pipeline");
 
         // Ping-pong pair for the feedback loop.
         let mk_target = |label: &str| {
@@ -921,6 +988,7 @@ mod tests {
                     &spectrum,
                     &spectrogram,
                     &sampler,
+                    &[],
                 )
             })
             .collect();
@@ -1156,8 +1224,8 @@ mod tests {
 
         let (w, h) = (960u32, 540u32);
         let fmt = wgpu::TextureFormat::Rgba8UnormSrgb;
-        let pipeline =
-            ShaderPipeline::new(&device, fmt, &fragment_source, None).expect("chromatica pipeline");
+        let pipeline = ShaderPipeline::new(&device, fmt, &fragment_source, None, 0)
+            .expect("chromatica pipeline");
 
         // Ping-pong pair for the feedback loop.
         let mk_target = |label: &str| {
@@ -1221,6 +1289,7 @@ mod tests {
                     &spectrum,
                     &spectrogram,
                     &sampler,
+                    &[],
                 )
             })
             .collect();

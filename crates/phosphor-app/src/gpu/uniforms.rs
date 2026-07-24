@@ -148,6 +148,10 @@ impl UniformBuffer {
     /// 6 = the shared audio-texture sampler. During the reserve phase all three
     /// audio textures are the 1x1 placeholder view; the A17 DSP swaps in the real
     /// textures later without changing this layout (finding #1492).
+    ///
+    /// `inputs` are the multi-pass graph inputs (#1481) in declared order: each
+    /// `(view, sampler)` binds a prior pass's output at binding `7+2i` / `8+2i`.
+    /// The `layout` must have been built with a matching `input_count`.
     #[allow(clippy::too_many_arguments)]
     pub fn create_bind_group(
         &self,
@@ -159,40 +163,53 @@ impl UniformBuffer {
         spectrum_view: &TextureView,
         spectrogram_view: &TextureView,
         audio_sampler: &Sampler,
+        inputs: &[(&TextureView, &Sampler)],
     ) -> BindGroup {
+        let mut entries = vec![
+            BindGroupEntry {
+                binding: 0,
+                resource: self.buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::TextureView(prev_frame_view),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: BindingResource::Sampler(prev_frame_sampler),
+            },
+            BindGroupEntry {
+                binding: 3,
+                resource: BindingResource::TextureView(waveform_view),
+            },
+            BindGroupEntry {
+                binding: 4,
+                resource: BindingResource::TextureView(spectrum_view),
+            },
+            BindGroupEntry {
+                binding: 5,
+                resource: BindingResource::TextureView(spectrogram_view),
+            },
+            BindGroupEntry {
+                binding: 6,
+                resource: BindingResource::Sampler(audio_sampler),
+            },
+        ];
+        for (i, (view, sampler)) in inputs.iter().enumerate() {
+            let i = i as u32;
+            entries.push(BindGroupEntry {
+                binding: 7 + 2 * i,
+                resource: BindingResource::TextureView(view),
+            });
+            entries.push(BindGroupEntry {
+                binding: 8 + 2 * i,
+                resource: BindingResource::Sampler(sampler),
+            });
+        }
         device.create_bind_group(&BindGroupDescriptor {
             label: Some("phosphor-bind-group"),
             layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: self.buffer.as_entire_binding(),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::TextureView(prev_frame_view),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::Sampler(prev_frame_sampler),
-                },
-                BindGroupEntry {
-                    binding: 3,
-                    resource: BindingResource::TextureView(waveform_view),
-                },
-                BindGroupEntry {
-                    binding: 4,
-                    resource: BindingResource::TextureView(spectrum_view),
-                },
-                BindGroupEntry {
-                    binding: 5,
-                    resource: BindingResource::TextureView(spectrogram_view),
-                },
-                BindGroupEntry {
-                    binding: 6,
-                    resource: BindingResource::Sampler(audio_sampler),
-                },
-            ],
+            entries: &entries,
         })
     }
 }

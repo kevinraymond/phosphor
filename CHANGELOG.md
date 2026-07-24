@@ -3,6 +3,11 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## Unreleased
+
+### Added
+- **Custom effects can now chain render passes.** A pass in a `.pfx` may list earlier passes in its `inputs`, and its shader samples their output through `input0(uv)`, `input1(uv)`, and so on. This is the groundwork for multi-stage looks like fluid ink and reaction-diffusion; no built-in effect uses it yet.
+
 ## v1.17.0 — 2026-07-24
 
 ### Added
