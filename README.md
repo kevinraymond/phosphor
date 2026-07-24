@@ -16,7 +16,7 @@
 
 Fosfora is a free, open-source music visualizer built for actually performing with. There's
 nothing to code, no account to make, and no project to set up: open it, play music, and it
-reacts. When you want more, every knob is there — 40 effects, an eight-layer stack, MIDI, OSC,
+reacts. When you want more, every knob is there — 42 effects, an eight-layer stack, MIDI, OSC,
 your phone as a control surface, a webcam, and NDI out to your video mixer.
 
 ## See it move
@@ -36,7 +36,7 @@ Six of the forty-two, all at default settings:
 </tr>
 </table>
 
-**→ [See all 40 effects in the gallery](docs/GALLERY.md)**
+**→ [See all 42 effects in the gallery](docs/GALLERY.md)**
 
 ## Past the defaults
 

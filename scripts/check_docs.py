@@ -139,6 +139,12 @@ def check_gallery() -> list[str]:
             for m in re.finditer(r"\*\*(\d+) built-in", body):
                 if int(m.group(1)) != len(shipped):
                     errors.append(f"{doc} claims {m.group(1)} built-in effects, not {len(shipped)}")
+            # Bare "40 effects" — no bold, no "built-in" — is still the catalogue count and
+            # still goes stale (README lead + gallery link both sat at 40 into v1.18.0). The
+            # patterns above sailed past it because it is neither bold nor "built-in".
+            for m in re.finditer(r"(\d+) effects\b", body):
+                if int(m.group(1)) != len(shipped):
+                    errors.append(f"{doc} says '{m.group(1)} effects', {len(shipped)} are shipped")
             # README spells the count out ("Six of the thirty-eight"), which the digit
             # patterns above sail straight past — it sat two releases stale that way.
             for m in re.finditer(r"\bof the ([a-z]+(?:-[a-z]+)?)\b", body):
