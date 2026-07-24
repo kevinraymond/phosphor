@@ -160,47 +160,7 @@ jobs:
           path: staging/
           retention-days: 7
 
-  tag-release:
-    name: Tag release if version changed
-    needs: [fmt, deny, lint, test, build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.RELEASE_PAT }}
-
-      # Gate the tag on the CHANGELOG, because release.yml extracts the release body by
-      # awk-matching '## vX.Y.Z' and publishes an empty one if that header is missing.
-      # Twice now (v1.11.0, v1.13.0) it was. No tag means no release, so this fails in the
-      # one place where the mistake is still cheap to fix. It cannot live in a normal CI
-      # job: paths-ignore skips '**.md', so a CHANGELOG-only push never reaches one.
-      - name: Check CHANGELOG
-        run: scripts/check_changelog.py
-
-      # Same reasoning for the docs: paths-ignore means nothing else in CI ever runs this,
-      # so a stale effect count or a broken relative link rides out to a release unnoticed.
-      # Catch-22 (hit shipping v1.17.0 — Chromatica shipped without gallery/count updates):
-      # when this guard fails, a docs-ONLY fix is itself skipped by paths-ignore and never
-      # re-runs the job, so the tag stays stuck. Bundle the doc fix with a non-'**.md' change
-      # (a version bump, or an edit to this file) to retrigger. Proper fix would be to move
-      # tag-release to its own workflow keyed on Cargo.toml/CHANGELOG/docs paths.
-      - name: Check docs
-        run: scripts/check_docs.py
-
-      - name: Check version and tag
-        run: |
-          # Read version from Cargo.toml
-          VERSION=$(grep '^version' crates/phosphor-app/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          TAG="v${VERSION}"
-          echo "Cargo.toml version: ${VERSION} (tag: ${TAG})"
-
-          # Check if this tag already exists
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists — skipping"
-          else
-            echo "New version detected — creating tag ${TAG}"
-            git tag "$TAG"
-            git push origin "$TAG"
-          fi
+  # Tagging lives in its own workflow (tag.yml), NOT here: this workflow uses
+  # paths-ignore '**.md', so a CHANGELOG/docs-only fix never reaches a job here.
+  # When the release guards failed on such a fix, the tag stayed stuck (hit
+  # shipping v1.17.0). tag.yml triggers on the release-relevant paths instead.

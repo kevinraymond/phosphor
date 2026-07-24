@@ -10,6 +10,15 @@ if ! scripts/check_changelog.py; then
     exit 1
 fi
 
+# Guard the docs the release also gates on: every shipped effect present in the gallery,
+# the effect count in sync, all relative links/anchors resolving. tag.yml checks this too,
+# but catching it here stops an effect (Chromatica did, before v1.17.0) reaching a release
+# commit without its docs — the release tag can't retrigger on a docs-only fix.
+if ! scripts/check_docs.py; then
+    echo "ERROR: docs check failed. See scripts/check_docs.py."
+    exit 1
+fi
+
 # Check cargo fmt
 if ! cargo fmt --all -- --check 2>/dev/null; then
     echo "ERROR: cargo fmt check failed. Run 'cargo fmt --all' to fix."

@@ -1,0 +1,69 @@
+name: Tag Release
+
+# Creates the vX.Y.Z tag (which release.yml then builds and publishes) once the
+# version in crates/phosphor-app/Cargo.toml has a matching CHANGELOG header and the
+# docs are in sync.
+#
+# This lives apart from ci.yml on purpose. ci.yml uses `paths-ignore: '**.md'` so the
+# expensive build matrix skips doc-only pushes — but that also meant the tag job could
+# never run for a doc-only change. When the release guards rejected a commit and the
+# fix was docs-only, the fix couldn't retrigger the job and the tag stayed stuck (this
+# happened shipping v1.17.0). So tag on the release-relevant paths below, which include
+# the docs. The job is cheap (checkout + two guard scripts + a tag check) and no-ops
+# when the tag already exists.
+#
+# Not gated on the build: a doc-only fix doesn't change the code, and release.yml
+# rebuilds every platform from the tag and publishes nothing if that build fails — so a
+# broken commit produces at worst a dangling tag, never a broken release.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/phosphor-app/Cargo.toml" # the version bump that names the tag
+      - "CHANGELOG.md" # the release body release.yml awk-extracts
+      - "README.md" # carries the effect count the docs guard checks
+      - "docs/**" # GALLERY.md / TUTORIALS.md counts + relative links
+
+permissions:
+  contents: write
+
+jobs:
+  tag-release:
+    name: Tag release if version changed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+
+      # Gate the tag on the CHANGELOG: release.yml extracts the release body by
+      # awk-matching '## vX.Y.Z' and publishes an empty one if that header is missing
+      # (v1.11.0, v1.13.0 both shipped empty that way). No tag means no release, so this
+      # fails where the mistake is still cheap to fix.
+      - name: Check CHANGELOG
+        run: scripts/check_changelog.py
+
+      # Gate on the docs too: a stale effect count or a broken relative link would
+      # otherwise ride out to a release unnoticed (v1.17.0 nearly did — Chromatica
+      # shipped without its gallery entry). The pre-commit hook runs this as well, so
+      # it should rarely fail here.
+      - name: Check docs
+        run: scripts/check_docs.py
+
+      - name: Check version and tag
+        run: |
+          # Read version from Cargo.toml
+          VERSION=$(grep '^version' crates/phosphor-app/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          TAG="v${VERSION}"
+          echo "Cargo.toml version: ${VERSION} (tag: ${TAG})"
+
+          # Check if this tag already exists
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists — skipping"
+          else
+            echo "New version detected — creating tag ${TAG}"
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
