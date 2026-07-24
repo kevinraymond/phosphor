@@ -8,9 +8,9 @@ Effects respond to what they hear, so what you see here is a starting point, not
 Change the music and they change with it; every parameter is also a slider, and can be driven
 by MIDI, OSC, a phone or a webcam.
 
-**40 effects.**
+**41 effects.**
 
-## Shaders (11)
+## Shaders (12)
 
 Pure fragment shaders — no particles, just math evaluated per pixel, every frame.
 
@@ -18,22 +18,22 @@ Pure fragment shaders — no particles, just math evaluated per pixel, every fra
 <tr>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/aurora.webp" width="100%" alt="Aurora"><br><b>Aurora</b><br><sub>Horizontal flowing curtain bands driven by 7 frequency bands — a spectrogram disguised as northern lights</sub></td>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/beam.webp" width="100%" alt="Beam"><br><b>Beam</b><br><sub>Vector-CRT oscilloscope — draws the audio waveform as a glowing, over-focused beam with phosphor persistence. Scope and radial modes.</sub></td>
-<td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/drift.webp" width="100%" alt="Drift"><br><b>Drift</b><br><sub>Fluid smoke via triple domain-warped FBM noise with advected feedback</sub></td>
+<td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/chromatica.webp" width="100%" alt="Chromatica"><br><b>Chromatica</b><br><sub>The screen tunes to the song's key — twelve rings on the circle of fifths bloom with the chord being played, the mandala takes the hue of the detected key, and minor keys droop and cool</sub></td>
 </tr>
 <tr>
+<td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/drift.webp" width="100%" alt="Drift"><br><b>Drift</b><br><sub>Fluid smoke via triple domain-warped FBM noise with advected feedback</sub></td>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/frost.webp" width="100%" alt="Frost"><br><b>Frost</b><br><sub>Spectral-flatness material dissolution: tonal sound freezes into faceted crystal, noisy sound melts it into drifting sand</sub></td>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/iris.webp" width="100%" alt="Iris"><br><b>Iris</b><br><sub>Spinning dot with fading feedback trails — circular pattern resembles an iris</sub></td>
-<td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/prism.webp" width="100%" alt="Prism"><br><b>Prism</b><br><sub>Kaleidoscopic N-fold mirror symmetry over FBM and geometric patterns</sub></td>
 </tr>
 <tr>
+<td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/prism.webp" width="100%" alt="Prism"><br><b>Prism</b><br><sub>Kaleidoscopic N-fold mirror symmetry over FBM and geometric patterns</sub></td>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/pulse.webp" width="100%" alt="Pulse"><br><b>Pulse</b><br><sub>Concentric expanding rings synced to beat with light feedback trails</sub></td>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/shards.webp" width="100%" alt="Shards"><br><b>Shards</b><br><sub>Animated Voronoi cells with glowing fracture edges</sub></td>
-<td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/storm.webp" width="100%" alt="Storm"><br><b>Storm</b><br><sub>Billowing dark clouds lit from within by flashes of lightning</sub></td>
 </tr>
 <tr>
+<td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/storm.webp" width="100%" alt="Storm"><br><b>Storm</b><br><sub>Billowing dark clouds lit from within by flashes of lightning</sub></td>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/strata.webp" width="100%" alt="Strata"><br><b>Strata</b><br><sub>Spectral canyon — a heightfield flythrough over the last ~8 seconds of the mel-spectrogram. Ridges are loud moments, chasms are quiet ones; the terrain scrolls…</sub></td>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/tunnel.webp" width="100%" alt="Tunnel"><br><b>Tunnel</b><br><sub>Raymarched infinite cylindrical flythrough with twist, ribs, and glow</sub></td>
-<td width="33%"></td>
 </tr>
 </table>
 

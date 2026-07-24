@@ -21,7 +21,7 @@ your phone as a control surface, a webcam, and NDI out to your video mixer.
 
 ## See it move
 
-Six of the forty, all at default settings:
+Six of the forty-one, all at default settings:
 
 <table>
 <tr>
@@ -109,7 +109,7 @@ cargo run --release --features depth   # webcam + MiDaS depth — needs libssl-d
 
 ## The effects
 
-**40 built-in**, all audio-reactive out of the box, every parameter a slider you can map to
+**41 built-in**, all audio-reactive out of the box, every parameter a slider you can map to
 MIDI or OSC. [Full gallery with clips →](docs/GALLERY.md)
 
 **Shaders** — Aurora · Beam · Drift · Frost · Iris · Prism · Pulse · Shards · Storm · Strata · Tunnel
