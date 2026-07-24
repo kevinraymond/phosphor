@@ -1199,6 +1199,113 @@ mod tests {
         assert!(err.is_none(), "chromatica.wgsl failed validation: {err:?}");
     }
 
+    // Same silent-drop guard, for the first true multi-pass pass-graph effect (#1481).
+    // Also pins the two pieces of infra the solver depends on: the pressure pass's
+    // Jacobi `iterations` and the cross-pass `prev_inputs` edge that cuts the
+    // velocity→divergence→pressure→velocity cycle.
+    #[test]
+    fn sumi_pfx_parses_as_builtin() {
+        let effect: PfxEffect =
+            serde_json::from_str(include_str!("../../../../assets/effects/sumi.pfx"))
+                .expect("sumi.pfx must deserialize");
+        assert!(EffectLoader::is_builtin(&effect));
+        assert_eq!(effect.inputs.len(), 10); // 10 float param sliders
+        assert!(effect.particles.is_none()); // pure fragment pass-graph effect
+        let passes = effect.normalized_passes();
+        assert_eq!(passes.len(), 4);
+        let pressure = passes.iter().find(|p| p.name == "pressure").unwrap();
+        assert_eq!(pressure.iterations, 24);
+        assert!(pressure.feedback);
+        let divergence = passes.iter().find(|p| p.name == "divergence").unwrap();
+        assert!(!divergence.feedback);
+        assert_eq!(divergence.prev_inputs, vec!["velocity".to_string()]);
+        let velocity = passes.iter().find(|p| p.name == "velocity").unwrap();
+        assert_eq!(velocity.inputs, vec!["pressure".to_string()]);
+        assert_eq!(velocity.prev_inputs, vec!["dye".to_string()]);
+
+        // Mirror PassExecutor::new's resolver so a mistyped pass name in the .pfx fails
+        // in CI, not only in the ignored GPU probe: every `inputs` entry must name an
+        // EARLIER pass; every `prev_inputs` entry must name some FEEDBACK pass.
+        for (idx, pass) in passes.iter().enumerate() {
+            for name in &pass.inputs {
+                assert!(
+                    passes[..idx].iter().any(|p| &p.name == name),
+                    "pass '{}' input '{name}' must name an earlier pass",
+                    pass.name
+                );
+            }
+            for name in &pass.prev_inputs {
+                assert!(
+                    passes.iter().any(|p| &p.name == name && p.feedback),
+                    "pass '{}' prev_input '{name}' must name a feedback pass",
+                    pass.name
+                );
+            }
+        }
+        // None of the pass shaders may mention the uniform struct name (#1855 trap).
+        for shader in [
+            include_str!("../../../../assets/shaders/sumi_divergence.wgsl"),
+            include_str!("../../../../assets/shaders/sumi_pressure.wgsl"),
+            include_str!("../../../../assets/shaders/sumi_velocity.wgsl"),
+            include_str!("../../../../assets/shaders/sumi_dye.wgsl"),
+        ] {
+            assert!(
+                !shader.contains("PhosphorUniforms"),
+                "a Sumi shader mentions the uniform struct name — it suppresses injection"
+            );
+        }
+    }
+
+    // Compile probe for all four Sumi pass shaders through the real pipeline path
+    // (ShaderPipeline::new = reflection layout + render-pipeline creation), each with
+    // its production input_count so the injected input0/input1 bindings validate.
+    // Run: cargo test -p phosphor-app -- --ignored sumi_shaders_compile
+    #[test]
+    #[ignore = "requires a GPU/software adapter"]
+    fn sumi_shaders_compile() {
+        use crate::gpu::pipeline::ShaderPipeline;
+
+        let noise = include_str!("../../../../assets/shaders/lib/noise.wgsl");
+        let palette = include_str!("../../../../assets/shaders/lib/palette.wgsl");
+        let sdf = include_str!("../../../../assets/shaders/lib/sdf.wgsl");
+        let tonemap = include_str!("../../../../assets/shaders/lib/tonemap.wgsl");
+        let libs = format!("{noise}\n{palette}\n{sdf}\n{tonemap}");
+        let loader = EffectLoader::for_test(&libs);
+
+        let _guard = gpu_guard();
+        let (device, _queue) = test_gpu();
+        let fmt = wgpu::TextureFormat::Rgba16Float;
+
+        // (name, source, input_count) — velocity reads pressure + prev dye (2).
+        let cases = [
+            (
+                "sumi_divergence",
+                include_str!("../../../../assets/shaders/sumi_divergence.wgsl"),
+                1usize,
+            ),
+            (
+                "sumi_pressure",
+                include_str!("../../../../assets/shaders/sumi_pressure.wgsl"),
+                1,
+            ),
+            (
+                "sumi_velocity",
+                include_str!("../../../../assets/shaders/sumi_velocity.wgsl"),
+                2,
+            ),
+            (
+                "sumi_dye",
+                include_str!("../../../../assets/shaders/sumi_dye.wgsl"),
+                1,
+            ),
+        ];
+        for (name, shader, count) in cases {
+            let src = loader.prepend_library_with_inputs(shader, count);
+            ShaderPipeline::new(&device, fmt, &src, None, count)
+                .unwrap_or_else(|e| panic!("{name}.wgsl failed to compile: {e}"));
+        }
+    }
+
     // Offscreen render probe: drive the real fragment pipeline with synthetic
     // chroma/key uniforms (C major, A minor, silence, edges-off) through feedback
     // frames and capture PNGs. Guards against a black screen or a feedback blowout,

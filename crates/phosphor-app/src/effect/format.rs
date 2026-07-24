@@ -24,9 +24,22 @@ pub struct PassDef {
     pub shader: String,
     #[serde(default = "default_scale")]
     pub scale: f32,
-    /// Names of previous passes whose outputs can be sampled as inputs.
+    /// Names of earlier passes whose **current-frame** outputs this pass samples as
+    /// `input0..` (in declared order). Forward/unknown references are a hard error.
     #[serde(default)]
     pub inputs: Vec<String>,
+    /// Names of feedback passes whose **previous-frame** outputs this pass samples,
+    /// appended after `inputs` in the `input0..` numbering. Unlike `inputs`, these
+    /// may name a later-declared pass (previous-frame data has no intra-frame ordering
+    /// constraint) — the edge that cuts a solver's velocity→divergence→pressure→velocity
+    /// cycle (#1481). Each named pass must have `feedback: true`.
+    #[serde(default)]
+    pub prev_inputs: Vec<String>,
+    /// Number of times to run this pass per frame, ping-ponging its own target between
+    /// runs (Jacobi/relaxation loops). Only meaningful for `feedback: true` passes;
+    /// defaults to 1 (single draw, legacy behavior).
+    #[serde(default = "default_one")]
+    pub iterations: u32,
     /// Whether this pass reads its own previous frame (ping-pong feedback).
     /// Defaults to true (matches legacy single-shader behavior); set false to disable.
     #[serde(default = "default_true")]
@@ -35,6 +48,10 @@ pub struct PassDef {
 
 fn default_scale() -> f32 {
     1.0
+}
+
+fn default_one() -> u32 {
+    1
 }
 
 /// Per-effect post-processing overrides.
@@ -177,6 +194,8 @@ impl PfxEffect {
                 shader: self.shader.clone(),
                 scale: 1.0,
                 inputs: vec![],
+                prev_inputs: vec![],
+                iterations: 1,
                 feedback: true,
             }]
         } else {
@@ -284,6 +303,8 @@ mod tests {
             shader: "a.wgsl".into(),
             scale: 0.5,
             inputs: vec![],
+            prev_inputs: vec![],
+            iterations: 1,
             feedback: false,
         };
         let effect = PfxEffect {
@@ -344,6 +365,22 @@ mod tests {
         assert!(approx_eq(pass.scale, 1.0, 1e-6));
         assert!(pass.feedback);
         assert!(pass.inputs.is_empty());
+        assert!(pass.prev_inputs.is_empty());
+        assert_eq!(pass.iterations, 1);
+    }
+
+    #[test]
+    fn pass_def_serde_prev_inputs_and_iterations() {
+        let json = r#"{"name":"pressure","shader":"p.wgsl","feedback":true,
+            "inputs":["divergence"],"prev_inputs":["velocity"],"iterations":24}"#;
+        let pass: PassDef = serde_json::from_str(json).unwrap();
+        assert_eq!(pass.inputs, vec!["divergence".to_string()]);
+        assert_eq!(pass.prev_inputs, vec!["velocity".to_string()]);
+        assert_eq!(pass.iterations, 24);
+        // A pass differing only in iterations is still a passes-change (forces rebuild).
+        let mut other = pass.clone();
+        other.iterations = 12;
+        assert_ne!(pass, other);
     }
 
     #[test]

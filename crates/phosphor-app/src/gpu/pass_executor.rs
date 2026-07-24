@@ -10,6 +10,16 @@ use super::placeholder::PlaceholderTexture;
 use super::render_target::{PingPongTarget, RenderTarget};
 use super::uniforms::UniformBuffer;
 
+/// One resolved pass-graph input: which pass supplies it, and whether we sample
+/// that pass's *previous* frame (`prev`, from `PassDef.prev_inputs`) or its
+/// *current* frame (`PassDef.inputs`). Current inputs come first in the WGSL
+/// `input0..` numbering, then prev inputs (matching declaration order).
+#[derive(Clone, Copy)]
+struct InputSrc {
+    pass: usize,
+    prev: bool,
+}
+
 /// A compiled pass: pipeline + render target + bind groups.
 struct CompiledPass {
     name: String,
@@ -21,9 +31,11 @@ struct CompiledPass {
     /// feedback input at the right parity.
     bind_groups: [wgpu::BindGroup; 2],
     has_feedback: bool,
-    /// Indices (into the pass list) of the prior passes this pass samples as
-    /// `input0..inputN-1`. Resolved from `PassDef.inputs`; always earlier passes.
-    input_srcs: Vec<usize>,
+    /// Prior passes this pass samples as `input0..inputN-1` (current + prev frame).
+    input_srcs: Vec<InputSrc>,
+    /// Per-frame draw count. `>1` ping-pongs this pass's own target between draws
+    /// (Jacobi/relaxation loops); requires `has_feedback`. `1` = single draw.
+    iterations: u32,
 }
 
 /// Everything the bind-group builder needs about each pass, borrowed. Lets one
@@ -34,7 +46,7 @@ struct PassView<'a> {
     layout: &'a wgpu::BindGroupLayout,
     target: &'a PingPongTarget,
     has_feedback: bool,
-    input_srcs: &'a [usize],
+    input_srcs: &'a [InputSrc],
 }
 
 /// A pass after pipeline + target creation but before its bind groups exist
@@ -44,7 +56,8 @@ struct PreparedPass {
     pipeline: ShaderPipeline,
     target: PingPongTarget,
     has_feedback: bool,
-    input_srcs: Vec<usize>,
+    input_srcs: Vec<InputSrc>,
+    iterations: u32,
 }
 
 /// Executes a sequence of render passes for a multi-pass effect.
@@ -77,10 +90,12 @@ impl PassExecutor {
         let mut prepared: Vec<PreparedPass> = Vec::with_capacity(pass_defs.len());
 
         for (idx, def) in pass_defs.iter().enumerate() {
-            // Resolve each declared input name to an earlier pass. Forward
-            // references and unknown names are a hard error — the pass graph is a
-            // DAG evaluated in declaration order.
-            let mut input_srcs = Vec::with_capacity(def.inputs.len());
+            // Resolve inputs into `input0..` order: current-frame inputs first,
+            // then previous-frame inputs.
+            let mut input_srcs = Vec::with_capacity(def.inputs.len() + def.prev_inputs.len());
+
+            // `inputs`: current-frame output of an EARLIER pass. Forward/unknown
+            // references are a hard error — that half of the graph is a DAG.
             for name in &def.inputs {
                 let src = pass_defs[..idx]
                     .iter()
@@ -91,21 +106,44 @@ impl PassExecutor {
                             def.name
                         )
                     })?;
-                input_srcs.push(src);
+                input_srcs.push(InputSrc {
+                    pass: src,
+                    prev: false,
+                });
             }
 
+            // `prev_inputs`: previous-frame output of ANY feedback pass (later refs
+            // allowed — previous-frame data has no intra-frame ordering constraint;
+            // this is the edge that cuts a solver's velocity→div→pressure→velocity
+            // cycle). A non-feedback pass has no distinct previous frame, so require
+            // `feedback: true`.
+            for name in &def.prev_inputs {
+                let src = pass_defs
+                    .iter()
+                    .position(|p| &p.name == name)
+                    .ok_or_else(|| {
+                        format!("Pass '{}' prev_input '{name}' names no pass", def.name)
+                    })?;
+                if !pass_defs[src].feedback {
+                    return Err(format!(
+                        "Pass '{}' prev_input '{name}' must name a feedback pass",
+                        def.name
+                    ));
+                }
+                input_srcs.push(InputSrc {
+                    pass: src,
+                    prev: true,
+                });
+            }
+
+            let input_count = input_srcs.len();
             let source = effect_loader
-                .load_effect_source_with_inputs(&def.shader, def.inputs.len())
+                .load_effect_source_with_inputs(&def.shader, input_count)
                 .map_err(|e| format!("Failed to load shader '{}': {e}", def.shader))?;
 
-            let pipeline = ShaderPipeline::new(
-                device,
-                hdr_format,
-                &source,
-                pipeline_cache,
-                def.inputs.len(),
-            )
-            .map_err(|e| format!("Failed to compile shader '{}': {e}", def.shader))?;
+            let pipeline =
+                ShaderPipeline::new(device, hdr_format, &source, pipeline_cache, input_count)
+                    .map_err(|e| format!("Failed to compile shader '{}': {e}", def.shader))?;
 
             // Clear feedback targets to prevent NaN/garbage from uninitialized GPU memory
             let target = if def.feedback {
@@ -114,12 +152,20 @@ impl PassExecutor {
                 PingPongTarget::new(device, width, height, hdr_format, def.scale)
             };
 
+            // Iterations only ping-pong a feedback target; ignore on non-feedback passes.
+            let iterations = if def.feedback {
+                def.iterations.max(1)
+            } else {
+                1
+            };
+
             prepared.push(PreparedPass {
                 name: def.name.clone(),
                 pipeline,
                 target,
                 has_feedback: def.feedback,
                 input_srcs,
+                iterations,
             });
         }
 
@@ -148,6 +194,7 @@ impl PassExecutor {
                 bind_groups: bg,
                 has_feedback: p.has_feedback,
                 input_srcs: p.input_srcs,
+                iterations: p.iterations,
             })
             .collect();
 
@@ -185,6 +232,7 @@ impl PassExecutor {
                 bind_groups,
                 has_feedback: true,
                 input_srcs: Vec::new(),
+                iterations: 1,
             }],
             particle_system: None,
             flip_parity: 0,
@@ -209,31 +257,53 @@ impl PassExecutor {
 
         // 2. Fragment shader passes
         for pass in &self.passes {
-            let write_view = &pass.target.write_target().view;
-            // Index by the global parity, not the pass's own `current`: a
-            // non-feedback pass reading a feedback input must pick the bind group
-            // that points at that input's current-frame target (#1481).
-            let bind_group = &pass.bind_groups[self.flip_parity];
+            // Single-draw passes render into `write_target()` (= targets[flip_parity]
+            // for a feedback pass) with the parity-indexed bind group. An iterated
+            // (Jacobi) pass ping-pongs its own two targets in-encoder: draw `k` uses
+            // bind_group[g] and writes targets[g] (bind_group[g] reads targets[1-g] via
+            // feedback(), so consecutive draws chain), with `g` alternating so the FINAL
+            // draw lands in targets[flip_parity] — what downstream readers (indexed by
+            // flip_parity) and next frame's warm-start expect. Non-feedback inputs stay
+            // fixed in targets[0] across the loop, so a stable divergence feeds every
+            // pressure iteration.
+            let n = pass.iterations.max(1);
+            for k in 0..n {
+                // (write index, bind-group index). Single draw: write our own
+                // `current` target (flip_parity for feedback, 0 for non-feedback) and
+                // read with the parity-indexed bind group — a non-feedback pass reading
+                // a feedback input must pick the group pointing at that input's
+                // current-frame target (#1481). Iterated (feedback only): both indices
+                // are `g`, alternating so the FINAL draw lands in targets[flip_parity].
+                let (write_idx, bind_idx) = if pass.has_feedback && n > 1 {
+                    let g0 = self.flip_parity ^ ((n as usize - 1) & 1);
+                    let g = g0 ^ (k as usize & 1);
+                    (g, g)
+                } else {
+                    (pass.target.current, self.flip_parity)
+                };
+                let write_view = &pass.target.targets[write_idx].view;
+                let bind_group = &pass.bind_groups[bind_idx];
 
-            let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some(&pass.name),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: write_view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+                let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(&pass.name),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: write_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
 
-            rp.set_pipeline(&pass.pipeline.pipeline);
-            rp.set_bind_group(0, bind_group, &[]);
-            rp.draw(0..3, 0..1);
+                rp.set_pipeline(&pass.pipeline.pipeline);
+                rp.set_bind_group(0, bind_group, &[]);
+                rp.draw(0..3, 0..1);
+            }
         }
 
         let final_target = self
@@ -407,13 +477,22 @@ fn build_bind_groups(
             (&placeholder.view, &placeholder.sampler)
         };
 
-        // Declared inputs → each source pass's current-frame target.
+        // Declared inputs → each source pass's target. Current-frame inputs read the
+        // target the source writes THIS frame (targets[g] if feedback, else targets[0]);
+        // prev-frame inputs read the source feedback pass's OTHER target, targets[1-g],
+        // which still holds last frame's output when this pass executes (#1481).
         let input_refs: Vec<(&TextureView, &Sampler)> = view
             .input_srcs
             .iter()
             .map(|&src| {
-                let sp = &views[src];
-                let ti = if sp.has_feedback { g } else { 0 };
+                let sp = &views[src.pass];
+                let ti = if src.prev {
+                    1 - g
+                } else if sp.has_feedback {
+                    g
+                } else {
+                    0
+                };
                 let rt = &sp.target.targets[ti];
                 (&rt.view, &rt.sampler)
             })
@@ -455,6 +534,17 @@ mod tests {
         fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {\n\
             let a = input0(vec2f(0.5, 0.5)).r;\n\
             return vec4f(1.0 - a, 0.0, 0.0, 1.0);\n\
+        }";
+    // Passthrough: echo input0 (used to observe a prev-frame input directly).
+    const FRAG_ECHO0: &str = "@fragment\n\
+        fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {\n\
+            return vec4f(input0(vec2f(0.5, 0.5)).r, 0.0, 0.0, 1.0);\n\
+        }";
+    // Self-feedback accumulator, +0.1 per invocation (for the iterations loop).
+    const FRAG_STEP: &str = "@fragment\n\
+        fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {\n\
+            let prev = feedback(vec2f(0.5, 0.5)).r;\n\
+            return vec4f(prev + 0.1, 0.0, 0.0, 1.0);\n\
         }";
 
     /// A minimal blit pipeline: `textureLoad` the source at the fragment position
@@ -520,32 +610,40 @@ mod tests {
 
     /// Assemble a `PassExecutor` from pre-built pipelines without touching disk —
     /// the same two-phase bind-group build `PassExecutor::new` performs.
+    /// One `assemble` pass spec: (name, pipeline, feedback, input srcs, iterations, scale).
+    type PassSpec<'a> = (&'a str, ShaderPipeline, bool, Vec<InputSrc>, u32, f32);
+
+    #[allow(clippy::too_many_arguments)]
     fn assemble(
         device: &Device,
         queue: &Queue,
         w: u32,
         h: u32,
+        fmt: TextureFormat,
         ubuf: &UniformBuffer,
         placeholder: &PlaceholderTexture,
         audio: &AudioTextures,
-        specs: Vec<(&str, ShaderPipeline, bool, Vec<usize>)>,
+        specs: Vec<PassSpec>,
     ) -> PassExecutor {
         let prepared: Vec<PreparedPass> = specs
             .into_iter()
-            .map(|(name, pipeline, feedback, input_srcs)| {
-                let target = if feedback {
-                    PingPongTarget::new_cleared(device, queue, w, h, FMT, 1.0)
-                } else {
-                    PingPongTarget::new(device, w, h, FMT, 1.0)
-                };
-                PreparedPass {
-                    name: name.to_string(),
-                    pipeline,
-                    target,
-                    has_feedback: feedback,
-                    input_srcs,
-                }
-            })
+            .map(
+                |(name, pipeline, feedback, input_srcs, iterations, scale)| {
+                    let target = if feedback {
+                        PingPongTarget::new_cleared(device, queue, w, h, fmt, scale)
+                    } else {
+                        PingPongTarget::new(device, w, h, fmt, scale)
+                    };
+                    PreparedPass {
+                        name: name.to_string(),
+                        pipeline,
+                        target,
+                        has_feedback: feedback,
+                        input_srcs,
+                        iterations,
+                    }
+                },
+            )
             .collect();
         let bind_groups: Vec<[wgpu::BindGroup; 2]> = {
             let views: Vec<PassView> = prepared
@@ -571,6 +669,7 @@ mod tests {
                 bind_groups: bg,
                 has_feedback: p.has_feedback,
                 input_srcs: p.input_srcs,
+                iterations: p.iterations,
             })
             .collect();
         PassExecutor {
@@ -597,6 +696,8 @@ mod tests {
             shader: "unused.wgsl".into(),
             scale: 1.0,
             inputs: vec!["missing".into()],
+            prev_inputs: vec![],
+            iterations: 1,
             feedback: false,
         }];
         let res = PassExecutor::new(
@@ -661,10 +762,24 @@ mod tests {
             &queue,
             w,
             h,
+            FMT,
             &ubuf,
             &placeholder,
             &audio,
-            vec![("A", pipe_a, true, vec![]), ("B", pipe_b, false, vec![0])],
+            vec![
+                ("A", pipe_a, true, vec![], 1, 1.0),
+                (
+                    "B",
+                    pipe_b,
+                    false,
+                    vec![InputSrc {
+                        pass: 0,
+                        prev: false,
+                    }],
+                    1,
+                    1.0,
+                ),
+            ],
         );
 
         let mut uniforms = crate::gpu::ShaderUniforms::zeroed();
@@ -742,6 +857,493 @@ mod tests {
             (0.40..0.60).contains(&b2),
             "frame 2: B should read A's flipped target (0.50) and output ~0.50, \
              got {b2:.3} (a value near 0.75 means the parity fix regressed)"
+        );
+    }
+
+    /// Execute the graph, then blit `executor.passes[pass_idx]`'s freshly-written
+    /// target into a FrameCapture and read back the full RGBA8 bytes. Unlike the
+    /// parity test's `read_final_red`, this inspects an arbitrary pass (not just the
+    /// last), which the prev-input and Sumi probes need.
+    #[allow(clippy::too_many_arguments)]
+    fn capture_pass_rgba(
+        device: &Device,
+        queue: &Queue,
+        ubuf: &UniformBuffer,
+        blit: &wgpu::RenderPipeline,
+        blit_bgl: &wgpu::BindGroupLayout,
+        executor: &PassExecutor,
+        uniforms: &crate::gpu::ShaderUniforms,
+        pass_idx: usize,
+        w: u32,
+        h: u32,
+    ) -> Vec<u8> {
+        let mut fc = FrameCapture::new(device, w, h, FMT, "probe-cap");
+        let mut enc = device.create_command_encoder(&Default::default());
+        {
+            let _ = executor.execute(&mut enc, ubuf, queue, uniforms);
+            let src = &executor.passes[pass_idx].target.write_target().view;
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("probe-blit-bg"),
+                layout: blit_bgl,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(src),
+                }],
+            });
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("probe-blit-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &fc.view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(blit);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        fc.copy_to_staging(&mut enc);
+        queue.submit([enc.finish()]);
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .unwrap();
+        fc.request_map();
+        loop {
+            device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: None,
+                })
+                .unwrap();
+            if let Some(d) = fc.take_mapped_data(device) {
+                break d;
+            }
+        }
+    }
+
+    /// `capture_pass_rgba` reduced to a single pixel's red channel (0..1).
+    #[allow(clippy::too_many_arguments)]
+    fn render_pass_red(
+        device: &Device,
+        queue: &Queue,
+        ubuf: &UniformBuffer,
+        blit: &wgpu::RenderPipeline,
+        blit_bgl: &wgpu::BindGroupLayout,
+        executor: &PassExecutor,
+        uniforms: &crate::gpu::ShaderUniforms,
+        pass_idx: usize,
+        w: u32,
+        h: u32,
+    ) -> f32 {
+        let data = capture_pass_rgba(
+            device, queue, ubuf, blit, blit_bgl, executor, uniforms, pass_idx, w, h,
+        );
+        data[0] as f32 / 255.0
+    }
+
+    // Previous-frame cross-pass input (#1481): pass 0 "reader" samples pass 1 "gen"'s
+    // PREVIOUS frame via prev_inputs — a *forward* reference (gen is declared later),
+    // legal only for prev inputs. gen is a +0.25 accumulator (0.25, 0.50, 0.75, …).
+    // reader echoes gen's prior frame, so it must LAG by one: {0.00, 0.25, 0.50}. Had
+    // the bind resolved to gen's current frame, reader would read {0.25, 0.50, 0.75}.
+    #[test]
+    #[ignore = "requires a wgpu adapter; renders offscreen"]
+    fn passgraph_prev_input_reads_previous_frame() {
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
+        let loader = EffectLoader::for_test("");
+        let (w, h) = (4u32, 4u32);
+
+        let ubuf = UniformBuffer::new(&device);
+        let placeholder = PlaceholderTexture::new(&device, &queue, FMT);
+        let audio = AudioTextures::new(&device, &queue);
+
+        let pipe_reader = ShaderPipeline::new(
+            &device,
+            FMT,
+            &loader.prepend_library_with_inputs(FRAG_ECHO0, 1),
+            None,
+            1,
+        )
+        .expect("reader pipeline");
+        let pipe_gen = ShaderPipeline::new(
+            &device,
+            FMT,
+            &loader.prepend_library_with_inputs(FRAG_ACCUM, 0),
+            None,
+            0,
+        )
+        .expect("gen pipeline");
+
+        // Declaration order: reader (0) then gen (1). reader's only input is gen's
+        // previous frame — a forward reference that only prev_inputs allow.
+        let mut executor = assemble(
+            &device,
+            &queue,
+            w,
+            h,
+            FMT,
+            &ubuf,
+            &placeholder,
+            &audio,
+            vec![
+                (
+                    "reader",
+                    pipe_reader,
+                    false,
+                    vec![InputSrc {
+                        pass: 1,
+                        prev: true,
+                    }],
+                    1,
+                    1.0,
+                ),
+                ("gen", pipe_gen, true, vec![], 1, 1.0),
+            ],
+        );
+
+        let mut uniforms = crate::gpu::ShaderUniforms::zeroed();
+        uniforms.resolution = [w as f32, h as f32];
+        let (blit, blit_bgl) = blit_pipeline(&device);
+
+        let read = |ex: &PassExecutor| {
+            render_pass_red(
+                &device, &queue, &ubuf, &blit, &blit_bgl, ex, &uniforms, 0, w, h,
+            )
+        };
+
+        let f1 = read(&executor);
+        executor.flip();
+        let f2 = read(&executor);
+        executor.flip();
+        let f3 = read(&executor);
+
+        assert!(
+            f1 < 0.1,
+            "frame 1: gen had no prior frame, reader ~0.0, got {f1:.3}"
+        );
+        assert!(
+            (0.15..0.35).contains(&f2),
+            "frame 2: reader should lag to gen's frame-1 value (0.25), got {f2:.3} \
+             (~0.50 means it read the current frame, not the previous)"
+        );
+        assert!(
+            (0.40..0.60).contains(&f3),
+            "frame 3: reader should lag to gen's frame-2 value (0.50), got {f3:.3}"
+        );
+    }
+
+    // Iterations (#1481): a single feedback pass with `iterations: 5` and a +0.1
+    // self-accumulator must run five draws per frame, ping-ponging its own target, and
+    // leave the fifth result in targets[flip_parity] (what the reader/warm-start read).
+    // Frame 1 from cleared 0 → 0.5; frame 2 warm-starts from 0.5 → 1.0.
+    #[test]
+    #[ignore = "requires a wgpu adapter; renders offscreen"]
+    fn passgraph_iterations_accumulate_within_frame() {
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
+        let loader = EffectLoader::for_test("");
+        let (w, h) = (4u32, 4u32);
+
+        let ubuf = UniformBuffer::new(&device);
+        let placeholder = PlaceholderTexture::new(&device, &queue, FMT);
+        let audio = AudioTextures::new(&device, &queue);
+
+        let pipe = ShaderPipeline::new(
+            &device,
+            FMT,
+            &loader.prepend_library_with_inputs(FRAG_STEP, 0),
+            None,
+            0,
+        )
+        .expect("step pipeline");
+
+        let mut executor = assemble(
+            &device,
+            &queue,
+            w,
+            h,
+            FMT,
+            &ubuf,
+            &placeholder,
+            &audio,
+            vec![("acc", pipe, true, vec![], 5, 1.0)],
+        );
+
+        let mut uniforms = crate::gpu::ShaderUniforms::zeroed();
+        uniforms.resolution = [w as f32, h as f32];
+        let (blit, blit_bgl) = blit_pipeline(&device);
+        let read = |ex: &PassExecutor| {
+            render_pass_red(
+                &device, &queue, &ubuf, &blit, &blit_bgl, ex, &uniforms, 0, w, h,
+            )
+        };
+
+        let f1 = read(&executor);
+        executor.flip();
+        let f2 = read(&executor);
+
+        // 5 × 0.1 from a cleared start. A single draw would give 0.1.
+        assert!(
+            (0.45..0.55).contains(&f1),
+            "frame 1: 5 iterations of +0.1 should reach ~0.5, got {f1:.3} \
+             (~0.1 means the loop ran once)"
+        );
+        // Warm-started from frame 1's 0.5, five more steps → ~1.0.
+        assert!(
+            (0.95..1.01).contains(&f2),
+            "frame 2: warm-started 0.5 + 5×0.1 should reach ~1.0, got {f2:.3}"
+        );
+    }
+
+    // End-to-end probe of the real Sumi stable-fluids graph (#1481) through the actual
+    // PassExecutor: divergence(prev velocity) → pressure×24 → velocity(project+advect+
+    // forces) → dye. Injects colored onset splats for the first ~20 frames, then coasts
+    // with buoyancy for ~140 more. Captures the dye pass early (just after injection) and
+    // late, and asserts the ink is present, not blown out, and actually MOVED — a dead
+    // sim (static splat) would leave the two frames identical.
+    // Run: SUMI_PNG_DIR=/tmp cargo test -p phosphor-app --release -- --ignored sumi_render_previews
+    #[test]
+    #[ignore = "requires a wgpu adapter; renders offscreen, writes PNGs"]
+    fn sumi_render_previews() {
+        let out_dir = std::env::var("SUMI_PNG_DIR").ok();
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
+
+        // Real production preamble: uniform block + libs + injected input bindings.
+        let noise = include_str!("../../../../assets/shaders/lib/noise.wgsl");
+        let palette = include_str!("../../../../assets/shaders/lib/palette.wgsl");
+        let sdf = include_str!("../../../../assets/shaders/lib/sdf.wgsl");
+        let tonemap = include_str!("../../../../assets/shaders/lib/tonemap.wgsl");
+        let loader = EffectLoader::for_test(&format!("{noise}\n{palette}\n{sdf}\n{tonemap}"));
+        let fmt = TextureFormat::Rgba16Float;
+        // 16:9 so the probe reproduces the real window's aspect (a square target hides
+        // whether the injection ring fills a wide frame).
+        let (w, h) = (480u32, 270u32);
+
+        let ubuf = UniformBuffer::new(&device);
+        let placeholder = PlaceholderTexture::new(&device, &queue, fmt);
+        let audio = AudioTextures::new(&device, &queue);
+
+        let mk = |shader: &str, count: usize| {
+            ShaderPipeline::new(
+                &device,
+                fmt,
+                &loader.prepend_library_with_inputs(shader, count),
+                None,
+                count,
+            )
+            .expect("sumi pass pipeline")
+        };
+        let pipe_div = mk(
+            include_str!("../../../../assets/shaders/sumi_divergence.wgsl"),
+            1,
+        );
+        let pipe_pres = mk(
+            include_str!("../../../../assets/shaders/sumi_pressure.wgsl"),
+            1,
+        );
+        let pipe_vel = mk(
+            include_str!("../../../../assets/shaders/sumi_velocity.wgsl"),
+            2,
+        );
+        let pipe_dye = mk(include_str!("../../../../assets/shaders/sumi_dye.wgsl"), 1);
+
+        // Same wiring as sumi.pfx: passes 0..3 = divergence, pressure, velocity, dye.
+        let src = |pass: usize, prev: bool| InputSrc { pass, prev };
+        let mut executor = assemble(
+            &device,
+            &queue,
+            w,
+            h,
+            fmt,
+            &ubuf,
+            &placeholder,
+            &audio,
+            vec![
+                ("divergence", pipe_div, false, vec![src(2, true)], 1, 0.5),
+                ("pressure", pipe_pres, true, vec![src(0, false)], 24, 0.5),
+                (
+                    "velocity",
+                    pipe_vel,
+                    true,
+                    vec![src(1, false), src(3, true)],
+                    1,
+                    0.5,
+                ),
+                ("dye", pipe_dye, true, vec![src(2, false)], 1, 1.0),
+            ],
+        );
+        let dye_idx = 3;
+
+        let (blit, blit_bgl) = blit_pipeline(&device);
+
+        let mut u = crate::gpu::ShaderUniforms::zeroed();
+        u.resolution = [w as f32, h as f32];
+        u.delta_time = 1.0 / 60.0;
+        // Sumi param defaults (see sumi.pfx), indices 0..9.
+        // Sumi param defaults (see sumi.pfx), indices 0..9.
+        for (i, v) in [0.5, 0.5, 0.55, 0.45, 0.7, 0.5, 0.6, 0.5, 0.7, 0.55]
+            .into_iter()
+            .enumerate()
+        {
+            u.params[i] = v;
+        }
+
+        // Luminance stats over an RGBA8 frame: (mean 0..1, centroid uv, coverage) where
+        // coverage is the fraction of pixels lit above a small threshold — the "fills the
+        // screen" measure.
+        let stats = |data: &[u8]| -> (f64, f64, f64, f64) {
+            let (mut sum, mut sx, mut sy, mut lit) = (0.0f64, 0.0f64, 0.0f64, 0u32);
+            for y in 0..h {
+                for x in 0..w {
+                    let i = ((y * w + x) * 4) as usize;
+                    let l = 0.299 * data[i] as f64
+                        + 0.587 * data[i + 1] as f64
+                        + 0.114 * data[i + 2] as f64;
+                    sum += l;
+                    sx += l * x as f64;
+                    sy += l * y as f64;
+                    if l > 8.0 {
+                        lit += 1;
+                    }
+                }
+            }
+            let mean = sum / (w * h) as f64 / 255.0;
+            let coverage = lit as f64 / (w * h) as f64;
+            if sum > 0.0 {
+                (mean, sx / sum / w as f64, sy / sum / h as f64, coverage)
+            } else {
+                (mean, 0.5, 0.5, coverage)
+            }
+        };
+
+        const FRAMES: u32 = 96;
+        const EARLY: u32 = 24;
+        const LATE: u32 = 92;
+        let mut early: Vec<u8> = Vec::new();
+        let mut late: Vec<u8> = Vec::new();
+
+        for f in 0..FRAMES {
+            u.time = f as f32 / 60.0;
+            u.frame_index = f as f32;
+            // Onsets fire periodically (as real music does), so the LATE frame measures
+            // the steady-state fill, not a single coasting burst.
+            u.onset = if f % 6 == 0 { 1.0 } else { 0.0 };
+            u.beat = if f % 12 == 0 { 1.0 } else { 0.0 };
+            u.bass = 0.7; // LOUD — buoyancy must stay a drift, not surge the bottom over the top
+            u.flux = 0.6; // vorticity confinement
+            u.dominant_chroma = 0.0; // C
+            // Broad chroma so all twelve ring sites inject; every class stays lit.
+            u.chroma = [0.6; 12];
+
+            if f == EARLY || f == LATE {
+                let data = capture_pass_rgba(
+                    &device, &queue, &ubuf, &blit, &blit_bgl, &executor, &u, dye_idx, w, h,
+                );
+                if f == EARLY {
+                    early = data;
+                } else {
+                    late = data;
+                }
+            } else {
+                let mut enc = device.create_command_encoder(&Default::default());
+                let _ = executor.execute(&mut enc, &ubuf, &queue, &u);
+                queue.submit([enc.finish()]);
+            }
+            executor.flip();
+        }
+
+        let (em, _ex, _ey, ec) = stats(&early);
+        let (lm, _lx, _ly, lc) = stats(&late);
+
+        if let Some(dir) = out_dir {
+            for (name, data) in [("early", &early), ("late", &late)] {
+                let path = format!("{dir}/sumi_{name}.png");
+                image::RgbaImage::from_raw(w, h, data.clone())
+                    .expect("raw->image")
+                    .save(&path)
+                    .expect("save png");
+                eprintln!("wrote {path}");
+            }
+        }
+        // Fraction of near-white pixels — a saturated wash blows this up.
+        let hot = late
+            .chunks_exact(4)
+            .filter(|p| p[0] > 220 && p[1] > 220 && p[2] > 220)
+            .count() as f64
+            / (w * h) as f64;
+        eprintln!("early mean {em:.4} cover {ec:.3}; late mean {lm:.4} cover {lc:.3} hot {hot:.3}");
+
+        // Ink present, and NOT a saturated wash (Kevin's blowout had mean ~0.6 and most of
+        // the frame near-white with no fluid detail left).
+        assert!(
+            lm > 0.004,
+            "late frame near-black (mean {lm:.4}) — ink died out"
+        );
+        assert!(lm < 0.5, "late frame blew out (mean {lm:.4})");
+        assert!(
+            hot < 0.15,
+            "late frame is a saturated wash ({:.0}% near-white) — no fluid detail left",
+            hot * 100.0
+        );
+
+        // Fills the frame: a good fraction of the 16:9 target is lit at steady state, not
+        // a narrow central band. (The pre-fix aspect-squished ring covered ~10%.)
+        assert!(
+            lc > 0.25,
+            "late frame covers only {:.0}% of the frame — ink is too localized",
+            lc * 100.0
+        );
+
+        // Top/bottom balance under LOUD bass: the lower ring colours must not surge up and
+        // dominate the upper half. Compare luminance in the top third vs the bottom third.
+        let band_lum = |y0: u32, y1: u32| -> f64 {
+            let mut s = 0.0f64;
+            for y in y0..y1 {
+                for x in 0..w {
+                    let i = ((y * w + x) * 4) as usize;
+                    s += 0.299 * late[i] as f64
+                        + 0.587 * late[i + 1] as f64
+                        + 0.114 * late[i + 2] as f64;
+                }
+            }
+            s / ((y1 - y0) * w) as f64
+        };
+        let top = band_lum(0, h / 3);
+        let bottom = band_lum(2 * h / 3, h);
+        let ratio = (bottom + 1.0) / (top + 1.0);
+        eprintln!("top-third lum {top:.2}, bottom-third lum {bottom:.2}, ratio {ratio:.2}");
+        assert!(
+            ratio < 3.0,
+            "bottom third is {ratio:.1}x the top under loud bass — buoyancy is surging the \
+             lower colours over the upper ring"
+        );
+
+        // The fluid must be LIVE: early and late differ substantially. A static splat
+        // (dead advection/projection) would leave them near-identical.
+        let mut sad = 0.0f64;
+        for i in (0..early.len()).step_by(4) {
+            let el =
+                0.299 * early[i] as f64 + 0.587 * early[i + 1] as f64 + 0.114 * early[i + 2] as f64;
+            let ll =
+                0.299 * late[i] as f64 + 0.587 * late[i + 1] as f64 + 0.114 * late[i + 2] as f64;
+            sad += (el - ll).abs();
+        }
+        let sad = sad / (w * h) as f64 / 255.0;
+        assert!(
+            sad > 0.01,
+            "early and late frames are nearly identical (SAD {sad:.4}) — the fluid isn't moving"
         );
     }
 }

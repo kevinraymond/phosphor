@@ -6,7 +6,8 @@
 ## Unreleased
 
 ### Added
-- **Custom effects can now chain render passes.** A pass in a `.pfx` may list earlier passes in its `inputs`, and its shader samples their output through `input0(uv)`, `input1(uv)`, and so on. This is the groundwork for multi-stage looks like fluid ink and reaction-diffusion; no built-in effect uses it yet.
+- **New effect: Sumi — ink drops bloom in water on every onset.** A real incompressible fluid — advection, a Jacobi pressure solve, and vorticity confinement — carries twelve dye colours, one per pitch class, that splat onto a circle-of-fifths ring. Bass makes the ink rise, spectral flux sharpens the swirl, and the central drop takes the hue of the detected key.
+- **Custom effects can now chain render passes.** A pass in a `.pfx` may sample earlier passes' output this frame through `input0(uv)`, `input1(uv)`, …, read any feedback pass's previous frame via `prev_inputs`, and iterate in place for relaxation solves. This is the machinery behind Sumi's fluid solver and the groundwork for more multi-stage looks.
 
 ## v1.17.0 — 2026-07-24
 

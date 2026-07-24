@@ -8,9 +8,9 @@ Effects respond to what they hear, so what you see here is a starting point, not
 Change the music and they change with it; every parameter is also a slider, and can be driven
 by MIDI, OSC, a phone or a webcam.
 
-**41 effects.**
+**42 effects.**
 
-## Shaders (12)
+## Shaders (13)
 
 Pure fragment shaders — no particles, just math evaluated per pixel, every frame.
 
@@ -33,6 +33,9 @@ Pure fragment shaders — no particles, just math evaluated per pixel, every fra
 <tr>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/storm.webp" width="100%" alt="Storm"><br><b>Storm</b><br><sub>Billowing dark clouds lit from within by flashes of lightning</sub></td>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/strata.webp" width="100%" alt="Strata"><br><b>Strata</b><br><sub>Spectral canyon — a heightfield flythrough over the last ~8 seconds of the mel-spectrogram. Ridges are loud moments, chasms are quiet ones; the terrain scrolls…</sub></td>
+<td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/sumi.webp" width="100%" alt="Sumi"><br><b>Sumi</b><br><sub>Ink drops bloom in water on every onset — a real incompressible fluid whose twelve dye colours are keyed to the twelve pitch classes, splatting on a circle-of-fifths ring with vorticity filigree</sub></td>
+</tr>
+<tr>
 <td width="33%"><img src="https://github.com/kevinraymond/fosfora/releases/download/demo-assets/tunnel.webp" width="100%" alt="Tunnel"><br><b>Tunnel</b><br><sub>Raymarched infinite cylindrical flythrough with twist, ribs, and glow</sub></td>
 </tr>
 </table>
