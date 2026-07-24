@@ -1088,6 +1088,332 @@ mod tests {
         );
     }
 
+    // Same guard as frost_pfx_parses_as_builtin: discovery silently drops a .pfx
+    // that fails to deserialize, and the #1855 injection trap suppresses the
+    // uniform block if the shader mentions the struct name anywhere.
+    #[test]
+    fn chromatica_pfx_parses_as_builtin() {
+        let effect: PfxEffect =
+            serde_json::from_str(include_str!("../../../../assets/effects/chromatica.pfx"))
+                .expect("chromatica.pfx must deserialize");
+        assert!(EffectLoader::is_builtin(&effect));
+        assert_eq!(effect.inputs.len(), 12); // 12 float params
+        assert!(effect.particles.is_none()); // pure fragment + feedback effect
+        let shader = include_str!("../../../../assets/shaders/chromatica.wgsl");
+        assert!(
+            !shader.contains("PhosphorUniforms"),
+            "chromatica.wgsl must not mention the uniform struct name — it suppresses injection"
+        );
+    }
+
+    // Compile probe for the Chromatica fragment shader through the production
+    // concatenation. It uses phosphor_sd_segment2, so sdf.wgsl must be in the
+    // concat (production prepends it via LIB_FILENAMES; the compile probe must too).
+    // Run: cargo test -p phosphor-app -- --ignored chromatica_shaders_compile
+    #[test]
+    #[ignore = "requires a GPU/software adapter"]
+    fn chromatica_shaders_compile() {
+        let noise = include_str!("../../../../assets/shaders/lib/noise.wgsl");
+        let palette = include_str!("../../../../assets/shaders/lib/palette.wgsl");
+        let sdf = include_str!("../../../../assets/shaders/lib/sdf.wgsl");
+        let chromatica = include_str!("../../../../assets/shaders/chromatica.wgsl");
+
+        let _guard = gpu_guard();
+        let (device, _queue) = test_gpu();
+
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let src = format!("{UNIFORM_BLOCK}\n{noise}\n{palette}\n{sdf}\n{chromatica}");
+        let _ = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("chromatica-probe"),
+            source: wgpu::ShaderSource::Wgsl(src.into()),
+        });
+        let err = pollster::block_on(device.pop_error_scope());
+        assert!(err.is_none(), "chromatica.wgsl failed validation: {err:?}");
+    }
+
+    // Offscreen render probe: drive the real fragment pipeline with synthetic
+    // chroma/key uniforms (C major, A minor, silence, edges-off) through feedback
+    // frames and capture PNGs. Guards against a black screen or a feedback blowout,
+    // and asserts a lit chord is brighter than silence and the consonance edges add light.
+    // Run: CHROMATICA_PNG_DIR=/path cargo test -p phosphor-app --release -- --ignored chromatica_render_previews
+    #[test]
+    #[ignore = "requires a GPU/software adapter; writes PNGs"]
+    fn chromatica_render_previews() {
+        use crate::gpu::frame_capture::FrameCapture;
+        use crate::gpu::pipeline::ShaderPipeline;
+        use crate::gpu::uniforms::{ShaderUniforms, UniformBuffer};
+
+        let out_dir = std::env::var("CHROMATICA_PNG_DIR").unwrap_or_else(|_| "/tmp".to_string());
+        let _guard = gpu_guard();
+        let (device, queue) = test_gpu();
+
+        // Production concatenation: uniform block + libs (incl. sdf) + effect fragment.
+        let noise = include_str!("../../../../assets/shaders/lib/noise.wgsl");
+        let palette = include_str!("../../../../assets/shaders/lib/palette.wgsl");
+        let sdf = include_str!("../../../../assets/shaders/lib/sdf.wgsl");
+        let chromatica = include_str!("../../../../assets/shaders/chromatica.wgsl");
+        let fragment_source = format!("{UNIFORM_BLOCK}\n{noise}\n{palette}\n{sdf}\n{chromatica}");
+
+        let (w, h) = (960u32, 540u32);
+        let fmt = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let pipeline =
+            ShaderPipeline::new(&device, fmt, &fragment_source, None).expect("chromatica pipeline");
+
+        // Ping-pong pair for the feedback loop.
+        let mk_target = |label: &str| {
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: fmt,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = tex.create_view(&Default::default());
+            (tex, view)
+        };
+        let targets = [mk_target("chroma-ping"), mk_target("chroma-pong")];
+
+        // 1x1 placeholder audio textures matching the production bindings.
+        let mk_audio = |label: &str, format: wgpu::TextureFormat| {
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            tex.create_view(&Default::default())
+        };
+        let waveform = mk_audio("chroma-waveform", wgpu::TextureFormat::Rg16Float);
+        let spectrum = mk_audio("chroma-spectrum", wgpu::TextureFormat::R16Float);
+        let spectrogram = mk_audio("chroma-spectrogram", wgpu::TextureFormat::R8Unorm);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let ubuf = UniformBuffer::new(&device);
+        let bind_groups: Vec<_> = targets
+            .iter()
+            .map(|(_, view)| {
+                ubuf.create_bind_group(
+                    &device,
+                    &pipeline.bind_group_layout,
+                    view,
+                    &sampler,
+                    &waveform,
+                    &spectrum,
+                    &spectrogram,
+                    &sampler,
+                )
+            })
+            .collect();
+
+        struct ProbeState {
+            name: &'static str,
+            chroma: [f32; 12],
+            key_class: f32,
+            key_is_minor: f32,
+            key_confidence: f32,
+            dominant_chroma: f32,
+            edges: f32,
+        }
+        // Chord chroma vectors (C=0 .. B=11).
+        let c_major = {
+            let mut c = [0.0f32; 12];
+            c[0] = 1.0; // C
+            c[4] = 0.85; // E
+            c[7] = 0.9; // G
+            c
+        };
+        let a_minor = {
+            let mut c = [0.0f32; 12];
+            c[9] = 1.0; // A
+            c[0] = 0.85; // C
+            c[4] = 0.8; // E
+            c
+        };
+        let states = [
+            ProbeState {
+                name: "c_major",
+                chroma: c_major,
+                key_class: 0.0,
+                key_is_minor: 0.0,
+                key_confidence: 0.9,
+                dominant_chroma: 0.0,
+                edges: 1.0,
+            },
+            ProbeState {
+                name: "a_minor",
+                chroma: a_minor,
+                key_class: 9.0 / 11.0,
+                key_is_minor: 1.0,
+                key_confidence: 0.85,
+                dominant_chroma: 9.0 / 11.0,
+                edges: 1.0,
+            },
+            ProbeState {
+                name: "no_edges",
+                chroma: c_major,
+                key_class: 0.0,
+                key_is_minor: 0.0,
+                key_confidence: 0.9,
+                dominant_chroma: 0.0,
+                edges: 0.0,
+            },
+            ProbeState {
+                name: "silence",
+                chroma: [0.0; 12],
+                key_class: 0.0,
+                key_is_minor: 0.0,
+                key_confidence: 0.0,
+                dominant_chroma: 0.0,
+                edges: 1.0,
+            },
+        ];
+        let frames = 60u32;
+        let dt = 1.0 / 60.0;
+        let mut means = std::collections::HashMap::new();
+
+        for s in states {
+            let name = s.name;
+            let mut u = ShaderUniforms::zeroed();
+            u.resolution = [w as f32, h as f32];
+            u.delta_time = dt;
+            u.feedback_decay = 0.88;
+            // ring_spacing, bloom_gain, arc_thickness, rotation_speed, palette_shift,
+            // minor_droop, feedback_amount, interval_edges, consonance_gain, glow,
+            // edge_spin, edge_breath
+            u.params = [
+                0.4, 0.6, 0.5, 0.4, 0.0, 0.6, 0.5, s.edges, 0.6, 0.6, 0.65, 0.5, 0.0, 0.0, 0.0, 0.0,
+            ];
+            u.chroma = s.chroma;
+            u.key_class = s.key_class;
+            u.key_is_minor = s.key_is_minor;
+            u.key_confidence = s.key_confidence;
+            u.dominant_chroma = s.dominant_chroma;
+            u.bandwidth = 0.4;
+
+            let mut src = 0usize;
+            for f in 0..frames {
+                u.time = f as f32 * dt;
+                u.frame_index = f as f32;
+                u.beat_phase = (u.time * 2.0).fract();
+                ubuf.update(&queue, &u);
+                let dst = 1 - src;
+                let mut enc = device.create_command_encoder(&Default::default());
+                {
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("chroma-preview-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &targets[dst].1,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                    pass.set_pipeline(&pipeline.pipeline);
+                    pass.set_bind_group(0, &bind_groups[src], &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                queue.submit([enc.finish()]);
+                src = dst;
+            }
+
+            // Re-render the final frame into the capture target and read it back.
+            let mut fc = FrameCapture::new(&device, w, h, fmt, "chroma-capture");
+            let mut enc = device.create_command_encoder(&Default::default());
+            {
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("chroma-capture-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &fc.view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                pass.set_pipeline(&pipeline.pipeline);
+                pass.set_bind_group(0, &bind_groups[1 - src], &[]);
+                pass.draw(0..3, 0..1);
+            }
+            fc.copy_to_staging(&mut enc);
+            queue.submit([enc.finish()]);
+            device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: None,
+                })
+                .unwrap();
+            fc.request_map();
+            let data = loop {
+                device
+                    .poll(wgpu::PollType::Wait {
+                        submission_index: None,
+                        timeout: None,
+                    })
+                    .unwrap();
+                if let Some(d) = fc.take_mapped_data(&device) {
+                    break d;
+                }
+            };
+
+            let mean = data.iter().map(|&b| b as f64).sum::<f64>() / (data.len() as f64 * 255.0);
+            means.insert(name, mean);
+            let path = format!("{out_dir}/chromatica_{name}.png");
+            image::RgbaImage::from_raw(w, h, data)
+                .expect("raw->image")
+                .save(&path)
+                .expect("save png");
+            eprintln!("wrote {path} (mean {mean:.4})");
+
+            // Not blown out.
+            assert!(mean < 0.90, "{name} blew out (mean {mean:.4})");
+        }
+
+        // A lit chord is not black.
+        assert!(means["c_major"] > 0.005, "c_major near-black");
+        assert!(means["a_minor"] > 0.005, "a_minor near-black");
+        // A chord is brighter than silence (the rings bloom).
+        assert!(
+            means["c_major"] > means["silence"] + 0.002,
+            "chord not brighter than silence (means {means:?})"
+        );
+        // The consonance edges add light: edges-on is brighter than edges-off.
+        assert!(
+            means["c_major"] > means["no_edges"],
+            "consonance edges added no light (means {means:?})"
+        );
+    }
+
     // Same guard as tide_pfx_parses_as_builtin, plus the frozen Splat param
     // ABI: the sim reads slots 0–7 by index and the CPU driver reads 8–11
     // (app.rs forwards them into splat_ui_params), so count and order are

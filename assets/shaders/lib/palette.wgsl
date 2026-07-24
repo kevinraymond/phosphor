@@ -42,3 +42,16 @@ fn phosphor_hue_shift(c: vec3f, shift: f32) -> vec3f {
     let k = vec3f(0.57735);
     return c * co + cross(k, c) * si + k * dot(k, c) * (1.0 - co);
 }
+
+// Key-locked hue on the circle of fifths (A11 #1462, Chromatica #1477).
+// `key_class` is the detected tonic pitch class / 11 (0=C .. 1.0=B); `is_minor` is 0/1.
+// Recover the integer pitch class, map it AROUND THE CIRCLE OF FIFTHS so neighbouring keys
+// are a perfect fifth apart (Newton/Scriabin-style), and return a hue in 0..1. Minor keys
+// are nudged toward the cool side of the wheel. `key_class` is held on silence upstream, so
+// a layer that ties its palette to this locks to the song's key rather than sweeping.
+// Keep this in sync with the `audio.key_hue` binding source (bindings/sources.rs::key_hue).
+fn phosphor_key_hue(key_class: f32, is_minor: f32) -> f32 {
+    let pc = round(clamp(key_class, 0.0, 1.0) * 11.0); // 0..11 pitch class
+    let fifths = (pc * 7.0) % 12.0;                     // circle-of-fifths position
+    return fract(fifths / 12.0 - is_minor * 0.08);
+}

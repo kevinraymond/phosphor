@@ -10,9 +10,24 @@ use super::types::SourceRaw;
 /// Key: source ID (e.g. "audio.kick"), Value: (normalized 0-1, raw diagnostics).
 pub type SourceSnapshot = HashMap<String, (f32, SourceRaw)>;
 
+/// Circle-of-fifths key hue for the `audio.key_hue` derived source (Chromatica #1477).
+///
+/// Mirrors `phosphor_key_hue()` in `assets/shaders/lib/palette.wgsl`: recover the integer
+/// pitch class from `key_class` (= tonic/11), map it through the circle of fifths so adjacent
+/// keys sit a perfect fifth apart, nudge minor keys cooler. The scalar is then eased toward a
+/// neutral 0.5 as `key_confidence` falls, so an unsure key doesn't swing every bound layer's
+/// color. The base hue is the shared source of truth with the shader helper; the confidence
+/// ease is binding-only (a shader reads `u.key_confidence` directly).
+fn key_hue(key_class: f32, is_minor: f32, key_confidence: f32) -> f32 {
+    let pc = (key_class.clamp(0.0, 1.0) * 11.0).round();
+    let hue = ((pc * 7.0) % 12.0 / 12.0 - is_minor * 0.08).rem_euclid(1.0);
+    let conf = key_confidence.clamp(0.0, 1.0);
+    0.5 + (hue - 0.5) * conf
+}
+
 /// Collect audio features into source snapshot.
 pub fn collect_audio(features: &AudioFeatures) -> SourceSnapshot {
-    let mut map = HashMap::with_capacity(74);
+    let mut map = HashMap::with_capacity(75);
 
     let raw = |v: f32| SourceRaw {
         display: format!("{:.3}", v),
@@ -68,6 +83,15 @@ pub fn collect_audio(features: &AudioFeatures) -> SourceSnapshot {
         "audio.dominant_chroma".to_string(),
         (features.dominant_chroma, raw(features.dominant_chroma)),
     );
+
+    // Derived: key-locked hue on the circle of fifths (Chromatica #1477). Lets any layer's
+    // color param bind to the song's key. Mirrors phosphor_key_hue() in lib/palette.wgsl.
+    let kh = key_hue(
+        features.key_class,
+        features.key_is_minor,
+        features.key_confidence,
+    );
+    map.insert("audio.key_hue".to_string(), (kh, raw(kh)));
 
     // Audio features added by the batched ABI bumps #1505 ("v2") and #1629 ("v3").
     // Every detector below has landed; the "0.0 until each detector lands" note this
@@ -234,13 +258,15 @@ mod tests {
     fn test_collect_audio() {
         let features = AudioFeatures::default();
         let snap = collect_audio(&features);
-        // 7 bands + 13 scalars + 13 mfcc + 12 chroma + 1 dominant + 28 reserved = 74
-        assert_eq!(snap.len(), 74);
+        // 7 bands + 13 scalars + 13 mfcc + 12 chroma + 1 dominant + 1 key_hue + 28 reserved = 75
+        assert_eq!(snap.len(), 75);
         assert!(snap.contains_key("audio.kick"));
         assert!(snap.contains_key("audio.band.0"));
         assert!(snap.contains_key("audio.mfcc.12"));
         assert!(snap.contains_key("audio.chroma.11"));
         assert!(snap.contains_key("audio.dominant_chroma"));
+        // Derived circle-of-fifths key hue (Chromatica #1477).
+        assert!(snap.contains_key("audio.key_hue"));
         // Reserved v2 tail (#1505)
         assert!(snap.contains_key("audio.loudness_m"));
         assert!(snap.contains_key("audio.downbeat"));
@@ -252,6 +278,21 @@ mod tests {
         assert!(snap.contains_key("audio.pitch"));
         assert!(snap.contains_key("audio.contrast_0"));
         assert!(snap.contains_key("audio.timbre_flux"));
+    }
+
+    #[test]
+    fn test_key_hue_circle_of_fifths() {
+        // C major (key_class 0) at full confidence -> hue 0.0.
+        assert!((key_hue(0.0, 0.0, 1.0) - 0.0).abs() < 1e-6);
+        // G (tonic 7 -> key_class 7/11) is a fifth up: one step around the wheel = 1/12.
+        assert!((key_hue(7.0 / 11.0, 0.0, 1.0) - 1.0 / 12.0).abs() < 1e-5);
+        // Unsure key eases toward the neutral 0.5 so bound layers don't swing.
+        assert!((key_hue(7.0 / 11.0, 0.0, 0.0) - 0.5).abs() < 1e-6);
+        // Output always stays in 0..1.
+        for pc in 0..12u32 {
+            let h = key_hue(pc as f32 / 11.0, 1.0, 1.0);
+            assert!((0.0..=1.0).contains(&h), "hue {h} out of range for pc {pc}");
+        }
     }
 
     #[test]
